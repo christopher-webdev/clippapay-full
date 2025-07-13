@@ -1,0 +1,312 @@
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
+import { getData } from "country-list";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
+// grab & sort ISO country list
+const countryOptions = getData().sort((a, b) =>
+  a.name.localeCompare(b.name)
+);
+
+export default function SignupPage() {
+  const navigate = useNavigate();
+  const [step, setStep] = useState<"form" | "otp">("form");
+  const [formData, setFormData] = useState({
+    role: "clipper",
+    email: "",
+    password: "",
+    confirm: "",
+    phone: "",
+    country: "",
+    firstName: "",
+    lastName: "",
+    contactName: "",
+    company: "",
+  });
+  const [otp, setOtp] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  async function request(endpoint: string, body: any) {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message);
+    return data;
+  }
+
+  const submitSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setMessage(null);
+    setLoading(true);
+    try {
+      const data = await request("/auth/signup", formData);
+      setMessage(data.message);
+      setStep("otp");
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setMessage(null);
+    setLoading(true);
+    try {
+      const data = await request("/auth/verify", {
+        email: formData.email,
+        otp,
+      });
+      setMessage(data.message);
+      navigate(
+        formData.role === "clipper"
+          ? "/login?role=clipper"
+          : "/login?role=advertiser"
+      );
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 p-6">
+      <motion.div
+        initial={{ opacity: 0, y: 40 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6 }}
+        className="w-full max-w-md bg-white/90 backdrop-blur-lg rounded-3xl shadow-2xl overflow-hidden"
+      >
+        <div className="p-8">
+          {step === "form" ? (
+            <>
+              <h2 className="text-3xl font-bold text-gray-800 text-center mb-6">
+                Create Your Account
+              </h2>
+              {error && (
+                <p className="text-red-600 mb-4 text-center">{error}</p>
+              )}
+              <form onSubmit={submitSignup} className="space-y-4">
+                {/* Role */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Signing up as
+                  </label>
+                  <select
+                    name="role"
+                    value={formData.role}
+                    onChange={handleChange}
+                    className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                  >
+                    <option value="clipper">Clipper</option>
+                    <option value="advertiser">Advertiser</option>
+                  </select>
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    name="email"
+                    value={formData.email}
+                    onChange={handleChange}
+                    required
+                    className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                    placeholder="you@example.com"
+                  />
+                </div>
+
+                {/* Passwords */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      name="password"
+                      value={formData.password}
+                      onChange={handleChange}
+                      required
+                      className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Confirm
+                    </label>
+                    <input
+                      type="password"
+                      name="confirm"
+                      value={formData.confirm}
+                      onChange={handleChange}
+                      required
+                      className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                </div>
+
+                {/* Phone */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Phone
+                  </label>
+                  <input
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleChange}
+                    required
+                    className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                    placeholder="+234 800 0000 000"
+                  />
+                </div>
+
+                {/* Country */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Country
+                  </label>
+                  <select
+                    name="country"
+                    value={formData.country}
+                    onChange={handleChange}
+                    required
+                    className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                  >
+                    <option value="">Select Country</option>
+                    {countryOptions.map(({ code, name }) => (
+                      <option key={code} value={code}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Conditional Fields */}
+                {formData.role === "clipper" ? (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        First Name
+                      </label>
+                      <input
+                        name="firstName"
+                        value={formData.firstName}
+                        onChange={handleChange}
+                        required
+                        className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                        placeholder="John"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Last Name
+                      </label>
+                      <input
+                        name="lastName"
+                        value={formData.lastName}
+                        onChange={handleChange}
+                        required
+                        className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                        placeholder="Doe"
+                      />
+                    </div>
+                   
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Contact Name
+                      </label>
+                      <input
+                        name="contactName"
+                        value={formData.contactName}
+                        onChange={handleChange}
+                        required
+                        className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                        placeholder="Jane Doe"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Company (optional)
+                      </label>
+                      <input
+                        name="company"
+                        value={formData.company}
+                        onChange={handleChange}
+                        className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                        placeholder="Acme Corp"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full mt-6 py-3 bg-purple-600 text-white font-semibold rounded-lg shadow hover:bg-purple-700 transition"
+                >
+                  {loading ? "Sending OTP…" : "Sign Up"}
+                </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <h2 className="text-3xl font-bold text-gray-800 text-center mb-6">
+                Verify Your Account
+              </h2>
+              {message && (
+                <p className="text-green-600 mb-2 text-center">{message}</p>
+              )}
+              {error && (
+                <p className="text-red-600 mb-2 text-center">{error}</p>
+              )}
+              <form onSubmit={submitOtp} className="space-y-4">
+                <input
+                  name="otp"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  required
+                  maxLength={6}
+                  className="w-full text-center text-xl font-medium tracking-widest mt-1 block rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                  placeholder="Enter 6-digit code"
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-green-600 text-white font-semibold rounded-lg shadow hover:bg-green-700 transition"
+                >
+                  {loading ? "Verifying…" : "Verify"}
+                </button>
+              </form>
+            </>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}

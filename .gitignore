@@ -1,0 +1,22 @@
+# Ignore node_modules in frontend and backend
+clippapay-react/node_modules
+express_backend/node_modules
+
+# Also ignore these common things
+*.env
+.DS_Store
+dist/
+build/
+express_backend/uploads/clips
+express_backend/uploads/deposits
+express_backend/uploads/receipts
+express_backend/uploads/videos
+express_backend/uploads/proof
+express_backend/uploads/proofs
+express_backend/uploads
+
+
+
+# git add .
+# git commit -m "Short clear message about what you did"
+# git push
