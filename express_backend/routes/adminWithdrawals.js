@@ -7,8 +7,8 @@ import { requireAdminAuth } from '../middleware/adminAuth.js'
 const router = express.Router();
 
 // GET /api/admin/withdrawals
-// Returns all withdrawals, mapped for frontend display,requireAdminAuth
-router.get('/', async (req, res, next) => {
+// Returns all withdrawals, mapped for frontend display,
+router.get('/', requireAdminAuth, async (req, res, next) => {
   try {
     // Fetch withdrawals and populate user info with all necessary fields
     const withdrawals = await Withdrawal.find()

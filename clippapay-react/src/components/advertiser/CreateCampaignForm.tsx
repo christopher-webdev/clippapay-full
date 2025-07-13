@@ -50,7 +50,12 @@ interface FormData {
   categories: string[];
   numClipsSuggested: number;
 }
+const MAX_FILE_SIZE_MB = 300;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024; // 300MB in bytes
 
+const validateFileSize = (file: File): boolean => {
+  return file.size <= MAX_FILE_SIZE_BYTES;
+};
 export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps) {
   const [form, setForm] = useState<FormData>({
     title: '',
@@ -102,7 +107,16 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
     const { name, value, type, checked } = target;
 
     if (type === 'file') {
-      const file = (target as HTMLInputElement).files?.[0] || null;
+      const file = target.files?.[0] || null;
+      if (file) {
+        if (!validateFileSize(file)) {
+          setError(`File size exceeds ${MAX_FILE_SIZE_MB}MB limit`);
+          // Clear the file input
+          target.value = '';
+          return;
+        }
+        setError(null); // Clear any previous errors
+      }
       setForm((f) => ({ ...f, videoFile: file }));
     } else if (type === 'checkbox') {
       if (name === 'platforms') {
@@ -252,9 +266,10 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
           </div>
 
           {/* Video Upload */}
+          {/* Video Upload */}
           <div>
             <label className="block text-sm font-semibold text-gray-700">
-              Upload Video <span className="text-gray-400 text-xs">(required)</span>
+              Upload Video <span className="text-gray-400 text-xs">(required, max {MAX_FILE_SIZE_MB}MB)</span>
             </label>
             <input
               type="file"
@@ -264,6 +279,11 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
               required
               className="mt-1 block w-full text-gray-700"
             />
+            {form.videoFile && (
+              <p className="text-xs mt-1 text-gray-500">
+                File size: {(form.videoFile.size / (1024 * 1024)).toFixed(2)}MB
+              </p>
+            )}
             {videoPreview && (
               <video
                 src={videoPreview}

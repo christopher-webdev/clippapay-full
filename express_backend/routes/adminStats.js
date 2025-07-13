@@ -11,6 +11,7 @@ import Subscription from '../models/Subscription.js';
 import Wallet from '../models/Wallet.js';
 import ClipSubmission from '../models/ClipSubmission.js';
 import { requireAdminAuth } from '../middleware/adminAuth.js'
+import DepositRequest from '../models/DepositRequest.js';
 
 
 const router = express.Router();
@@ -45,18 +46,27 @@ router.get('/', requireAuth, async (req, res) => {
 
     // Withdrawals
     const pendingWithdrawals = await Withdrawal.countDocuments({ status: 'pending' });
+    const pendingDeposits    = await DepositRequest.countDocuments({ status: 'pending' });
 
-    // Revenue = sum of all deposits
-    const revenueResult = await Transaction.aggregate([
-      { $match: { type: 'deposit' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
+    // Revenue = sum of approved deposits - sum of approved/completed withdrawals
+    const approvedDepositResult = await DepositRequest.aggregate([
+      { $match: { status: 'approved' } },
+      { $group: { _id: null, totalDeposits: { $sum: '$amount' } } }
     ]);
-    const totalRevenue = revenueResult[0]?.total || 0;
+    const totalApprovedDeposits = approvedDepositResult[0]?.totalDeposits || 0;
+
+    const withdrawalResult = await Withdrawal.aggregate([
+      { $match: { status: { $in: ['paid', 'completed'] } } },
+      { $group: { _id: null, totalWithdrawals: { $sum: '$amount' } } }
+    ]);
+    const totalWithdrawals = withdrawalResult[0]?.totalWithdrawals || 0;
+
+    const totalRevenue = totalApprovedDeposits - totalWithdrawals;
 
     // Subscriptions
-    const pendingSubscriptions = await Subscription.countDocuments({ paymentStatus: 'pending' });
-    const activeClipperPendingApproval = await ClipSubmission.countDocuments({'proofs.status': 'pending'});
-    const totalSubscriptions   = await Subscription.countDocuments();
+    const pendingSubscriptions         = await Subscription.countDocuments({ paymentStatus: 'pending' });
+    const activeClipperPendingApproval = await ClipSubmission.countDocuments({ 'proofs.status': 'pending' });
+    const totalSubscriptions           = await Subscription.countDocuments();
 
     // TOTAL ESCROW (sum of all users' escrowLocked)
     const escrowResult = await Wallet.aggregate([
@@ -83,12 +93,13 @@ router.get('/', requireAuth, async (req, res) => {
       activeCampaigns,
       totalSubmissions,
       pendingWithdrawals,
+      pendingDeposits,
       totalRevenue,
       pendingSubscriptions,
       activeClipperPendingApproval,
       totalSubscriptions,
-      totalEscrowLocked,      // for dashboard
-      platformWalletBalance,  // for dashboard
+      totalEscrowLocked,
+      platformWalletBalance,
     });
   } catch (err) {
     console.error(err);

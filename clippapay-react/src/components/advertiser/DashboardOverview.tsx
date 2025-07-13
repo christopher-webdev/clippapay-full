@@ -64,7 +64,7 @@ export default function AdvertiserDashboardOverview() {
     // 'totalViewsBought',
     'walletBalance',
     'fundsInEscrow',
-    'totalClippers'
+    // 'totalClippers'
   ];
 
   const cards = (Object.entries(stats) as [keyof OverviewStats, number][])

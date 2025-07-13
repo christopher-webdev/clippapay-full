@@ -14,7 +14,19 @@ import {
   UploadCloud,
   ArrowDownCircle,
   FileText,
+  Landmark,          // Bank icon
+  CircleDollarSign,  // USDT icon
+  Info,              // Information icon
+  X                  // Close ico
+
 } from 'lucide-react';
+
+import {
+  BanknotesIcon,
+  CurrencyDollarIcon,
+  InformationCircleIcon,
+  DocumentDuplicateIcon,
+} from '@heroicons/react/24/outline';
 
 type Deposit = {
   _id: string;
@@ -36,6 +48,7 @@ type Withdrawal = {
   status: 'pending' | 'completed' | 'declined';
   createdAt: string;
 };
+
 
 export default function WalletSection() {
   // balances
@@ -66,8 +79,25 @@ export default function WalletSection() {
   const [wdrUsdtAddr, setWdrUsdtAddr] = useState('');
   const [wdrUsdtNet, setWdrUsdtNet] = useState('');
 
-  const withdrawable = balance - escrow;
-
+  // Add this state to your WalletSection component
+  const [bankDetails, setBankDetails] = useState({
+    bankName: '',
+    accountNumber: '',
+    accountName: ''
+  });
+  const withdrawable = balance;
+  // Add this useEffect to fetch bank details
+  useEffect(() => {
+    const fetchBankDetails = async () => {
+      try {
+        const res = await axios.get('/wallet/bank-details');
+        setBankDetails(res.data);
+      } catch (err) {
+        console.error('Failed to fetch bank details:', err);
+      }
+    };
+    fetchBankDetails();
+  }, []);
   // fetch wallet, deposits, withdrawals
   const fetchAll = async () => {
     setLoading(true);
@@ -90,7 +120,11 @@ export default function WalletSection() {
   };
 
   useEffect(() => {
-    fetchAll();
+    fetchAll(); // initial fetch
+
+    const interval = setInterval(fetchAll, 15000); // 15000ms = 15s
+
+    return () => clearInterval(interval); // cleanup on unmount
   }, []);
 
   // submit deposit request
@@ -225,10 +259,10 @@ export default function WalletSection() {
               <div className="flex items-center gap-4">
                 <span
                   className={`px-2 py-1 text-xs font-semibold rounded-full ${d.status === 'pending'
-                      ? 'bg-yellow-100 text-yellow-800'
-                      : d.status === 'approved'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'
+                    ? 'bg-yellow-100 text-yellow-800'
+                    : d.status === 'approved'
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-red-100 text-red-800'
                     }`}
                 >
                   {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
@@ -271,10 +305,10 @@ export default function WalletSection() {
               </div>
               <span
                 className={`px-2 py-1 text-xs font-semibold rounded-full ${w.status === 'pending'
-                    ? 'bg-yellow-100 text-yellow-800'
-                    : w.status === 'completed'
-                      ? 'bg-green-100 text-green-800'
-                      : 'bg-red-100 text-red-800'
+                  ? 'bg-yellow-100 text-yellow-800'
+                  : w.status === 'completed'
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-red-100 text-red-800'
                   }`}
               >
                 {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
@@ -297,35 +331,111 @@ export default function WalletSection() {
           <Dialog.Title className="text-xl font-semibold">
             Add Funds
           </Dialog.Title>
-          <div className="space-y-2 text-sm text-gray-700">
-            <p>Select payment method:</p>
-            <div className="flex gap-4">
-              {(['bank', 'usdt'] as const).map(m => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setDepMethod(m)}
-                  className={`px-3 py-1 rounded-full border ${depMethod === m
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-gray-700 border-gray-300'
-                    }`}
-                >
-                  {m === 'bank' ? 'Bank Transfer' : 'USDT Transfer'}
-                </button>
-              ))}
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Payment Method</h3>
+              <div className="flex gap-3">
+                {(['bank'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setDepMethod(m)}
+                    className={`px-4 py-2 rounded-lg border transition-all ${depMethod === m
+                      ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm'
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      {m === 'bank' ? (
+                        <>
+                          <BanknotesIcon className="w-5 h-5" />
+                          Bank Transfer
+                        </>
+                      ) : (
+                        <>
+                          <CurrencyDollarIcon className="w-5 h-5" />
+                          USDT Transfer
+                        </>
+                      )}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
+
             {depMethod === 'bank' ? (
-              <div className="space-y-1">
-                <p>Please transfer to:</p>
-                <p className="font-medium">Access Bank PLC</p>
-                <p className="font-medium">Account: 0030604306</p>
-                <p className="font-medium">Name: ClippaPay Inc</p>
+              <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  <InformationCircleIcon className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                  <p className="text-sm text-blue-800">
+                    Please transfer to the bank account details below
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-white p-4 rounded-md border">
+                  <div>
+                    <p className="text-xs font-medium text-gray-500">Bank Name</p>
+                    <p className="font-medium mt-1">{bankDetails.bankName}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-500">Account Number</p>
+                    <p className="font-medium mt-1">
+                      {bankDetails.accountNumber}
+                      <button
+                        onClick={() => navigator.clipboard.writeText(bankDetails.accountNumber)}
+                        className="ml-2 text-blue-600 hover:text-blue-800"
+                        title="Copy to clipboard"
+                      >
+                        <DocumentDuplicateIcon className="w-4 h-4" />
+                      </button>
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-500">Account Name</p>
+                    <p className="font-medium mt-1">{bankDetails.accountName}</p>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <p className="text-xs text-gray-500">
+                    Transfers typically process within 5 - 10 mins
+                  </p>
+                </div>
               </div>
             ) : (
-              <div className="space-y-1">
-                <p>Please send USDT to:</p>
-                <p className="font-medium">Addr: TXXXXXXXXXXXXXXXXXXX</p>
-                <p className="font-medium">Network: TRC20</p>
+              <div className="bg-purple-50/50 border border-purple-100 rounded-lg p-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  <InformationCircleIcon className="w-5 h-5 text-purple-600 flex-shrink-0" />
+                  <p className="text-sm text-purple-800">
+                    Please send USDT to the wallet address below
+                  </p>
+                </div>
+
+                <div className="space-y-3 bg-white p-4 rounded-md border">
+                  <div>
+                    <p className="text-xs font-medium text-gray-500">Wallet Address</p>
+                    <div className="flex items-center mt-1">
+                      <p className="font-medium font-mono">TXXXXXXXXXXXXXXXXXXX</p>
+                      <button
+                        onClick={() => navigator.clipboard.writeText("TXXXXXXXXXXXXXXXXXXX")}
+                        className="ml-2 text-purple-600 hover:text-purple-800"
+                        title="Copy to clipboard"
+                      >
+                        <DocumentDuplicateIcon className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-500">Network</p>
+                    <p className="font-medium mt-1">TRC20</p>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <p className="text-xs text-gray-500">
+                    USDT transfers typically confirm within 15-30 minutes
+                  </p>
+                </div>
               </div>
             )}
           </div>
@@ -379,112 +489,200 @@ export default function WalletSection() {
         className="fixed inset-0 z-50 flex items-center justify-center p-4"
       >
         <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-        <Dialog.Panel className="relative bg-white rounded-lg p-6 w-full max-w-md space-y-4">
-          <Dialog.Title className="text-xl font-semibold">
-            Withdraw Funds
-          </Dialog.Title>
-          <div className="space-y-2 text-sm text-gray-700">
-            <p>You may withdraw up to ₦{withdrawable.toLocaleString()}</p>
-            <p>Select payment method:</p>
-            <div className="flex gap-4">
-              {(['bank', 'usdt'] as const).map(m => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setWdrMethod(m)}
-                  className={`px-3 py-1 rounded-full border ${wdrMethod === m
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-gray-700 border-gray-300'
-                    }`}
-                >
-                  {m === 'bank' ? 'Bank' : 'USDT'}
-                </button>
-              ))}
+        <Dialog.Panel className="relative bg-white rounded-xl p-6 w-full max-w-md space-y-6 shadow-xl">
+          <div className="flex justify-between items-start">
+            <Dialog.Title className="text-xl font-bold text-gray-900">
+              Withdraw Funds
+            </Dialog.Title>
+            <button
+              onClick={() => setShowWdrModal(false)}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <X size={24} />
+            </button>
+          </div>
+
+          <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-4">
+            <div className="flex items-center gap-3 mb-2">
+              <Info className="w-5 h-5 text-blue-600 flex-shrink-0" />
+              <p className="text-sm text-blue-800">
+                Available for withdrawal: <span className="font-bold">₦{withdrawable.toLocaleString()}</span>
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setWdrAmt(withdrawable * 0.25)}
+                className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+              >
+                25%
+              </button>
+              <button
+                onClick={() => setWdrAmt(withdrawable * 0.5)}
+                className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+              >
+                50%
+              </button>
+              <button
+                onClick={() => setWdrAmt(withdrawable * 0.75)}
+                className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+              >
+                75%
+              </button>
+              <button
+                onClick={() => setWdrAmt(withdrawable)}
+                className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"
+              >
+                100%
+              </button>
             </div>
           </div>
-          <form onSubmit={submitWithdraw} className="space-y-4">
+
+          <form onSubmit={submitWithdraw} className="space-y-5">
             <div>
-              <label className="block text-sm">Amount (₦)</label>
-              <input
-                type="number"
-                min="1"
-                max={withdrawable}
-                value={wdrAmt}
-                onChange={e => setWdrAmt(parseFloat(e.target.value))}
-                required
-                className="mt-1 block w-full rounded-md border-gray-300"
-              />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
+              <div className="grid grid-cols-2 gap-3">
+                {(['bank',] as const).map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setWdrMethod(m)}
+                    className={`flex items-center justify-center gap-2 p-3 rounded-lg border transition-all ${wdrMethod === m
+                      ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm'
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
+                  >
+                    {m === 'bank' ? (
+                      <>
+                        <Landmark className="w-5 h-5" />
+                        Bank Transfer
+                      </>
+                    ) : (
+                      <>
+                        <CircleDollarSign className="w-5 h-5" />
+                        USDT
+                      </>
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₦)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₦</span>
+                <input
+                  type="number"
+                  min="1000" // Minimum withdrawal amount
+                  max={withdrawable}
+                  value={wdrAmt}
+                  onChange={e => setWdrAmt(parseFloat(e.target.value))}
+                  required
+                  className="pl-8 pr-4 py-2 block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Minimum withdrawal: ₦1,000
+              </p>
+            </div>
+
             {wdrMethod === 'bank' ? (
-              <>
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-sm">Bank Name</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
                   <input
                     type="text"
                     value={wdrBankName}
                     onChange={e => setWdrBankName(e.target.value)}
                     required
-                    className="mt-1 block w-full rounded-md border-gray-300"
+                    className="block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="e.g. Access Bank"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm">Account Number</label>
-                  <input
-                    type="text"
-                    value={wdrAcctNum}
-                    onChange={e => setWdrAcctNum(e.target.value)}
-                    required
-                    className="mt-1 block w-full rounded-md border-gray-300"
-                  />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+                    <input
+                      type="text"
+                      value={wdrAcctNum}
+                      onChange={e => setWdrAcctNum(e.target.value)}
+                      required
+                      className="block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="10 digits"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
+                    <input
+                      type="text"
+                      value={wdrAcctName}
+                      onChange={e => setWdrAcctName(e.target.value)}
+                      required
+                      className="block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="As it appears on bank"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm">Account Name</label>
-                  <input
-                    type="text"
-                    value={wdrAcctName}
-                    onChange={e => setWdrAcctName(e.target.value)}
-                    required
-                    className="mt-1 block w-full rounded-md border-gray-300"
-                  />
-                </div>
-              </>
+              </div>
             ) : (
-              <>
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-sm">USDT Address</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">USDT Address</label>
                   <input
                     type="text"
                     value={wdrUsdtAddr}
                     onChange={e => setWdrUsdtAddr(e.target.value)}
                     required
-                    className="mt-1 block w-full rounded-md border-gray-300"
+                    className="block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                    placeholder="TXXXXXXXXXXXXXXXXXXX"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm">Network</label>
-                  <input
-                    type="text"
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Network</label>
+                  <select
                     value={wdrUsdtNet}
                     onChange={e => setWdrUsdtNet(e.target.value)}
                     required
-                    className="mt-1 block w-full rounded-md border-gray-300"
-                  />
+                    className="block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select network</option>
+                    <option value="TRC20">TRC20</option>
+                    <option value="ERC20">ERC20</option>
+                    <option value="BEP20">BEP20</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Ensure network matches your wallet
+                  </p>
                 </div>
-              </>
+              </div>
             )}
-            <div className="flex justify-end gap-2">
+
+            <div className="pt-2 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setShowWdrModal(false)}
-                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                className="px-5 py-2 rounded-lg bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                className="px-5 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition flex items-center gap-2"
+                disabled={loading}
               >
-                Submit
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Processing...
+                  </>
+                ) : (
+                  'Withdraw Funds'
+                )}
               </button>
             </div>
           </form>

@@ -4,7 +4,7 @@ import multer from 'multer';
 import Wallet from '../models/Wallet.js';
 import DepositRequest from '../models/DepositRequest.js';
 import { requireAuth } from '../middleware/auth.js';
-
+import PlatformSetting from '../models/PlatformSetting.js';
 import { requireAdminAuth } from '../middleware/adminAuth.js'
 
 const router = express.Router();
@@ -95,4 +95,31 @@ router.get(
     }
   }
 );
+
+// File: express_backend/routes/platformSettings.js
+
+
+
+
+// GET /api/platform-settings/bank-details
+router.get('/bank-details', requireAuth, async (req, res) => {
+  try {
+    const settings = await PlatformSetting.find({
+      key: { $in: ['bankName', 'bankAccountNumber', 'bankAccountName'] }
+    }).lean();
+
+    const result = {
+      bankName: settings.find(s => s.key === 'bankName')?.value || '',
+      accountNumber: settings.find(s => s.key === 'bankAccountNumber')?.value || '',
+      accountName: settings.find(s => s.key === 'bankAccountName')?.value || ''
+    };
+
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch bank details' });
+  }
+});
+
+
 export default router;

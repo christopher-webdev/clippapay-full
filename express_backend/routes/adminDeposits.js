@@ -5,6 +5,8 @@ import Wallet from '../models/Wallet.js';
 import Transaction from '../models/Transaction.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { requireAdminAuth } from '../middleware/adminAuth.js'
+import path from 'node:path';
+import fs from 'node:fs/promises';
 
 const router = express.Router();
 
@@ -145,6 +147,8 @@ router.post(
  * DELETE /api/admin/deposits/:id
  * Remove deposit request and its receipt file.
  */
+
+
 router.delete(
   '/:id',
   requireAdminAuth,
@@ -154,18 +158,25 @@ router.delete(
       const dr = await DepositRequest.findById(id);
       if (!dr) return res.status(404).json({ error: 'Not found.' });
 
-      // delete file from disk
-      const fs = await import('fs');
-      const full = path.join(process.cwd(), dr.receiptUrl);
-      fs.promises.unlink(full).catch(() => { /* ignore */ });
+      // Make sure receiptUrl is a local file path
+      if (dr.receiptUrl) {
+        const receiptPath = path.join(process.cwd(), dr.receiptUrl);
+        try {
+          await fs.unlink(receiptPath);
+          console.log('Receipt image deleted:', receiptPath);
+        } catch (err) {
+          console.warn('Receipt file not found or failed to delete:', receiptPath);
+        }
+      }
 
-      await dr.remove();
+      await DepositRequest.findByIdAndDelete(id);
       res.json({ success: true });
     } catch (err) {
-      console.error(err);
+      console.error('Delete failed:', err);
       res.status(500).json({ error: 'Delete failed.' });
     }
   }
 );
+
 
 export default router;

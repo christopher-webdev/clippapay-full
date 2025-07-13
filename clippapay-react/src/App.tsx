@@ -20,6 +20,7 @@ import WalletSection from './components/advertiser/WalletSection';
 import NotificationsPanel from './components/advertiser/NotificationsPanel';
 import SettingsPanel from './components/advertiser/SettingsPanel';
 
+
 // Clipper
 import ClipperDashboardLayout from './components/clipper/ClipperDashboardLayout.tsx';
 import ClipperDashboardOverview from './components/clipper/ClipperDashboardOverview.tsx';
@@ -44,7 +45,11 @@ import AdminSignup from '@/components/admin/AdminSignup';
 import AdminLogin from '@/components/admin/AdminLogin';
 import AdminWorkerCreation from '@/components/admin/AdminWorkerCreation';
 
+//Ad-Workers
 import AdWorkerDashboard from './components/AdWorkerDashboard';
+
+import WorkerLayout from './components/WorkerLayout';
+
 
 export default function App() {
   return (
@@ -68,8 +73,6 @@ export default function App() {
       <Route path="dashboard/advertiser" element={<AdvertiserDashboardLayout />}>
         <Route index element={<AdvertiserDashboardOverview />} />
         <Route path="campaigns" element={<AdvertiserCampaignList />} />
-        {/* <Route path="subscription-plan" element={<SubscriptionPlans />} /> */}
-        {/* <Route path="subscribe" element={<SubscribePage />} /> */}
         <Route path="create-campaign" element={<CreateCampaignForm />} />
         <Route path="analytics" element={<CampaignAnalytics />} />
         <Route path="wallet" element={<WalletSection />} />
@@ -87,11 +90,19 @@ export default function App() {
         <Route path="settings" element={<ClipperSettings />} />
       </Route>
 
-      {/* ad-worker */}
-      <Route path="dashboard/ad-worker" element={<AdWorkerDashboard />} />
-        {/* <Route path="wallet" element={<ClipperWallet />} />
+       {/* Clipper */}
+      <Route path="dashboard/ad-worker" element={<WorkerLayout />}>
+        <Route index element={<AdWorkerDashboard />} />
+        {/* <Route path="campaigns" element={<CampaignListClipper />} />
+        <Route path="campaigns/:id" element={<CampaignDetail />} />
+        <Route path="submissions" element={<Submissions />} />
+        <Route path="wallet" element={<ClipperWallet />} />
         <Route path="settings" element={<ClipperSettings />} /> */}
-      <Route/>
+      </Route>
+      {/* <Route path="dashboard/ad-worker" element={< />} />
+        <Route index element={< />} />
+        <Route path="overview" element={<AdWorkerDashboard/>} />  
+      </Route> */}
 
       {/* Admin */}
       <Route path="dashboard/admin" element={<AdminLayout />}>

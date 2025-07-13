@@ -24,6 +24,7 @@ interface AdminStats {
   activeCampaigns: number;
   totalSubmissions: number;
   pendingWithdrawals: number;
+  pendingDeposits: number;
   totalRevenue: number;
   pendingSubscriptions: number;
   activeClipperPendingApproval: number;
@@ -41,6 +42,7 @@ const ICON_MAP: Record<keyof AdminStats, React.ComponentType<{ className?: strin
   activeCampaigns: HiOutlineChartBar,
   totalSubmissions: HiOutlineDocument,
   pendingWithdrawals: HiOutlineExclamationCircle,
+  pendingDeposits: HiOutlineExclamationCircle,
   totalRevenue: HiOutlineCash,
   pendingSubscriptions: HiOutlineDocument,
   activeClipperPendingApproval: HiOutlineDocument,
@@ -66,6 +68,7 @@ const VARIANTS: Record<keyof AdminStats, string> = {
   // Financial stats (warm colors)
   totalRevenue: 'amber',
   pendingWithdrawals: 'orange',
+  pendingDeposits: 'orange',
   platformWalletBalance: 'green',
   totalEscrowLocked: 'emerald',
   totalSubscriptions: 'cyan'
@@ -116,6 +119,7 @@ export default function AdminOverview() {
       { key: 'totalCampaigns', label: 'Total Campaigns (all)', value: stats.totalCampaigns },
       { key: 'activeCampaigns', label: 'Active Campaigns', value: stats.activeCampaigns },
       { key: 'pendingWithdrawals', label: 'Withdrawals Pending', value: stats.pendingWithdrawals },
+      { key: 'pendingDeposits', label: 'Deposits Pending', value: stats.pendingDeposits },
       { key: 'activeClipperPendingApproval', label: 'Total Clippper Pending Approval', value: stats.activeClipperPendingApproval },
       { key: 'totalRevenue', label: 'Total Wallets Balance (₦)', value: `₦${stats.totalRevenue.toLocaleString()}` },
       { key: 'platformWalletBalance', label: 'Platform Wallet (₦)', value: `₦${stats.platformWalletBalance.toLocaleString()}` },

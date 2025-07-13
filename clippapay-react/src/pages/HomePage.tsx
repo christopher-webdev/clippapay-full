@@ -85,7 +85,7 @@ const faqs = [
 
 export default function HomePage() {
     const campaignSamples = [
-        { title: "Jollof Taste Challenge", rate: "₦1.50/view", category: "Food" },
+        { title: "Clippapay Onboarding Challenge", rate: "₦1.50/view", category: "Food" },
         { title: "Dance with VibeStream", rate: "₦2.00/view", category: "Entertainment" },
         { title: "GlowUp Skincare Tease", rate: "₦1.80/view", category: "Beauty" },
     ];

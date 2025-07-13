@@ -154,70 +154,98 @@ export default function ClipperWallet() {
 
       {/* WITHDRAWAL MODAL */}
       {showWdrModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <form onSubmit={submitWithdraw} className="bg-white p-6 rounded-lg w-full max-w-sm space-y-4">
-            <h3 className="text-lg font-semibold">Withdraw Funds</h3>
-            <p className="text-sm text-gray-500">You may withdraw up to ₦{balance.toLocaleString()}</p>
-            <div>
-              <label className="block text-sm">Amount (₦)</label>
-              <input
-                type="number"
-                min={1}
-                max={balance}
-                value={wdrAmt}
-                onChange={e => setWdrAmt(Number(e.target.value))}
-                required
-                className="mt-1 w-full border rounded p-2"
-              />
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-500 p-6 text-white">
+              <h3 className="text-xl font-bold">Withdraw Funds</h3>
+              <p className="text-blue-100 text-sm mt-1">Available balance: ₦{balance.toLocaleString()}</p>
             </div>
-            <div>
-              <label className="block text-sm">Bank Name</label>
-              <input
-                type="text"
-                value={wdrBankName}
-                onChange={e => setWdrBankName(e.target.value)}
-                required
-                className="mt-1 w-full border rounded p-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm">Account Number</label>
-              <input
-                type="text"
-                value={wdrAcctNum}
-                onChange={e => setWdrAcctNum(e.target.value)}
-                required
-                className="mt-1 w-full border rounded p-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm">Account Name</label>
-              <input
-                type="text"
-                value={wdrAcctName}
-                onChange={e => setWdrAcctName(e.target.value)}
-                required
-                className="mt-1 w-full border rounded p-2"
-              />
-            </div>
-            <div className="flex justify-end space-x-2 pt-4 border-t">
-              <button
-                type="button"
-                onClick={() => setShowWdrModal(false)}
-                disabled={processing}
-                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={processing}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-              >
-                {processing ? 'Processing…' : 'Submit Withdrawal'}
-              </button>
-            </div>
-          </form>
+
+            <form onSubmit={submitWithdraw} className="p-6 space-y-5">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₦)</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min={1}
+                      max={balance}
+                      value={wdrAmt}
+                      onChange={e => setWdrAmt(Number(e.target.value))}
+                      required
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                      placeholder="Enter amount"
+                    />
+                    <div className="absolute inset-y-0 right-3 flex items-center">
+                      <span className="text-gray-500">NGN</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
+                  <input
+                    type="text"
+                    value={wdrBankName}
+                    onChange={e => setWdrBankName(e.target.value)}
+                    required
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                    placeholder="e.g. Zenith Bank"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+                  <input
+                    type="text"
+                    value={wdrAcctNum}
+                    onChange={e => setWdrAcctNum(e.target.value)}
+                    required
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                    placeholder="10-digit account number"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
+                  <input
+                    type="text"
+                    value={wdrAcctName}
+                    onChange={e => setWdrAcctName(e.target.value)}
+                    required
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                    placeholder="Account holder's name"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowWdrModal(false)}
+                  disabled={processing}
+                  className="px-5 py-2.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={processing}
+                  className="px-5 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition disabled:opacity-50 flex items-center justify-center"
+                >
+                  {processing ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Processing...
+                    </>
+                  ) : 'Withdraw Funds'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

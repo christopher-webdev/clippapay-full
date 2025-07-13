@@ -133,26 +133,200 @@ router.get('/:id/analytics', async (req, res) => {
 
 
 
+// router.post(
+//   '/',
+//   requireAuth,
+//   upload.single('video'),
+//   async (req, res) => {
+//     try {
+//       const {
+//         title, cpv, budget, platforms, countries, hashtags,
+//         directions, cta_url, categories, numClipsSuggested,
+//       } = req.body;
+
+//       const ratePerView = parseFloat(cpv);  // should be 0.6
+//       const budgetVal = parseFloat(budget);
+//       const viewsPurchased = Math.floor(budgetVal / ratePerView);
+
+//       const campaignData = {
+//         advertiser: req.user._id,
+//         title,
+//         rate_per_1000: 600, // for reference
+//         clipper_cpm: 200,   // for reference
+//         rate_per_view: ratePerView,
+//         budget_total: budgetVal,
+//         budget_remaining: budgetVal,
+//         views_purchased: viewsPurchased,
+//         views_left: viewsPurchased,
+//         platforms: JSON.parse(platforms),
+//         countries: JSON.parse(countries),
+//         hashtags: JSON.parse(hashtags),
+//         directions: JSON.parse(directions),
+//         cta_url: cta_url || undefined,
+//         categories: JSON.parse(categories),
+//         numClipsSuggested: parseInt(numClipsSuggested, 10),
+//       };
+
+//       if (req.file) {
+//         campaignData.video_url = `/uploads/videos/${req.file.filename}`;
+//       }
+
+//       // Assign ad worker here:
+//       const worker = await getNextAdWorker();
+//       if (worker) campaignData.assignedWorker = worker._id;
+
+//       // ---- WALLET LOGIC ----
+//       // 1. Find advertiser's wallet
+//       const advertiserWallet = await Wallet.findOne({ user: req.user._id });
+//       if (!advertiserWallet) return res.status(400).json({ error: 'Wallet not found.' });
+
+//       // 2. Check balance
+//       if (advertiserWallet.balance < budgetVal)
+//         return res.status(400).json({ error: 'Insufficient wallet balance.' });
+
+//       // 3. Move budget to escrow
+//       await advertiserWallet.lockEscrow(budgetVal); // throws if insufficient
+
+//       // 4. Create campaign
+//       const campaign = new Campaign(campaignData);
+//       await campaign.save();
+
+//       return res.status(201).json(campaign);
+//     } catch (err) {
+//       console.error(err);
+//       return res.status(500).json({ error: 'Server error creating campaign.' });
+//     }
+//   }
+// );
+
 router.post(
   '/',
   requireAuth,
   upload.single('video'),
   async (req, res) => {
     try {
+      // 1. File Validation
+      const MAX_FILE_SIZE_MB = 300;
+      const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+      const ALLOWED_MIME_TYPES = [
+        'video/mp4',
+        'video/quicktime',  // MOV
+        'video/x-msvideo',  // AVI
+        'video/webm'
+      ];
+
+      if (req.file) {
+        // Validate file size
+        if (req.file.size > MAX_FILE_SIZE_BYTES) {
+          fs.unlinkSync(req.file.path);
+          return res.status(400).json({ 
+            error: `Video file exceeds ${MAX_FILE_SIZE_MB}MB limit` 
+          });
+        }
+
+        // Validate file type
+        if (!ALLOWED_MIME_TYPES.includes(req.file.mimetype)) {
+          fs.unlinkSync(req.file.path);
+          return res.status(400).json({
+            error: 'Invalid file type. Only MP4, MOV, AVI, and WEBM are allowed'
+          });
+        }
+      } else {
+        return res.status(400).json({ error: 'Video file is required' });
+      }
+
+      // 2. Data Validation
       const {
         title, cpv, budget, platforms, countries, hashtags,
         directions, cta_url, categories, numClipsSuggested,
       } = req.body;
 
-      const ratePerView = parseFloat(cpv);  // should be 0.6
-      const budgetVal = parseFloat(budget);
-      const viewsPurchased = Math.floor(budgetVal / ratePerView);
+      // Validate required fields
+      const requiredFields = {
+        title, cpv, budget, platforms, countries,
+        hashtags, directions, categories, numClipsSuggested
+      };
 
+      for (const [field, value] of Object.entries(requiredFields)) {
+        if (!value) {
+          if (req.file) fs.unlinkSync(req.file.path);
+          return res.status(400).json({ error: `${field} is required` });
+        }
+      }
+
+      // Validate numerical values
+      const ratePerView = parseFloat(cpv);
+      const budgetVal = parseFloat(budget);
+      const clipsSuggested = parseInt(numClipsSuggested, 10);
+
+      if (isNaN(ratePerView)) {
+        return res.status(400).json({ error: 'Invalid rate per view value' });
+      }
+
+      if (isNaN(budgetVal)) {
+        return res.status(400).json({ error: 'Invalid budget value' });
+      }
+
+      if (isNaN(clipsSuggested)) {
+        return res.status(400).json({ error: 'Invalid clips suggested value' });
+      }
+
+      // Validate budget minimum
+      const MIN_BUDGET = 600; // ₦600 minimum (1000 views)
+      if (budgetVal < MIN_BUDGET) {
+        return res.status(400).json({
+          error: `Minimum budget is ₦${MIN_BUDGET} (1000 views)`
+        });
+      }
+
+      // Validate JSON fields
+      try {
+        const platformsArr = JSON.parse(platforms);
+        const countriesArr = JSON.parse(countries);
+        const hashtagsArr = JSON.parse(hashtags);
+        const directionsArr = JSON.parse(directions);
+        const categoriesArr = JSON.parse(categories);
+
+        if (!Array.isArray(platformsArr) || platformsArr.length === 0) {
+          throw new Error('At least one platform must be selected');
+        }
+
+        if (!Array.isArray(categoriesArr) || categoriesArr.length === 0) {
+          throw new Error('At least one category must be selected');
+        }
+      } catch (err) {
+        if (req.file) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: err.message });
+      }
+
+      // 3. Business Logic Validation
+      const viewsPurchased = Math.floor(budgetVal / ratePerView);
+      if (viewsPurchased < 1000) {
+        return res.status(400).json({
+          error: 'Budget too low for meaningful campaign (minimum 1000 views)'
+        });
+      }
+
+      // 4. Wallet Validation
+      const advertiserWallet = await Wallet.findOne({ user: req.user._id });
+      if (!advertiserWallet) {
+        return res.status(400).json({ error: 'Wallet not found' });
+      }
+
+      if (advertiserWallet.balance < budgetVal) {
+        return res.status(400).json({ 
+          error: 'Insufficient wallet balance',
+          currentBalance: advertiserWallet.balance,
+          required: budgetVal
+        });
+      }
+
+      // 5. Create Campaign
       const campaignData = {
         advertiser: req.user._id,
         title,
-        rate_per_1000: 600, // for reference
-        clipper_cpm: 200,   // for reference
+        rate_per_1000: 600,
+        clipper_cpm: 200,
         rate_per_view: ratePerView,
         budget_total: budgetVal,
         budget_remaining: budgetVal,
@@ -164,42 +338,32 @@ router.post(
         directions: JSON.parse(directions),
         cta_url: cta_url || undefined,
         categories: JSON.parse(categories),
-        numClipsSuggested: parseInt(numClipsSuggested, 10),
+        numClipsSuggested: clipsSuggested,
+        video_url: `/uploads/videos/${req.file.filename}`
       };
 
-      if (req.file) {
-        campaignData.video_url = `/uploads/videos/${req.file.filename}`;
-      }
-
-      // Assign ad worker here:
+      // Assign ad worker
       const worker = await getNextAdWorker();
       if (worker) campaignData.assignedWorker = worker._id;
 
-      // ---- WALLET LOGIC ----
-      // 1. Find advertiser's wallet
-      const advertiserWallet = await Wallet.findOne({ user: req.user._id });
-      if (!advertiserWallet) return res.status(400).json({ error: 'Wallet not found.' });
+      // Move budget to escrow
+      await advertiserWallet.lockEscrow(budgetVal);
 
-      // 2. Check balance
-      if (advertiserWallet.balance < budgetVal)
-        return res.status(400).json({ error: 'Insufficient wallet balance.' });
-
-      // 3. Move budget to escrow
-      await advertiserWallet.lockEscrow(budgetVal); // throws if insufficient
-
-      // 4. Create campaign
       const campaign = new Campaign(campaignData);
       await campaign.save();
 
       return res.status(201).json(campaign);
-    } catch (err) {
+
+     } catch (err) {
       console.error(err);
-      return res.status(500).json({ error: 'Server error creating campaign.' });
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(500).json({ 
+        error: 'Server error creating campaign',
+        details: process.env.NODE_ENV === 'development' ? err.message : undefined
+      });
     }
   }
 );
-
-
 
 /**
  * GET /api/campaigns
@@ -294,17 +458,48 @@ router.put(
  * DELETE /api/campaigns/:id
  * Delete your own campaign (advertiser only)
  */
+// router.delete(
+//   '/:id',
+//   requireAuth,
+ 
+//   async (req, res) => {
+//     try {
+//       const camp = await Campaign.findById(req.params.id);
+//       if (!camp || !camp.advertiser.equals(req.user._id)) {
+//         return res.status(404).json({ error: 'Campaign not found or access denied.' });
+//       }
+//       await camp.remove();
+//       return res.status(204).end();
+//     } catch (err) {
+//       console.error(err);
+//       return res.status(500).json({ error: 'Server error deleting campaign.' });
+//     }
+//   }
+// );
 router.delete(
   '/:id',
   requireAuth,
- 
   async (req, res) => {
     try {
       const camp = await Campaign.findById(req.params.id);
       if (!camp || !camp.advertiser.equals(req.user._id)) {
         return res.status(404).json({ error: 'Campaign not found or access denied.' });
       }
-      await camp.remove();
+
+      // Attempt to delete the uploaded video if it exists
+      if (camp.video_url) {
+        const filePath = path.join(process.cwd(), camp.video_url);
+        try {
+          await fs.promises.unlink(filePath);
+          console.log('Deleted campaign video:', filePath);
+        } catch (err) {
+          console.warn('Failed to delete campaign video:', err.message);
+        }
+      }
+
+      // Remove campaign from DB
+      await camp.deleteOne();
+
       return res.status(204).end();
     } catch (err) {
       console.error(err);

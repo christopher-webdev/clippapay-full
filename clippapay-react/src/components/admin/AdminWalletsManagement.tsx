@@ -374,7 +374,7 @@ export default function AdminDepositsDashboard() {
         ) : (
           <ul className="divide-y">
             {filteredDeposits.map((deposit) => (
-              <li key={deposit._id} className="p-4 hover:bg-gray-50 transition">
+              <li key={deposit.id} className="p-4 hover:bg-gray-50 transition">
                 <div className="flex flex-col md:flex-row md:items-center gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
@@ -420,14 +420,14 @@ export default function AdminDepositsDashboard() {
                     {deposit.status === 'pending' && (
                       <>
                         <button
-                          onClick={() => handleVerify(deposit._id, 'approve')}
+                          onClick={() => handleVerify(deposit.id, 'approve')}
                           className="px-3 py-1.5 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 flex items-center gap-1 justify-center"
                         >
                           <CheckCircle size={16} />
                           Approve
                         </button>
                         <button
-                          onClick={() => handleVerify(deposit._id, 'reject')}
+                          onClick={() => handleVerify(deposit.id, 'reject')}
                           className="px-3 py-1.5 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 flex items-center gap-1 justify-center"
                         >
                           <X size={16} />
@@ -436,7 +436,7 @@ export default function AdminDepositsDashboard() {
                       </>
                     )}
                     <button
-                      onClick={() => handleDelete(deposit._id)}
+                      onClick={() => handleDelete(deposit.id)}
                       className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-300 flex items-center gap-1 justify-center"
                     >
                       <Trash2 size={16} />

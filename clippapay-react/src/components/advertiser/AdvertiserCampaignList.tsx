@@ -197,7 +197,7 @@ function CampaignCard({ c, setSelectedId }: { c: Campaign; setSelectedId: (id: s
 
   // Status handling
   let statusColor = "bg-yellow-50 text-yellow-800 border-yellow-200";
-  let statusLabel = "Pending";
+  let statusLabel = "Pending Approval";
   if (c.views_left <= 0) {
     statusColor = "bg-gray-100 text-gray-500 border-gray-200";
     statusLabel = "Completed";
