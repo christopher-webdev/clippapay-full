@@ -1,4 +1,4 @@
-// File: express_backend/index.js
+// File: express_backend/server.js
 
 import express from 'express';
 import dotenv from 'dotenv';
@@ -43,14 +43,21 @@ const isDev = process.env.NODE_ENV !== 'production';
 app.use(cookieParser());
 
 // 2) CORS in dev
-if (isDev) {
-  app.use(
+// if (isDev) {
+//   app.use(
+//     cors({
+//       origin: true,
+//       credentials: true,
+//     })
+//   );
+// }
+
+app.use(
     cors({
       origin: true,
       credentials: true,
     })
   );
-}
 
 // 3) JSON bodies
 app.use(express.json());
@@ -143,4 +150,4 @@ if (!isDev) {
 
 // 8) Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT,'0.0.0.0', () => console.log(`Server running on port ${PORT}`));

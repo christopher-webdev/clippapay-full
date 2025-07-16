@@ -12,11 +12,11 @@ export default defineConfig({
  server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'http://clippapay.com',
         changeOrigin: true,
       },
       '/uploads': {
-        target: 'http://localhost:5000',   // ← this is required
+        target: 'http://clippapay.com',   // ← this is required
         changeOrigin: true,
         secure: false,
       },
