@@ -387,7 +387,7 @@ export default function HomePage() {
 
                 <div className="relative">
                     <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory scroll-smooth px-1 md:px-0 pb-2 hide-scrollbar">
-                        {[4, 3, 2,1].map((i) => (
+                        {[4, 3, 2, 1].map((i) => (
                             <motion.div
                                 key={i}
                                 whileHover={{ scale: 1.05 }}
@@ -579,9 +579,9 @@ export default function HomePage() {
                     </div>
 
                     <div className="space-y-2">
-                        <p href="/terms" className="hover:underline block">Terms of Service</p>
-                        <p href="/privacy" className="hover:underline block">Privacy Policy</p>
-                        <p href="/contact" className="hover:underline block">Contact Us</p>
+                        <a href="/terms" className="hover:underline block">Terms of Service</a>
+                        <a href="/privacy" className="hover:underline block">Privacy Policy</a>
+                        <a href="/contact" className="hover:underline block">Contact Us</a>
                     </div>
 
                     <div className="space-y-2 text-right md:text-left">

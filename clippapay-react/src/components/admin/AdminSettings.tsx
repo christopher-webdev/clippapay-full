@@ -1,4 +1,5 @@
-import React, { useEffect, useState, FormEvent } from 'react';
+import React, { useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
 import axios from 'axios';
 
 export interface PlatformSettings {

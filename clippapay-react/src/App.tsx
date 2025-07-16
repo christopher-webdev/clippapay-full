@@ -1,5 +1,5 @@
 // src/App.tsx
-import React from 'react';
+
 import { Routes, Route } from 'react-router-dom';
 
 // Public
@@ -73,7 +73,7 @@ export default function App() {
       <Route path="dashboard/advertiser" element={<AdvertiserDashboardLayout />}>
         <Route index element={<AdvertiserDashboardOverview />} />
         <Route path="campaigns" element={<AdvertiserCampaignList />} />
-        <Route path="create-campaign" element={<CreateCampaignForm />} />
+        <Route path="create-campaign" element={<CreateCampaignForm onClose={() => {}} />} />
         <Route path="analytics" element={<CampaignAnalytics />} />
         <Route path="wallet" element={<WalletSection />} />
         <Route path="notifications" element={<NotificationsPanel />} />

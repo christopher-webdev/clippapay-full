@@ -2,7 +2,7 @@
 clippapay-react/node_modules
 express_backend/node_modules
 
-# Also ignore these common things
+# Also ignore these common things  // "build": "tsc -b && vite build",
 *.env
 .DS_Store
 dist/
