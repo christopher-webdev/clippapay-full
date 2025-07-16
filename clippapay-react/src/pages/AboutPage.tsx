@@ -4,9 +4,9 @@ import NavBar from '../components/NavBar';
 import { motion, useScroll, useTransform, useSpring } from 'framer-motion';
 
 const clippersVideos = [
-  { title: 'How to Join a Campaign', url: 'https://www.youtube.com/embed/dQw4w9WgXcQ' },
-  { title: 'Submitting Your First Repost', url: 'https://www.youtube.com/embed/3JZ_D3ELwOQ' },
-  { title: 'Tracking Your Earnings', url: 'https://www.youtube.com/embed/oHg5SJYRHA0' },
+  { title: 'How to Submit Proof for TikTok', file: 'tiktok.mp4' },
+  { title: 'How to Submit Proof for Instagram', file: 'instagram.mp4' },
+  { title: 'How to Submit Proof for YouTube', file: 'youtube.mp4' },
 ];
 
 const advertisersVideos = [
@@ -30,7 +30,25 @@ const faqs = [
   },
 ];
 
-function VideoCard({ title, url }: { title: string; url: string }) {
+function VideoCard({ title, file }: { title: string; file: string }) {
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow hover:shadow-xl transition">
+      <div className="aspect-video w-full">
+        <video
+          className="w-full h-full"
+          src={`/${file}`}
+          controls
+          preload="metadata"
+        />
+      </div>
+      <div className="p-4">
+        <h3 className="text-center font-medium text-gray-800 dark:text-gray-100">{title}</h3>
+      </div>
+    </div>
+  );
+}
+
+function YouTubeCard({ title, url }: { title: string; url: string }) {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow hover:shadow-xl transition">
       <div className="aspect-video w-full">
@@ -56,6 +74,9 @@ export default function AboutPage() {
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] });
   const bgY = useTransform(scrollYProgress, [0, 1], ['100%', '60%']);
   const smoothBgY = useSpring(bgY, { stiffness: 100, damping: 25 });
+  const [isMuted, setIsMuted] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
 
   const toggle = (i: number) => setOpenIndex((prev) => (prev === i ? null : i));
 
@@ -64,11 +85,29 @@ export default function AboutPage() {
       <NavBar />
 
       {/* Hero */}
-      <section ref={ref} className="relative h-[60vh] overflow-hidden">
-        <motion.div
-          style={{ backgroundPositionY: smoothBgY }}
-          className="absolute inset-0 bg-[url('/hero-illustration.jpg')] bg-cover bg-center"
-        />
+      <section ref={ref} className="relative h-[100vh] overflow-hidden">
+        <div className="absolute inset-0 w-full h-full">
+          <video
+            ref={videoRef}
+            className="w-full h-full object-center object-cover md:object-contain"
+            src="/video-ad.mp4"
+            autoPlay
+            muted={isMuted}
+            loop
+            playsInline
+          />
+        </div>
+
+        {/* Mute/Unmute Toggle */}
+        <div className="absolute bottom-4 right-4 z-20">
+          <button
+            onClick={() => setIsMuted((prev) => !prev)}
+            className="bg-black bg-opacity-50 text-white px-3 py-1 rounded hover:bg-opacity-75 transition"
+          >
+            {isMuted ? '🔇 Mute' : '🔊 Unmute'}
+          </button>
+        </div>
+
         <div className="relative z-10 flex items-center justify-center h-full bg-black bg-opacity-40 px-4">
           <div className="text-center text-white max-w-2xl space-y-4">
             <h1 className="text-4xl md:text-5xl font-bold">About ClippaPay</h1>
@@ -78,6 +117,7 @@ export default function AboutPage() {
           </div>
         </div>
       </section>
+
 
       {/* How It Works */}
       <section className="py-16 px-4 sm:px-6 lg:px-8">
@@ -133,7 +173,7 @@ export default function AboutPage() {
         </p>
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {advertisersVideos.map((v, i) => (
-            <VideoCard key={i} {...v} />
+            <YouTubeCard key={i} {...v} />
           ))}
         </div>
       </section>

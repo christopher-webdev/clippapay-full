@@ -140,13 +140,13 @@ app.use(express.urlencoded({ extended: true }));
 
 
 // 7) Serve React build in prod
-if (!isDev) {
-  const buildPath = path.resolve(process.cwd(), 'build');
-  app.use(express.static(buildPath));
-  app.get('*', (_req, res) => {
-    res.sendFile(path.join(buildPath, 'index.html'));
-  });
-}
+// if (!isDev) {
+//   const buildPath = path.resolve(process.cwd(), 'build');
+//   app.use(express.static(buildPath));
+//   app.get('*', (_req, res) => {
+//     res.sendFile(path.join(buildPath, 'index.html'));
+//   });
+// }
 
 // 8) Start server
 const PORT = process.env.PORT || 5000;
