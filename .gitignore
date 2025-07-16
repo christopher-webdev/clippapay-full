@@ -14,7 +14,7 @@ express_backend/uploads/videos
 express_backend/uploads/proof
 express_backend/uploads/proofs
 express_backend/uploads
-
+*.mp4
 
 
 # git add .

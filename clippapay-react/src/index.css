@@ -6,37 +6,79 @@
 .card {
   @apply relative rounded-2xl shadow-md overflow-hidden transition-transform transform;
 }
+
 .card::before {
   content: "";
   @apply absolute inset-0 pointer-events-none rounded-2xl opacity-0 transition-opacity;
-  background: radial-gradient(circle at top left, rgba(255,255,255,0.25), transparent 70%);
+  background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.25), transparent 70%);
 }
+
 .card:hover {
   @apply scale-105 shadow-lg;
 }
+
 .card:hover::before {
   @apply opacity-100;
 }
 
 /* User-related gradients */
-.card[data-variant="teal"]    { @apply bg-gradient-to-br from-teal-400 to-teal-600 text-white; }
-.card[data-variant="blue"]    { @apply bg-gradient-to-br from-blue-400 to-blue-600 text-white; }
-.card[data-variant="indigo"]  { @apply bg-gradient-to-br from-indigo-400 to-indigo-600 text-white; }
-.card[data-variant="violet"]  { @apply bg-gradient-to-br from-violet-400 to-violet-600 text-white; }
+.card[data-variant="teal"] {
+  @apply bg-gradient-to-br from-teal-400 to-teal-600 text-white;
+}
+
+.card[data-variant="blue"] {
+  @apply bg-gradient-to-br from-blue-400 to-blue-600 text-white;
+}
+
+.card[data-variant="indigo"] {
+  @apply bg-gradient-to-br from-indigo-400 to-indigo-600 text-white;
+}
+
+.card[data-variant="violet"] {
+  @apply bg-gradient-to-br from-violet-400 to-violet-600 text-white;
+}
 
 /* Campaign-related gradients */
-.card[data-variant="purple"]  { @apply bg-gradient-to-br from-purple-400 to-purple-600 text-white; }
-.card[data-variant="fuchsia"] { @apply bg-gradient-to-br from-fuchsia-400 to-fuchsia-600 text-white; }
-.card[data-variant="rose"]    { @apply bg-gradient-to-br from-rose-400 to-rose-600 text-white; }
-.card[data-variant="pink"]    { @apply bg-gradient-to-br from-pink-400 to-pink-600 text-white; }
-.card[data-variant="lightBlue"] { @apply bg-gradient-to-br from-sky-400 to-sky-600 text-white; }
+.card[data-variant="purple"] {
+  @apply bg-gradient-to-br from-purple-400 to-purple-600 text-white;
+}
+
+.card[data-variant="fuchsia"] {
+  @apply bg-gradient-to-br from-fuchsia-400 to-fuchsia-600 text-white;
+}
+
+.card[data-variant="rose"] {
+  @apply bg-gradient-to-br from-rose-400 to-rose-600 text-white;
+}
+
+.card[data-variant="pink"] {
+  @apply bg-gradient-to-br from-pink-400 to-pink-600 text-white;
+}
+
+.card[data-variant="lightBlue"] {
+  @apply bg-gradient-to-br from-sky-400 to-sky-600 text-white;
+}
 
 /* Financial gradients */
-.card[data-variant="amber"]   { @apply bg-gradient-to-br from-amber-400 to-amber-600 text-white; }
-.card[data-variant="orange"]  { @apply bg-gradient-to-br from-orange-400 to-orange-600 text-white; }
-.card[data-variant="green"]   { @apply bg-gradient-to-br from-green-400 to-green-600 text-white; }
-.card[data-variant="emerald"] { @apply bg-gradient-to-br from-emerald-400 to-emerald-600 text-white; }
-.card[data-variant="cyan"]    { @apply bg-gradient-to-br from-cyan-400 to-cyan-600 text-white; }
+.card[data-variant="amber"] {
+  @apply bg-gradient-to-br from-amber-400 to-amber-600 text-white;
+}
+
+.card[data-variant="orange"] {
+  @apply bg-gradient-to-br from-orange-400 to-orange-600 text-white;
+}
+
+.card[data-variant="green"] {
+  @apply bg-gradient-to-br from-green-400 to-green-600 text-white;
+}
+
+.card[data-variant="emerald"] {
+  @apply bg-gradient-to-br from-emerald-400 to-emerald-600 text-white;
+}
+
+.card[data-variant="cyan"] {
+  @apply bg-gradient-to-br from-cyan-400 to-cyan-600 text-white;
+}
 
 /* Indigo - Primary action */
 .card[data-variant="indigo"] {
@@ -50,7 +92,8 @@
 
 /* Amber - Attention needed */
 .card[data-variant="amber"] {
-  @apply bg-gradient-to-br from-amber-400 to-amber-500 text-gray-900; /* Dark text for better contrast */
+  @apply bg-gradient-to-br from-amber-400 to-amber-500 text-gray-900;
+  /* Dark text for better contrast */
 }
 
 /* Sky - Current activity */
@@ -66,4 +109,16 @@
 /* Violet - Premium achievement */
 .card[data-variant="violet"] {
   @apply bg-gradient-to-br from-violet-500 to-violet-600 text-white;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  scrollbar-width: none;
+  /* Firefox */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+  /* Chrome, Safari, Opera */
 }

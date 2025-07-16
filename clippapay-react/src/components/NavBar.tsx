@@ -5,16 +5,16 @@ import { HiMenu, HiX, HiSun, HiMoon } from 'react-icons/hi';
 import { motion } from 'framer-motion';
 
 const navItems = [
-  { name: 'Pricing', to: '/pricing' },
-  { name: 'Clips',   to: '/clips'   },
-  { name: 'FAQs',    to: '/faqs'    },
-  { name: 'About',   to: '/about'   },
-  { name: 'Login',   to: '/login'   },
+  // { name: 'Pricing', to: '/pricing' },
+  // { name: 'Clips',   to: '/clips'   },
+  // { name: 'FAQs',    to: '/faqs'    },
+  { name: 'About', to: '/about' },
+  { name: 'Login', to: '/login' },
 ];
 
 export default function NavBar() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [theme, setTheme] = useState<'light'|'dark'>(() => {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('theme');
       if (stored === 'light' || stored === 'dark') return stored;
@@ -33,7 +33,7 @@ export default function NavBar() {
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
 
   return (
-    <nav className="w-full bg-white dark:bg-gray-900 shadow px-6 py-4 flex items-center justify-between">
+    <nav className="relative z-50 w-full bg-white dark:bg-gray-900 shadow px-6 py-4 flex items-center justify-between">
       {/* Logo */}
       <Link to="/" className="flex items-center gap-2">
         <motion.img
@@ -62,7 +62,7 @@ export default function NavBar() {
             to={item.to}
             className={({ isActive }) =>
               `text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition
-               ${isActive ? 'font-semibold text-blue-600 dark:text-blue-400' : ''}`
+          ${isActive ? 'font-semibold text-blue-600 dark:text-blue-400' : ''}`
             }
           >
             {item.name}
@@ -74,9 +74,10 @@ export default function NavBar() {
         >
           Sign Up
         </NavLink>
-        {/* theme toggle */}
         <button onClick={toggleTheme} className="p-2 rounded-full bg-gray-200 dark:bg-gray-800">
-          {theme === 'dark' ? <HiSun className="w-5 h-5 text-yellow-400"/> : <HiMoon className="w-5 h-5 text-gray-600"/>}
+          {theme === 'dark'
+            ? <HiSun className="w-5 h-5 text-yellow-400" />
+            : <HiMoon className="w-5 h-5 text-gray-600" />}
         </button>
       </div>
 
@@ -89,33 +90,38 @@ export default function NavBar() {
         {mobileOpen ? <HiX className="w-6 h-6" /> : <HiMenu className="w-6 h-6" />}
       </button>
 
-      {/* Mobile menu */}
-      {mobileOpen && (
-        <div className="absolute top-full left-0 w-full bg-white dark:bg-gray-900 shadow-md md:hidden">
-          <div className="flex flex-col px-6 py-4 space-y-4">
-            {navItems.map(item => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                onClick={() => setMobileOpen(false)}
-                className={({ isActive }) =>
-                  `block text-lg text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400
-                   ${isActive ? 'font-semibold text-blue-600 dark:text-blue-400' : ''}`
-                }
-              >
-                {item.name}
-              </NavLink>
-            ))}
+      {/* Mobile menu dropdown */}
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={mobileOpen ? { opacity: 1, y: 0 } : { opacity: 0, y: -10 }}
+        transition={{ duration: 0.3 }}
+        className={`absolute left-0 top-full w-full bg-white dark:bg-gray-900 shadow-md md:hidden overflow-hidden ${mobileOpen ? 'block' : 'hidden'
+          }`}
+      >
+        <div className="flex flex-col px-6 py-4 space-y-4">
+          {navItems.map(item => (
             <NavLink
-              to="/signup"
+              key={item.to}
+              to={item.to}
               onClick={() => setMobileOpen(false)}
-              className="block text-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              className={({ isActive }) =>
+                `block text-lg text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400
+            ${isActive ? 'font-semibold text-blue-600 dark:text-blue-400' : ''}`
+              }
             >
-              Sign Up
+              {item.name}
             </NavLink>
-          </div>
+          ))}
+          <NavLink
+            to="/signup"
+            onClick={() => setMobileOpen(false)}
+            className="block text-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+          >
+            Sign Up
+          </NavLink>
         </div>
-      )}
+      </motion.div>
     </nav>
+
   );
 }

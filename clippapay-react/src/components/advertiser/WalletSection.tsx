@@ -122,7 +122,7 @@ export default function WalletSection() {
   useEffect(() => {
     fetchAll(); // initial fetch
 
-    const interval = setInterval(fetchAll, 15000); // 15000ms = 15s
+    const interval = setInterval(fetchAll, 1500000); // 15000ms = 15s
 
     return () => clearInterval(interval); // cleanup on unmount
   }, []);

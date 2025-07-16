@@ -297,40 +297,46 @@ export default function SubmissionsManagement() {
                 </td>
                 {/* Proof: Video, Image, or Link */}
                 <td className="px-2 py-2 text-xs text-center">
-                  {p.proofVideo ? (
-                    <a
-                      href={p.proofVideo}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex flex-col items-center text-blue-700 hover:underline"
-                    >
-                      <HiVideoCamera className="w-6 h-6 mx-auto" />
-                      <span>Video</span>
-                    </a>
-                  ) : p.proofImage ? (
-                    <a
-                      href={p.proofImage}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex flex-col items-center text-blue-700 hover:underline"
-                    >
-                      <HiPhotograph className="w-6 h-6 mx-auto" />
-                      <span>Image</span>
-                    </a>
-                  ) : p.submissionUrl ? (
-                    <a
-                      href={p.submissionUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex flex-col items-center text-indigo-600 hover:underline"
-                    >
-                      <HiExternalLink className="w-5 h-5 mx-auto" />
-                      <span>Link</span>
-                    </a>
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
+                  <div className="flex flex-col items-center space-y-1">
+                    {p.proofVideo && (
+                      <a
+                        href={p.proofVideo}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-col items-center text-blue-700 hover:underline"
+                      >
+                        <HiVideoCamera className="w-6 h-6 mx-auto" />
+                        <span>Video</span>
+                      </a>
+                    )}
+                    {p.proofImage && (
+                      <a
+                        href={p.proofImage}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-col items-center text-blue-700 hover:underline"
+                      >
+                        <HiPhotograph className="w-6 h-6 mx-auto" />
+                        <span>Image</span>
+                      </a>
+                    )}
+                    {p.submissionUrl && (
+                      <a
+                        href={p.submissionUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-col items-center text-indigo-600 hover:underline"
+                      >
+                        <HiExternalLink className="w-5 h-5 mx-auto" />
+                        <span>Link</span>
+                      </a>
+                    )}
+                    {!p.proofVideo && !p.proofImage && !p.submissionUrl && (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
                 </td>
+
                 {/* Views/Reward */}
                 <td className="px-2 py-2 text-center text-xs">
                   <div>

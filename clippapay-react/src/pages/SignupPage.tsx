@@ -95,6 +95,16 @@ export default function SignupPage() {
         className="w-full max-w-md bg-white/90 backdrop-blur-lg rounded-3xl shadow-2xl overflow-hidden"
       >
         <div className="p-8">
+          {/* Back to Home */}
+          <div className="mb-4">
+            <button
+              onClick={() => navigate("/")}
+              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium transition flex items-center gap-1 mb-2"
+            >
+              ← Back to Home
+            </button>
+          </div>
+
           {step === "form" ? (
             <>
               <h2 className="text-3xl font-bold text-gray-800 text-center mb-6">
@@ -233,7 +243,6 @@ export default function SignupPage() {
                         placeholder="Doe"
                       />
                     </div>
-                   
                   </>
                 ) : (
                   <>
