@@ -304,7 +304,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       id: campaign._id,
       title: campaign.title,
       advertiser: campaign.advertiser?.contactName || 'Advertiser',
-      description: campaign.description || '',
+      directions: campaign.directions || '',
       thumbUrl: campaign.thumb_url,
       payPerView: campaign.clipper_cpm ?? 200,
       totalViews: campaign.views_purchased,
