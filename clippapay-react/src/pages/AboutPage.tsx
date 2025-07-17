@@ -2,6 +2,7 @@
 import React, { useState, useRef } from 'react';
 import NavBar from '../components/NavBar';
 import { motion, useScroll, useTransform, useSpring } from 'framer-motion';
+import { FaPlayCircle } from 'react-icons/fa';
 
 const clippersVideos = [
   { title: 'How to Submit Proof for TikTok', file: 'tiktok.mp4' },
@@ -31,15 +32,27 @@ const faqs = [
 ];
 
 function VideoCard({ title, file }: { title: string; file: string }) {
+  const [showVideo, setShowVideo] = useState(false);
+
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow hover:shadow-xl transition">
-      <div className="aspect-video w-full">
-        <video
-          className="w-full h-full"
-          src={`/${file}`}
-          controls
-          preload="metadata"
-        />
+    <div
+      className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow hover:shadow-xl transition"
+      onClick={() => setShowVideo(true)}
+    >
+      <div className="aspect-video w-full relative cursor-pointer">
+        {showVideo ? (
+          <video
+            className="w-full h-96"
+            src={`/${file}`}
+            controls
+            autoPlay
+            preload="metadata"
+          />
+        ) : (
+          <div className="w-full h-96 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+            <FaPlayCircle className="text-6xl text-gray-500 dark:text-gray-300" />
+          </div>
+        )}
       </div>
       <div className="p-4">
         <h3 className="text-center font-medium text-gray-800 dark:text-gray-100">{title}</h3>
@@ -48,18 +61,29 @@ function VideoCard({ title, file }: { title: string; file: string }) {
   );
 }
 
-function YouTubeCard({ title, url }: { title: string; url: string }) {
+function EmbeddedVideoCard({ title, url }: { title: string; url: string }) {
+  const [showVideo, setShowVideo] = useState(false);
+
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow hover:shadow-xl transition">
-      <div className="aspect-video w-full">
-        <iframe
-          className="w-full h-full"
-          src={`${url}?rel=0`}
-          title={title}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-          loading="lazy"
-        />
+    <div
+      className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow hover:shadow-xl transition"
+      onClick={() => setShowVideo(true)}
+    >
+      <div className="aspect-video w-full relative cursor-pointer">
+        {showVideo ? (
+          <iframe
+            className="w-full h-full"
+            src={`${url}?rel=0&autoplay=1`}
+            title={title}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-96 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+            <FaPlayCircle className="text-6xl text-gray-500 dark:text-gray-300" />
+          </div>
+        )}
       </div>
       <div className="p-4">
         <h3 className="text-center font-medium text-gray-800 dark:text-gray-100">{title}</h3>
@@ -76,7 +100,6 @@ export default function AboutPage() {
   const smoothBgY = useSpring(bgY, { stiffness: 100, damping: 25 });
   const [isMuted, setIsMuted] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
-
 
   const toggle = (i: number) => setOpenIndex((prev) => (prev === i ? null : i));
 
@@ -117,7 +140,6 @@ export default function AboutPage() {
           </div>
         </div>
       </section>
-
 
       {/* How It Works */}
       <section className="py-16 px-4 sm:px-6 lg:px-8">
@@ -165,7 +187,7 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* Advertisers Onboarding Videos */}
+      {/* Advertisers Onboarding Videos (Lazy Loaded) */}
       <section className="py-16 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900">
         <h2 className="text-3xl font-semibold text-gray-800 dark:text-gray-100 text-center">Advertisers Onboarding</h2>
         <p className="mt-2 text-center text-gray-600 dark:text-gray-300">
@@ -173,7 +195,7 @@ export default function AboutPage() {
         </p>
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {advertisersVideos.map((v, i) => (
-            <YouTubeCard key={i} {...v} />
+            <EmbeddedVideoCard key={i} {...v} />
           ))}
         </div>
       </section>
