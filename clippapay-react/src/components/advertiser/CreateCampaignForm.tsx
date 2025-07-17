@@ -75,6 +75,8 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+
 
   // Derived: Calculate max views from budget (for the progress chip)
   const estimatedViews = form.budget > 0
@@ -201,11 +203,13 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
       payload.append('categories', JSON.stringify(form.categories));
       payload.append('numClipsSuggested', form.numClipsSuggested.toString());
 
-      const res = await axios.post(
-        `${API_BASE}/campaigns`,
-        payload,
-        { headers: { 'Content-Type': 'multipart/form-data' } }
-      );
+      const res = await axios.post(`${API_BASE}/campaigns`, payload, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setUploadProgress(percentCompleted);
+        }
+      });
 
       setMessage('Campaign created successfully!');
       setForm({
@@ -228,6 +232,7 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
       setError(err.response?.data?.error || err.message || 'Something went wrong');
     } finally {
       setLoading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -279,6 +284,15 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
               required
               className="mt-1 block w-full text-gray-700"
             />
+            {uploadProgress > 0 && (
+              <div className="w-full bg-gray-200 rounded-full mt-2 h-3">
+                <div
+                  className="bg-blue-500 h-3 rounded-full transition-all"
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
+                <p className="text-xs mt-1 text-gray-500 text-right">{uploadProgress}%</p>
+              </div>
+            )}
             {form.videoFile && (
               <p className="text-xs mt-1 text-gray-500">
                 File size: {(form.videoFile.size / (1024 * 1024)).toFixed(2)}MB
@@ -491,7 +505,7 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
             disabled={loading}
             className="w-full py-3 bg-cp-blue text-white font-semibold rounded-md shadow hover:bg-cp-indigo transition"
           >
-            {loading ? 'Creating…' : 'Create Campaign'}
+            {loading ? `Uploading… ${uploadProgress}%` : 'Create Campaign'}
           </button>
 
           {/* Success / error feedback */}
