@@ -1,5 +1,5 @@
 // src/pages/AboutPage.tsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import NavBar from '../components/NavBar';
 import { motion, useScroll, useTransform, useSpring } from 'framer-motion';
 import { FaPlayCircle } from 'react-icons/fa';
@@ -31,28 +31,51 @@ const faqs = [
   },
 ];
 
+// Updated VideoCard with 3-second autoplay preview
 function VideoCard({ title, file }: { title: string; file: string }) {
-  const [showVideo, setShowVideo] = useState(false);
+  const [playingPreview, setPlayingPreview] = useState(true);
+  const [showControls, setShowControls] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!playingPreview || !videoRef.current) return;
+
+    const vid = videoRef.current;
+
+    const handleTimeUpdate = () => {
+      if (vid.currentTime >= 5) {
+        vid.pause();
+        setPlayingPreview(false);
+      }
+    };
+
+    vid.addEventListener('timeupdate', handleTimeUpdate);
+    return () => vid.removeEventListener('timeupdate', handleTimeUpdate);
+  }, [playingPreview]);
+
+  const handleClick = () => {
+    if (!videoRef.current) return;
+    videoRef.current.currentTime = 0;
+    setShowControls(true);
+    videoRef.current.play();
+  };
 
   return (
     <div
-      className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow hover:shadow-xl transition"
-      onClick={() => setShowVideo(true)}
+      className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow hover:shadow-xl transition cursor-pointer"
+      onClick={handleClick}
     >
-      <div className="aspect-video w-full relative cursor-pointer">
-        {showVideo ? (
-          <video
-            className="w-full h-96"
-            src={`/${file}`}
-            controls
-            autoPlay
-            preload="metadata"
-          />
-        ) : (
-          <div className="w-full h-96 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-            <FaPlayCircle className="text-6xl text-gray-500 dark:text-gray-300" />
-          </div>
-        )}
+      <div className="aspect-video w-full relative">
+        <video
+          ref={videoRef}
+          className="w-full h-96"
+          src={`/${file}`}
+          muted
+          playsInline
+          autoPlay={playingPreview}
+          controls={showControls}
+          preload="metadata"
+        />
       </div>
       <div className="p-4">
         <h3 className="text-center font-medium text-gray-800 dark:text-gray-100">{title}</h3>
@@ -61,15 +84,16 @@ function VideoCard({ title, file }: { title: string; file: string }) {
   );
 }
 
+// YouTube embed with lazy click-to-load
 function EmbeddedVideoCard({ title, url }: { title: string; url: string }) {
   const [showVideo, setShowVideo] = useState(false);
 
   return (
     <div
-      className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow hover:shadow-xl transition"
+      className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow hover:shadow-xl transition cursor-pointer"
       onClick={() => setShowVideo(true)}
     >
-      <div className="aspect-video w-full relative cursor-pointer">
+      <div className="aspect-video w-full relative">
         {showVideo ? (
           <iframe
             className="w-full h-full"
@@ -187,7 +211,7 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* Advertisers Onboarding Videos (Lazy Loaded) */}
+      {/* Advertisers Onboarding Videos */}
       <section className="py-16 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900">
         <h2 className="text-3xl font-semibold text-gray-800 dark:text-gray-100 text-center">Advertisers Onboarding</h2>
         <p className="mt-2 text-center text-gray-600 dark:text-gray-300">

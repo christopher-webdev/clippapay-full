@@ -133,6 +133,9 @@ export default function LoginPage() {
           <a href="/signup" className="text-indigo-600 font-medium hover:underline">
             Sign up
           </a>
+          <a href="/" className="text-indigo-600 font-medium hover:underline">
+            Home
+          </a>
         </p>
       </div>
     </div>
