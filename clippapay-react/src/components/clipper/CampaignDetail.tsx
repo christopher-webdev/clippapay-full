@@ -175,6 +175,11 @@ export default function CampaignDetail() {
           <HiOutlineUserGroup className="w-6 h-6 text-indigo-500" />
           <span>{campaign.clippersCount} clippers joined</span>
         </div>
+        {campaign.description && (
+          <p className="mt-3 text-gray-600 leading-relaxed whitespace-pre-line">
+            {campaign.description}
+          </p>
+        )}
       </div>
 
       <div className="mt-6">
