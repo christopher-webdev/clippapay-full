@@ -125,9 +125,9 @@ export default function CampaignDetail() {
         />
       </div> */}
 
-      {/* <div className="mt-6 space-y-4">
+      <div className="mt-6 space-y-4">
         <p className="text-gray-700">{campaign.description}</p>
-      </div> */}
+      </div>
 
       <div className="mt-6">
         <h3 className="text-lg font-medium text-gray-800 mb-2 flex items-center gap-2">
@@ -175,11 +175,7 @@ export default function CampaignDetail() {
           <HiOutlineUserGroup className="w-6 h-6 text-indigo-500" />
           <span>{campaign.clippersCount} clippers joined</span>
         </div>
-        {campaign.description && (
-          <p className="mt-3 text-gray-600 leading-relaxed whitespace-pre-line">
-            {campaign.description}
-          </p>
-        )}
+        
       </div>
 
       <div className="mt-6">
