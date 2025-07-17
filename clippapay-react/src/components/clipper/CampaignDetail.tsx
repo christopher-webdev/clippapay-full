@@ -20,7 +20,7 @@ interface CampaignDetail {
   id: string;
   title: string;
   advertiser: string;
-  description: string;
+  directions: string;
   thumbUrl: string;
   payPerView: number;
   totalViews: number;
@@ -126,7 +126,7 @@ export default function CampaignDetail() {
       </div> */}
 
       <div className="mt-6 space-y-4">
-        <p className="text-gray-700">{campaign.description}</p>
+        <p className="text-gray-700">{campaign.directions}</p>
       </div>
 
       <div className="mt-6">
@@ -175,7 +175,7 @@ export default function CampaignDetail() {
           <HiOutlineUserGroup className="w-6 h-6 text-indigo-500" />
           <span>{campaign.clippersCount} clippers joined</span>
         </div>
-        
+
       </div>
 
       <div className="mt-6">
