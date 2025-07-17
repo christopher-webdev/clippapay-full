@@ -125,9 +125,19 @@ export default function CampaignDetail() {
         />
       </div> */}
 
-      <div className="mt-6 space-y-4">
-        <p className="text-gray-700">{campaign.directions}</p>
+      <div className="mt-6 space-y-2">
+        <h3 className="text-lg font-medium text-gray-800">Campaign Instructions (optional)</h3>
+        {campaign.instructions?.length > 0 ? (
+          <ul className="list-disc list-inside text-gray-700 space-y-1">
+            {campaign.instructions.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-gray-500 italic">No instructions provided.</p>
+        )}
       </div>
+
 
       <div className="mt-6">
         <h3 className="text-lg font-medium text-gray-800 mb-2 flex items-center gap-2">
