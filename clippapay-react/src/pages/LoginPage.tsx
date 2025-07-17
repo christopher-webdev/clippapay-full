@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import axios from 'axios';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -37,7 +37,6 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // 1) Get JWT from API
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -46,12 +45,10 @@ export default function LoginPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || 'Login failed');
 
-      // 2) Store and configure axios
       localStorage.setItem('token', data.token);
       axios.defaults.baseURL = API_BASE;
       axios.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
 
-      // 3) Route based on role
       const decoded = parseJwt(data.token);
       const role = decoded?.role;
       if (role === 'clipper') {
@@ -72,7 +69,14 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 p-6">
-      <div className="w-full max-w-md bg-white p-8 rounded-2xl shadow-xl">
+      <div className="w-full max-w-md bg-white p-8 rounded-2xl shadow-xl relative">
+        <Link
+          to="/"
+          className="absolute top-4 right-4 text-sm text-indigo-600 font-semibold hover:underline"
+        >
+          ← Go to Homepage
+        </Link>
+
         <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">
           Welcome Back 👋
         </h2>
@@ -130,12 +134,9 @@ export default function LoginPage() {
 
         <p className="mt-6 text-sm text-center text-gray-600">
           Don't have an account?{' '}
-          <a href="/signup" className="text-indigo-600 font-medium hover:underline">
+          <Link to="/signup" className="text-indigo-600 font-medium hover:underline">
             Sign up
-          </a>
-          <a href="/" className="text-indigo-600 font-medium hover:underline">
-            Home
-          </a>
+          </Link>
         </p>
       </div>
     </div>
