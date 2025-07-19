@@ -12,10 +12,12 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 // Nodemailer setup
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'mail.spacemail.com', // Spacemail’s SMTP server
+  port: 465,                  // 465 = SSL/TLS  •  587 = STARTTLS
+  secure: true,               // true for 465, false for 587 + STARTTLS
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    user: process.env.SMTP_USER, // e.g. reach@clippapay.com
+    pass: process.env.SMTP_PASS, // your mailbox password
   },
 });
 
