@@ -13,6 +13,7 @@ import {
   HiCog,
   HiOutlineBadgeCheck,
   HiOutlineCreditCard,
+  HiOutlineInformationCircle,
 } from 'react-icons/hi';
 import { getUserFromToken } from '@/utils/getUserFromToken';
 
@@ -30,6 +31,7 @@ const navItems: NavItem[] = [
   { name: 'Wallet', to: 'wallet', icon: <HiCurrencyDollar className="w-5 h-5" /> },
   // { name: 'Notifications', to: 'notifications', icon: <HiOutlineBell className="w-5 h-5" /> },
   { name: 'Settings', to: 'settings', icon: <HiCog className="w-5 h-5" /> },
+  { name: 'How to Use', to: 'how-to', icon: <HiOutlineInformationCircle className="w-5 h-5" /> },
 ];
 
 export default function AdvertiserDashboardLayout() {

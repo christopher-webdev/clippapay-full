@@ -19,6 +19,7 @@ import CampaignAnalytics from './components/advertiser/CampaignAnalytics';
 import WalletSection from './components/advertiser/WalletSection';
 import NotificationsPanel from './components/advertiser/NotificationsPanel';
 import SettingsPanel from './components/advertiser/SettingsPanel';
+import AdvertiserHowTo from './components/advertiser/AdvertiserHowTo';  
 
 
 // Clipper
@@ -78,6 +79,7 @@ export default function App() {
         <Route path="wallet" element={<WalletSection />} />
         <Route path="notifications" element={<NotificationsPanel />} />
         <Route path="settings" element={<SettingsPanel />} />
+        <Route path="how-to" element={<AdvertiserHowTo />} />
       </Route>
 
       {/* Clipper */}
@@ -90,7 +92,7 @@ export default function App() {
         <Route path="settings" element={<ClipperSettings />} />
       </Route>
 
-       {/* Clipper */}
+       {/* ad-worker */}
       <Route path="dashboard/ad-worker" element={<WorkerLayout />}>
         <Route index element={<AdWorkerDashboard />} />
         {/* <Route path="campaigns" element={<CampaignListClipper />} />

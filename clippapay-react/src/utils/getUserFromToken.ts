@@ -9,6 +9,8 @@ interface JwtPayload {
   role:         string;
   isSuperAdmin?: boolean;
   email:        string;
+  firstName: string;
+  company: string;
 }
 
 export function getUserFromToken(): JwtPayload | null {
