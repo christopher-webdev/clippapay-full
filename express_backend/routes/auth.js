@@ -11,15 +11,23 @@ const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // Nodemailer setup
-const transporter = nodemailer.createTransport({
-  host: 'mail.spacemail.com', // Spacemail’s SMTP server
-  port: 465,                  // 465 = SSL/TLS  •  587 = STARTTLS
-  secure: true,               // true for 465, false for 587 + STARTTLS
-  auth: {
-    user: process.env.SMTP_USER, // e.g. reach@clippapay.com
-    pass: process.env.SMTP_PASS, // your mailbox password
+// Nodemailer (Spacemail) transport with defaults
+const transporter = nodemailer.createTransport(
+  {
+    host: 'mail.spacemail.com',
+    port: 465,
+    secure: true,
+    auth: {
+      user: process.env.SMTP_USER,   // reach@clippapay.com
+      pass: process.env.SMTP_PASS,
+    },
   },
-});
+  {
+    // <-- defaults applied to every mail if not overridden
+    from: '"ClippaPay" <reach@clippapay.com>',
+  }
+);
+
 
 // Helper to generate 6-digit OTP
 function generateOTP() {
@@ -71,7 +79,13 @@ router.post('/signup', async (req, res) => {
     await user.save();
 
     // Send OTP mail
+    // await transporter.sendMail({
+    //   to: email,
+    //   subject: 'Your ClippaPay Verification Code',
+    //   text: `Your code is ${otp}. It expires in 30 minutes.`,
+    // });
     await transporter.sendMail({
+      from: '"ClippaPay" <reach@clippapay.com>',   // ✅ sender
       to: email,
       subject: 'Your ClippaPay Verification Code',
       text: `Your code is ${otp}. It expires in 30 minutes.`,
