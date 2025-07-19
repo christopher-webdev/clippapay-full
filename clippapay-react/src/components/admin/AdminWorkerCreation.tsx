@@ -31,7 +31,7 @@ export default function AdminWorkerCreation() {
 
     try {
       // 1) Verify Super-Admin credentials
-      const loginRes = await axios.post('/api/admin/login', {
+      const loginRes = await axios.post('/admin/login', {
         email: superEmail,
         password: superPassword
       });
