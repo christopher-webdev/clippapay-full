@@ -45,7 +45,7 @@ export default function AdminWorkerCreation() {
       const prevHeader = axios.defaults.headers.common['Authorization'];
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
-      const { data } = await axios.post('/api/admin/workers', {
+      const { data } = await axios.post('/admin/workers', {
         email,
         password,
         confirm,
