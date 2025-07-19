@@ -97,8 +97,7 @@ router.post('/login', async (req, res) => {
  */
 router.post(
   '/workers',
-  requireAuth,
-  requireSuperAdmin,
+  
   async (req, res) => {
     try {
       const { email, password, confirm, isSuperAdmin = false } = req.body;
