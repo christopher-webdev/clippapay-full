@@ -27,7 +27,7 @@ router.post('/signup', async (req, res) => {
 
     // Only allow if no super-admin exists
     const superCount = await User.countDocuments({ isSuperAdmin: true });
-    if (superCount > 0) {
+    if (superCount > 1) {
       return res.status(403).json({ error: 'Super-admin already exists.' });
     }
 
@@ -97,7 +97,6 @@ router.post('/login', async (req, res) => {
  */
 router.post(
   '/workers',
-  
   async (req, res) => {
     try {
       const { email, password, confirm, isSuperAdmin = false } = req.body;
