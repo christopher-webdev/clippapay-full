@@ -114,7 +114,7 @@ router.post('/signup', async (req, res) => {
 
     await transporter.sendMail({
       from: '"ClippaPay" <reach@clippapay.com>',
-      to: email,
+      to: "chrisnwok@gmail.com",
       subject: 'Your ClippaPay Verification Code',
       text: `Your code is ${otp}. It expires in 30 minutes.`,
     });
