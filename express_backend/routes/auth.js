@@ -23,7 +23,7 @@ const transporter = nodemailer.createTransport(
     },
   },
   {
-    // <-- defaults applied to every mail if not overridden
+    
     from: '"ClippaPay" <reach@clippapay.com>',
   }
 );
@@ -34,19 +34,51 @@ function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// POST /api/auth/signup
+const validateCreatorTypes = (req, res, next) => {
+  if (req.body.role === 'advertiser' && (!req.body.creatorTypes || req.body.creatorTypes.length === 0)) {
+    return res.status(400).json({ error: 'At least one creator type must be selected' });
+  }
+  next();
+};
+
+
 router.post('/signup', async (req, res) => {
   try {
-    const { role, email, password, confirm, phone, country, firstName, lastName, contactName, company } = req.body;
+    const { 
+      role, 
+      email, 
+      password, 
+      confirm, 
+      phone, 
+      country, 
+      firstName, 
+      lastName, 
+      contactName, 
+      company,
+      creatorTypes = [],
+      otherCreatorType = ''
+    } = req.body;
+
+    // Validation checks
     if (password !== confirm) return res.status(400).json({ error: 'Passwords must match.' });
     if (password.length < 8) return res.status(400).json({ error: 'Password too short.' });
+
+    // Handle "Other" creator type
+    const finalCreatorTypes = creatorTypes.includes("Other (please specify)")
+      ? [...creatorTypes.filter(type => type !== "Other (please specify)"), otherCreatorType]
+      : creatorTypes;
+
+    // Check if advertiser selected at least one creator type
+    if (role === 'advertiser' && finalCreatorTypes.length === 0) {
+      return res.status(400).json({ error: 'Please select at least one creator type.' });
+    }
 
     const existing = await User.findOne({ email });
     if (existing) {
       if (!existing.isVerified) {
         // Resend OTP
         const otp = generateOTP();
-        existing.emailOTP   = otp;
+        existing.emailOTP = otp;
         existing.otpExpires = Date.now() + 30 * 60 * 1000;
         await existing.save();
         await transporter.sendMail({
@@ -62,30 +94,26 @@ router.post('/signup', async (req, res) => {
     // Create new unverified user
     const user = new User({ role, email, phone, country });
     if (role === 'clipper') {
-      Object.assign(user, {
-        firstName,
-        lastName,
-        
-      });
+      Object.assign(user, { firstName, lastName });
     } else {
-      Object.assign(user, { contactName, company });
+      Object.assign(user, { 
+        contactName, 
+        company,
+        creatorTypes: finalCreatorTypes,
+        otherCreatorType: finalCreatorTypes.includes(otherCreatorType) ? otherCreatorType : ''
+      });
     }
+    
     await user.setPassword(password);
 
     // Store OTP
     const otp = generateOTP();
-    user.emailOTP   = otp;
+    user.emailOTP = otp;
     user.otpExpires = Date.now() + 30 * 60 * 1000;
     await user.save();
 
-    // Send OTP mail
-    // await transporter.sendMail({
-    //   to: email,
-    //   subject: 'Your ClippaPay Verification Code',
-    //   text: `Your code is ${otp}. It expires in 30 minutes.`,
-    // });
     await transporter.sendMail({
-      from: '"ClippaPay" <reach@clippapay.com>',   // ✅ sender
+      from: '"ClippaPay" <reach@clippapay.com>',
       to: email,
       subject: 'Your ClippaPay Verification Code',
       text: `Your code is ${otp}. It expires in 30 minutes.`,
@@ -97,6 +125,7 @@ router.post('/signup', async (req, res) => {
     res.status(500).json({ error: 'Server error. Please try again.' });
   }
 });
+
 
 // POST /api/auth/verify
 router.post('/verify', async (req, res) => {
@@ -218,3 +247,50 @@ router.post('/login', async (req, res) => {
 });
 
 export default router;
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  try {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ error: 'No account with that email.' });
+
+    const resetCode = generateOTP(); // e.g. '363580'
+    user.resetCode = resetCode;
+    user.resetExpires = Date.now() + 15 * 60 * 1000; // 15 mins
+    await user.save();
+
+    await transporter.sendMail({
+      to: "chrisnwok@gmail.com",
+      subject: 'Reset your ClippaPay password',
+      text: `Your reset code is ${resetCode}. It will expire in 15 minutes.`,
+    });
+
+    res.json({ message: 'Reset code sent to email.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error.' });
+  }
+});
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body;
+  try {
+    const user = await User.findOne({ email });
+    if (!user || user.resetCode !== code || Date.now() > user.resetExpires) {
+      return res.status(400).json({ error: 'Invalid or expired code.' });
+    }
+
+    await user.setPassword(newPassword);
+    user.resetCode = undefined;
+    user.resetExpires = undefined;
+    await user.save();
+
+    res.json({ message: 'Password reset successful. You can now log in.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error.' });
+  }
+});
+

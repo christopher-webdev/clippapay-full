@@ -51,6 +51,8 @@ import AdWorkerDashboard from './components/AdWorkerDashboard';
 
 import WorkerLayout from './components/WorkerLayout';
 
+import ForgotPasswordPage from './pages/ForgotPasswordPage.tsx';
+
 
 export default function App() {
   return (
@@ -60,7 +62,7 @@ export default function App() {
       <Route path="signup" element={<SignupPage />} />
       <Route path="login" element={<LoginPage />} />
       <Route path="about" element={<AboutPage />} />
-
+      <Route path="forgot-password" element={<ForgotPasswordPage />} />
       {/* initial super-admin signup (remove or secure after first use) */}
       <Route path="/admin/signup" element={<AdminSignup />} />
 

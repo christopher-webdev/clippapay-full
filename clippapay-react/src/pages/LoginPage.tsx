@@ -123,6 +123,16 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* Add this block */}
+          <div className="text-right text-sm">
+            <Link
+              to="/forgot-password"
+              className="text-indigo-600 hover:underline font-medium"
+            >
+              Forgot password?
+            </Link>
+          </div>
+
           <button
             type="submit"
             disabled={loading}
@@ -131,6 +141,7 @@ export default function LoginPage() {
             {loading ? 'Logging in…' : 'Log In'}
           </button>
         </form>
+
 
         <p className="mt-6 text-sm text-center text-gray-600">
           Don't have an account?{' '}

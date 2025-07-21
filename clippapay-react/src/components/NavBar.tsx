@@ -14,23 +14,23 @@ const navItems = [
 
 export default function NavBar() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('theme');
-      if (stored === 'light' || stored === 'dark') return stored;
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
-    return 'light';
-  });
+  // const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+  //   if (typeof window !== 'undefined') {
+  //     const stored = localStorage.getItem('theme');
+  //     if (stored === 'light' || stored === 'dark') return stored;
+  //     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  //   }
+  //   return 'light';
+  // });
 
-  useEffect(() => {
-    const root = window.document.documentElement;
-    root.classList.remove(theme === 'dark' ? 'light' : 'dark');
-    root.classList.add(theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+  // useEffect(() => {
+  //   const root = window.document.documentElement;
+  //   root.classList.remove(theme === 'dark' ? 'light' : 'dark');
+  //   root.classList.add(theme);
+  //   localStorage.setItem('theme', theme);
+  // }, [theme]);
 
-  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
+  // const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
 
   return (
     <nav className="relative z-50 w-full bg-white dark:bg-gray-900 shadow px-6 py-4 flex items-center justify-between">
@@ -74,11 +74,11 @@ export default function NavBar() {
         >
           Sign Up
         </NavLink>
-        <button onClick={toggleTheme} className="p-2 rounded-full bg-gray-200 dark:bg-gray-800">
+        {/* <button onClick={toggleTheme} className="p-2 rounded-full bg-gray-200 dark:bg-gray-800">
           {theme === 'dark'
             ? <HiSun className="w-5 h-5 text-yellow-400" />
             : <HiMoon className="w-5 h-5 text-gray-600" />}
-        </button>
+        </button> */}
       </div>
 
       {/* Mobile hamburger */}

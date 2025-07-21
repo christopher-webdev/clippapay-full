@@ -20,6 +20,8 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  resetCode: String,
+  resetExpires: Date,
 
   // Login credentials
   email:        { type: String, required: true, unique: true },
@@ -39,6 +41,11 @@ const userSchema = new mongoose.Schema({
   // Advertiser-specific fields
   contactName: String,
   company:     String,
+  creatorTypes: {  
+    type: [String],
+    default: []
+  },
+  otherCreatorType: String, // For "Other" specification
 
   // ----------------------------
   // Security & Verification
@@ -85,5 +92,7 @@ userSchema.methods.setPassword = async function(plain) {
 userSchema.methods.validatePassword = async function(plain) {
   return bcrypt.compare(plain, this.passwordHash);
 };
+
+
 
 export default mongoose.model('User', userSchema);

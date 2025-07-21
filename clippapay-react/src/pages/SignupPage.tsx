@@ -10,6 +10,25 @@ const countryOptions = getData().sort((a, b) =>
   a.name.localeCompare(b.name)
 );
 
+// Creator types for advertisers to select
+const CREATOR_TYPES = [
+  "Streamer (Twitch, Kick, YouTube Live, etc.)",
+  "YouTuber (long-form or Shorts)",
+  "TikTok Creator",
+  "Instagram Influencer / Content Creator",
+  "Podcaster",
+  "Musical Artiste (singer, rapper, producer)",
+  "Dancer / Choreographer",
+  "Comedian / Skit Creator",
+  "Actor / Actress",
+  "Motivational Speaker",
+  "Religious Leader / Spiritual Coach",
+  "Event Host / MC",
+  "Public Figure / Media Personality",
+  "Entrepreneur / Business Owner / Brand",
+  "Other (please specify)"
+];
+
 export default function SignupPage() {
   const navigate = useNavigate();
   const [step, setStep] = useState<"form" | "otp">("form");
@@ -24,6 +43,8 @@ export default function SignupPage() {
     lastName: "",
     contactName: "",
     company: "",
+    creatorTypes: [] as string[], // New field for selected creator types
+    otherCreatorType: "" // Field for "Other" specification
   });
   const [otp, setOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +55,26 @@ export default function SignupPage() {
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleCreatorTypeChange = (creatorType: string) => {
+    setFormData(prev => {
+      if (prev.creatorTypes.includes(creatorType)) {
+        return {
+          ...prev,
+          creatorTypes: prev.creatorTypes.filter(type => type !== creatorType)
+        };
+      } else {
+        return {
+          ...prev,
+          creatorTypes: [...prev.creatorTypes, creatorType]
+        };
+      }
+    });
+  };
+
+  const handleOtherCreatorTypeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({ ...formData, otherCreatorType: e.target.value });
   };
 
   async function request(endpoint: string, body: any) {
@@ -52,8 +93,18 @@ export default function SignupPage() {
     setError(null);
     setMessage(null);
     setLoading(true);
+    
     try {
-      const data = await request("/auth/signup", formData);
+      // Combine creatorTypes with otherCreatorType if "Other" is selected
+      const finalCreatorTypes = formData.creatorTypes.includes("Other (please specify)")
+        ? [...formData.creatorTypes.filter(type => type !== "Other (please specify)"), formData.otherCreatorType]
+        : formData.creatorTypes;
+
+      const data = await request("/auth/signup", {
+        ...formData,
+        creatorTypes: finalCreatorTypes
+      });
+      
       setMessage(data.message);
       setStep("otp");
     } catch (err: any) {
@@ -271,6 +322,46 @@ export default function SignupPage() {
                         placeholder="Acme Corp"
                       />
                     </div>
+                    
+                    {/* Creator Types Selection (only for advertisers) */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Preferred Creator Types (select all that apply)
+                      </label>
+                      <div className="space-y-2 max-h-60 overflow-y-auto p-2 border rounded-lg">
+                        {CREATOR_TYPES.map((type) => (
+                          <div key={type} className="flex items-center">
+                            <input
+                              type="checkbox"
+                              id={`creator-type-${type}`}
+                              checked={formData.creatorTypes.includes(type)}
+                              onChange={() => handleCreatorTypeChange(type)}
+                              className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                            />
+                            <label htmlFor={`creator-type-${type}`} className="ml-2 text-sm text-gray-700">
+                              {type}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {/* Other Creator Type Specification */}
+                    {formData.creatorTypes.includes("Other (please specify)") && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">
+                          Please specify other creator type
+                        </label>
+                        <input
+                          name="otherCreatorType"
+                          value={formData.otherCreatorType}
+                          onChange={handleOtherCreatorTypeChange}
+                          required
+                          className="mt-1 block w-full rounded-lg border-gray-300 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                          placeholder="Enter creator type"
+                        />
+                      </div>
+                    )}
                   </>
                 )}
 
