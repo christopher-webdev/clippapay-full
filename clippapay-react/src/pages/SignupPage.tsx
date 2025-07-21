@@ -1,3 +1,5 @@
+// signup 
+
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -87,24 +89,29 @@ export default function SignupPage() {
     if (!res.ok) throw new Error(data.error || data.message);
     return data;
   }
-
   const submitSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setMessage(null);
     setLoading(true);
-    
+
     try {
-      // Combine creatorTypes with otherCreatorType if "Other" is selected
-      const finalCreatorTypes = formData.creatorTypes.includes("Other (please specify)")
-        ? [...formData.creatorTypes.filter(type => type !== "Other (please specify)"), formData.otherCreatorType]
+      const isOtherSelected = formData.creatorTypes.includes("Other (please specify)");
+
+      // Prepare the creatorTypes array
+      const finalCreatorTypes = isOtherSelected
+        ? [
+          ...formData.creatorTypes.filter(type => type !== "Other (please specify)"),
+          formData.otherCreatorType
+        ]
         : formData.creatorTypes;
 
       const data = await request("/auth/signup", {
         ...formData,
-        creatorTypes: finalCreatorTypes
+        creatorTypes: finalCreatorTypes,
+        otherCreatorType: formData.otherCreatorType // ensure this is passed explicitly
       });
-      
+
       setMessage(data.message);
       setStep("otp");
     } catch (err: any) {
@@ -113,6 +120,7 @@ export default function SignupPage() {
       setLoading(false);
     }
   };
+
 
   const submitOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -322,7 +330,7 @@ export default function SignupPage() {
                         placeholder="Acme Corp"
                       />
                     </div>
-                    
+
                     {/* Creator Types Selection (only for advertisers) */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -345,7 +353,7 @@ export default function SignupPage() {
                         ))}
                       </div>
                     </div>
-                    
+
                     {/* Other Creator Type Specification */}
                     {formData.creatorTypes.includes("Other (please specify)") && (
                       <div>

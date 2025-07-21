@@ -23,7 +23,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { name: 'Overview', to: '', icon: <HiOutlineChartBar className="w-5 h-5" /> },
-  { name: 'Users', to: '/dashboard/ad-worker/overview', icon: <HiOutlineUsers className="w-5 h-5" /> },
+  //{ name: 'Users', to: '/dashboard/ad-worker/overview', icon: <HiOutlineUsers className="w-5 h-5" /> },
   // { name: 'Manage Subscriptions', to: '/dashboard/admin/subscriptions', icon: <HiOutlineUsers className="w-5 h-5" /> },
   //   { name: 'Campaigns', to: '/dashboard/admin/campaigns', icon: <HiClipboardList className="w-5 h-5" /> },
   //   { name: 'Submissions', to: '/dashboard/admin/submissions', icon: <HiOutlineDocument className="w-5 h-5" /> },

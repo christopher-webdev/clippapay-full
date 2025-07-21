@@ -35,7 +35,7 @@ const roleLabels: Record<string, string> = {
   platform: "Platform",
 };
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 100;
 
 export default function UsersManagement() {
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -131,8 +131,8 @@ export default function UsersManagement() {
     } catch (err: any) {
       setErr(
         err?.response?.data?.error ||
-          err?.message ||
-          "Error with batch action"
+        err?.message ||
+        "Error with batch action"
       );
     } finally {
       setBatchLoading(false);
@@ -154,8 +154,8 @@ export default function UsersManagement() {
     } catch (err: any) {
       setErr(
         err?.response?.data?.error ||
-          err?.message ||
-          "Error blocking user"
+        err?.message ||
+        "Error blocking user"
       );
     }
   };
@@ -177,8 +177,8 @@ export default function UsersManagement() {
     } catch (err: any) {
       setErr(
         err?.response?.data?.error ||
-          err?.message ||
-          "Error deleting user"
+        err?.message ||
+        "Error deleting user"
       );
     }
   };
@@ -334,8 +334,8 @@ export default function UsersManagement() {
                     u.isBlocked
                       ? "bg-red-50"
                       : u.isVerified
-                      ? "bg-green-50"
-                      : ""
+                        ? "bg-green-50"
+                        : ""
                   }
                 >
                   {/* Checkbox */}
@@ -351,10 +351,9 @@ export default function UsersManagement() {
                   {/* Stacked details */}
                   <td className="px-2 py-3 align-top">
                     <div className="font-semibold text-sm text-gray-900">
-                      {u.firstName || u.contactName || u.company || "—"}{" "}
-                      {u.lastName || ""}
+                      {u.firstName || u.contactName || u.company || "—"} {u.lastName || ""}
                     </div>
-                    <div className="flex flex-wrap gap-x-2 items-center text-xs text-gray-600">
+                    <div className="flex flex-wrap gap-x-2 items-center text-xs text-gray-600 mt-1">
                       <span className="flex items-center gap-1">
                         <HiMail className="w-3 h-3" /> {u.email}
                       </span>
@@ -374,7 +373,27 @@ export default function UsersManagement() {
                         </span>
                       )}
                     </div>
+
+                    {/* Render creatorTypes */}
+                    {u.creatorTypes && u.creatorTypes.length > 0 && (
+                      <div className="mt-2 text-xs text-gray-700">
+                        <span className="font-semibold">Creator Types:</span>{" "}
+                        <ul className="list-disc list-inside ml-2">
+                          {u.creatorTypes.map((type, index) => (
+                            <li key={index}>{type}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Render otherCreatorType if provided */}
+                    {u.otherCreatorType && (
+                      <div className="mt-1 text-xs text-gray-700">
+                        <span className="font-semibold">Other:</span> {u.otherCreatorType}
+                      </div>
+                    )}
                   </td>
+
                   <td className="px-2 py-3 align-top text-xs">
                     <span
                       className={
@@ -382,10 +401,10 @@ export default function UsersManagement() {
                         (u.role === "admin"
                           ? "bg-indigo-100 text-indigo-700"
                           : u.role === "clipper"
-                          ? "bg-blue-100 text-blue-700"
-                          : u.role === "advertiser"
-                          ? "bg-yellow-100 text-yellow-800"
-                          : "bg-gray-200 text-gray-600")
+                            ? "bg-blue-100 text-blue-700"
+                            : u.role === "advertiser"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-gray-200 text-gray-600")
                       }
                     >
                       {roleLabels[u.role] || u.role}

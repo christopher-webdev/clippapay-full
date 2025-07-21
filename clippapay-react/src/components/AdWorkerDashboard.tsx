@@ -13,7 +13,15 @@ interface CampaignDetails {
   campaign: {
     _id: string;
     title: string;
-    advertiser: { contactName: string, email: string };
+    advertiser: {
+      contactName?: string;
+      firstName?: string;
+      lastName?: string;
+      company?: string;
+      email?: string;
+      creatorTypes?: string[];
+      otherCreatorType?: string;
+    };
     video_url: string;
     platforms: string[];
     countries: string[];
@@ -82,7 +90,22 @@ export default function AdWorkerDashboard() {
               <div>
                 <div className="font-semibold text-lg text-gray-900 truncate">{c.title}</div>
                 <div className="text-gray-500 text-sm flex items-center gap-2">
-                  <User className="w-4 h-4 inline" /> {c.advertiser.contactName}
+                  <User className="w-4 h-4 inline" />
+                  {
+                    c.advertiser?.contactName ||
+                    c.advertiser?.company ||
+                    `${c.advertiser?.firstName || ''} ${c.advertiser?.lastName || ''}`.trim() ||
+                    "Unknown Advertiser"
+                  }
+                </div>
+                <div className="text-gray-500 text-sm flex items-center gap-2">
+                  <div className="w-4 h-4 inline" />
+                  {
+                    c.advertiser?.creatorTypes.join(', ')
+                  },
+                  {
+                    c.advertiser?.otherCreatorType
+                  }
                 </div>
               </div>
             </div>
@@ -93,10 +116,10 @@ export default function AdWorkerDashboard() {
                 ${c.adWorkerStatus === 'pending'
                   ? 'bg-yellow-50 text-yellow-700'
                   : c.adWorkerStatus === 'processing'
-                  ? 'bg-blue-50 text-blue-700'
-                  : c.adWorkerStatus === 'ready'
-                  ? 'bg-green-50 text-green-700'
-                  : 'bg-red-50 text-red-700'
+                    ? 'bg-blue-50 text-blue-700'
+                    : c.adWorkerStatus === 'ready'
+                      ? 'bg-green-50 text-green-700'
+                      : 'bg-red-50 text-red-700'
                 }`}>
                 {c.adWorkerStatus.toUpperCase()}
               </span>
@@ -118,7 +141,7 @@ export default function AdWorkerDashboard() {
 }
 
 // -------------- Modal/Details component ---------------
-function CampaignDetailsModal({ campaignId, onClose, onStatusChange }:{
+function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
   campaignId: string;
   onClose: () => void;
   onStatusChange: () => void;
@@ -208,37 +231,74 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }:{
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-2">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-auto relative animate-fadeIn">
-        <button className="absolute top-4 right-4 text-3xl text-gray-400 hover:text-gray-900"
-          onClick={onClose} aria-label="Close">&times;</button>
+        <button
+          className="absolute top-4 right-4 text-3xl text-gray-400 hover:text-gray-900"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          &times;
+        </button>
+
         {loading ? (
           <div className="p-12 text-center flex items-center justify-center">
-            <Loader2 className="animate-spin mr-2" />Loading…
+            <Loader2 className="animate-spin mr-2" />
+            Loading…
           </div>
         ) : !details ? (
-          <div className="p-12 text-center text-red-500">{error || 'Failed to load details.'}</div>
+          <div className="p-12 text-center text-red-500">
+            {error || 'Failed to load details.'}
+          </div>
         ) : (
           <div className="p-7">
+            {/* Header Section */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-2xl font-bold mb-1">{details.campaign.title}</h2>
                 <div className="text-gray-500 text-sm flex items-center gap-2">
-                  <User className="w-4 h-4" /> {details.campaign.advertiser.contactName} &middot; {details.campaign.advertiser.email}
+                  <User className="w-4 h-4" />
+                  {details.campaign.advertiser.contactName} &middot; {details.campaign.advertiser.email}
                 </div>
+
+
               </div>
-              <span className={`
+
+              <span
+                className={`
                 px-4 py-2 rounded-full text-sm font-semibold tracking-wide border
                 ${details.campaign.adWorkerStatus === 'pending'
-                  ? 'bg-yellow-50 text-yellow-800 border-yellow-200'
-                  : details.campaign.adWorkerStatus === 'processing'
-                  ? 'bg-blue-50 text-blue-800 border-blue-200'
-                  : details.campaign.adWorkerStatus === 'ready'
-                  ? 'bg-green-50 text-green-800 border-green-200'
-                  : 'bg-red-50 text-red-800 border-red-200'
-                }`}>
+                    ? 'bg-yellow-50 text-yellow-800 border-yellow-200'
+                    : details.campaign.adWorkerStatus === 'processing'
+                      ? 'bg-blue-50 text-blue-800 border-blue-200'
+                      : details.campaign.adWorkerStatus === 'ready'
+                        ? 'bg-green-50 text-green-800 border-green-200'
+                        : 'bg-red-50 text-red-800 border-red-200'
+                  }`}
+              >
                 {details.campaign.adWorkerStatus.toUpperCase()}
               </span>
             </div>
-            
+
+            {/* Download and Delete Buttons */}
+            {details.campaign.video_url && (
+              <div className="mb-4 flex flex-wrap items-center gap-4">
+                <a
+                  href={details.campaign.video_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center px-4 py-2 bg-cp-blue text-white rounded-md shadow hover:bg-cp-indigo transition"
+                >
+                  <Film className="mr-2 w-4 h-4" />
+                  Download Original Video
+                </a>
+                <button
+                  onClick={deleteOriginalVideo}
+                  className="px-4 py-2 bg-red-600 text-white rounded shadow hover:bg-red-700 transition"
+                >
+                  Delete Original Video
+                </button>
+              </div>
+            )}
+
             {/* Campaign Info Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-gray-700 mb-6">
               <Info label="Platforms" value={details.campaign.platforms.join(', ')} />
@@ -248,32 +308,25 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }:{
               <Info label="Directions" value={details.campaign.directions.join(' | ')} />
               <Info label="Suggested Clips" value={details.campaign.numClipsSuggested} />
               {details.campaign.cta_url && (
-                <Info label="CTA URL" value={
-                  <a href={details.campaign.cta_url} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">
-                    {details.campaign.cta_url}
-                  </a>
-                } />
+                <Info
+                  label="CTA URL"
+                  value={
+                    <a
+                      href={details.campaign.cta_url}
+                      className="text-blue-600 underline"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {details.campaign.cta_url}
+                    </a>
+                  }
+                />
               )}
-              <Info label="Created" value={new Date(details.campaign.createdAt).toLocaleString()} />
+              <Info
+                label="Created"
+                value={new Date(details.campaign.createdAt).toLocaleString()}
+              />
             </div>
-            
-            {/* Download and Actions */}
-            {details.campaign.video_url && (
-              <div className="mb-4 flex flex-wrap items-center gap-4">
-                <a href={details.campaign.video_url} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center px-4 py-2 bg-cp-blue text-white rounded-md shadow hover:bg-cp-indigo transition">
-                  <Film className="mr-2 w-4 h-4" />
-                  Download Original Video
-                </a>
-                {/* {clips && clips.length > 0 && (
-                  <button
-                    onClick={deleteOriginalVideo}
-                    className="px-4 py-2 bg-red-600 text-white rounded shadow hover:bg-red-700">
-                    Delete Original Video
-                  </button>
-                )} */}
-              </div>
-            )}
 
             {/* Status Actions */}
             {['pending', 'processing'].includes(details.campaign.adWorkerStatus) && (
@@ -287,32 +340,38 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }:{
               </button>
             )}
 
-            {/* Upload multiple clips */}
-            {details.campaign.adWorkerStatus === 'processing' && (!clips || clips.length < 6) && (
-              <form onSubmit={uploadClip} className="mt-6 flex flex-col sm:flex-row items-center gap-3">
-                <input
-                  type="file"
-                  name="clips"
-                  accept="video/*"
-                  required
-                  multiple
-                  disabled={uploading}
-                  className="block border px-2 py-1 rounded"
-                />
-                <button
-                  type="submit"
-                  disabled={uploading}
-                  className="px-4 py-2 bg-cp-blue text-white rounded shadow hover:bg-cp-indigo"
+            {/* Upload Clip Form */}
+            {details.campaign.adWorkerStatus === 'processing' &&
+              (!clips || clips.length < 6) && (
+                <form
+                  onSubmit={uploadClip}
+                  className="mt-6 flex flex-col sm:flex-row items-center gap-3"
                 >
-                  {uploading ? 'Uploading…' : 'Upload Clip(s)'}
-                </button>
-                {clips && clips.length >= 6 && (
-                  <div className="text-xs text-gray-500 ml-3">Maximum 6 clips uploaded.</div>
-                )}
-              </form>
-            )}
+                  <input
+                    type="file"
+                    name="clips"
+                    accept="video/*"
+                    required
+                    multiple
+                    disabled={uploading}
+                    className="block border px-2 py-1 rounded"
+                  />
+                  <button
+                    type="submit"
+                    disabled={uploading}
+                    className="px-4 py-2 bg-cp-blue text-white rounded shadow hover:bg-cp-indigo"
+                  >
+                    {uploading ? 'Uploading…' : 'Upload Clip(s)'}
+                  </button>
+                  {clips && clips.length >= 6 && (
+                    <div className="text-xs text-gray-500 ml-3">
+                      Maximum 6 clips uploaded.
+                    </div>
+                  )}
+                </form>
+              )}
 
-            {/* Clips list */}
+            {/* Uploaded Clips */}
             <div className="mt-7">
               <h3 className="font-semibold mb-2 flex items-center gap-2">
                 <Film className="w-5 h-5" />
@@ -320,9 +379,16 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }:{
               </h3>
               {clips && clips.length > 0 ? (
                 <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
-                  {clips.map(clip => (
-                    <div key={clip._id} className="p-3 rounded-lg border bg-gray-50">
-                      <video src={clip.url} controls className="w-full h-36 rounded mb-2" />
+                  {clips.map((clip) => (
+                    <div
+                      key={clip._id}
+                      className="p-3 rounded-lg border bg-gray-50"
+                    >
+                      <video
+                        src={clip.url}
+                        controls
+                        className="w-full h-36 rounded mb-2"
+                      />
                       <div className="text-xs text-gray-500">
                         Uploaded: {new Date(clip.createdAt).toLocaleString()}
                       </div>
@@ -333,13 +399,17 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }:{
                   ))}
                 </div>
               ) : (
-                <div className="text-gray-500 text-sm">No clips uploaded yet (last 30 days).</div>
+                <div className="text-gray-500 text-sm">
+                  No clips uploaded yet (last 30 days).
+                </div>
               )}
             </div>
 
             {(success || error) && (
               <div className="mt-4 text-center">
-                {success && <p className="text-green-600 font-medium">{success}</p>}
+                {success && (
+                  <p className="text-green-600 font-medium">{success}</p>
+                )}
                 {error && <p className="text-red-600 font-medium">{error}</p>}
               </div>
             )}
@@ -349,7 +419,6 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }:{
     </div>
   );
 }
-
 // Reusable info row
 function Info({ label, value }: { label: string; value: React.ReactNode }) {
   return (

@@ -397,7 +397,7 @@ router.get(
     }
     try {
       const camps = await Campaign.find({ assignedWorker: req.user._id })
-        .populate('advertiser', 'contactName');
+        .populate('advertiser', 'contactName firstName lastName company email creatorTypes otherCreatorType');
       return res.json(camps);
     } catch (err) {
       console.error(err);
@@ -405,6 +405,7 @@ router.get(
     }
   }
 );
+
 
 /**
  * PUT /api/campaigns/:id
