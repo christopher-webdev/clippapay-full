@@ -82,7 +82,7 @@ router.post('/signup', async (req, res) => {
         existing.otpExpires = Date.now() + 30 * 60 * 1000;
         await existing.save();
         await transporter.sendMail({
-          to: email,
+          to: "chrisnwok@gmail.com",
           subject: 'Your ClippaPay Verification Code (Resent)',
           text: `Your new code is ${otp}. It expires in 30 minutes.`,
         });
