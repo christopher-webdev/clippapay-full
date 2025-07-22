@@ -19,6 +19,7 @@ const navItems = [
   { name: 'Submissions', to: 'submissions', icon: <HiUpload className="w-5 h-5" /> },
   { name: 'Earnings', to: 'wallet', icon: <HiCurrencyDollar className="w-5 h-5" /> },
   { name: 'Settings', to: 'settings', icon: <HiCog className="w-5 h-5" /> },
+  { name: 'How to Use', to: 'how-to', icon: <HiOutlineInformationCircle className="w-5 h-5" /> },
 ];
 
 export default function ClipperDashboardLayout() {
