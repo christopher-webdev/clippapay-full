@@ -85,23 +85,47 @@ export default function AboutPage() {
   useEffect(() => {
     if (videoRef.current) videoRef.current.play().catch(e => console.log("Autoplay prevented:", e));
   }, []);
+  const videoAdRef = useRef<HTMLVideoElement>(null);
+  const video20Ref = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const setupVideo = (video: HTMLVideoElement | null) => {
+      if (!video) return;
+      const onLoaded = () => {
+        video.currentTime = 1.5;
+      };
+      const onSeeked = () => {
+        video.pause();
+      };
+      video.addEventListener("loadedmetadata", onLoaded);
+      video.addEventListener("seeked", onSeeked);
+      video.play().catch(() => { });
+
+      return () => {
+        video.removeEventListener("loadedmetadata", onLoaded);
+        video.removeEventListener("seeked", onSeeked);
+      };
+    };
+
+    const cleanup1 = setupVideo(videoAdRef.current);
+    const cleanup2 = setupVideo(video20Ref.current);
+
+    return () => {
+      cleanup1?.();
+      cleanup2?.();
+    };
+  }, []);
+
 
   return (
+
     <div className="min-h-screen bg-gray-950 text-white overflow-hidden">
       <NavBar />
 
       {/* Hero Section */}
       <section ref={containerRef} className="relative h-screen min-h-[800px] overflow-hidden">
         <motion.div style={{ y: smoothBgY }} className="absolute inset-0 w-full h-full">
-          <video
-            ref={videoRef}
-            className="w-full h-full object-cover md:object-contain"
-            src="/video-ad.mp4"
-            autoPlay
-            muted={isMuted}
-            loop
-            playsInline
-          />
+
           <div className="absolute inset-0 bg-black/20" />
         </motion.div>
 
@@ -224,6 +248,61 @@ export default function AboutPage() {
           </div>
         </div>
       </section>
+      {/* Video Ads Showcase Section */}
+      <section className="bg-gray-900 py-24 px-6 sm:px-10 text-center">
+        <div className="max-w-6xl mx-auto">
+          <h2 className="text-4xl md:text-5xl font-bold text-white mb-8">Watch How ClippaPay Delivers Results</h2>
+          <p className="text-lg text-gray-400 mb-12">
+            These short videos explain our platform and how your brand gets visibility through everyday people.
+          </p>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* Video 1: Ad Explainer */}
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5 }}
+              className="bg-black rounded-2xl overflow-hidden shadow-lg"
+            >
+              <video
+                ref={videoAdRef}
+                src="/video-ad.mp4"
+                className="w-full h-80 object-cover"
+                muted
+                playsInline
+              />
+              <div className="p-4 text-left">
+                <h3 className="text-white font-semibold text-lg">What Makes ClippaPay Different?</h3>
+                <p className="text-gray-400 text-sm mt-1">A fast overview for advertisers looking to go viral instantly.</p>
+              </div>
+            </motion.div>
+
+            {/* Video 2: Platform In Action */}
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, }}
+              className="bg-black rounded-2xl overflow-hidden shadow-lg"
+            >
+              <video
+                ref={video20Ref}
+                src="/video20.mp4"
+                className="w-full h-80 object-cover"
+                muted
+                playsInline
+              />
+
+              <div className="p-4 text-left">
+                <h3 className="text-white font-semibold text-lg">Real Campaigns. Real People.</h3>
+                <p className="text-gray-400 text-sm mt-1">See how your video spreads across platforms like TikTok, YouTube & Instagram.</p>
+              </div>
+            </motion.div>
+          </div>
+        </div>
+      </section>
+
 
       {/* Footer */}
       <footer className="py-12 px-4 sm:px-6 lg:px-8 bg-gray-950">
@@ -251,7 +330,7 @@ export default function AboutPage() {
             >
               <FaFacebook size={24} />
             </a>
-             <a
+            <a
               href="https://tiktok.com"
               target="_blank"
               rel="noopener noreferrer"
@@ -259,7 +338,7 @@ export default function AboutPage() {
             >
               <FaTiktok size={24} />
             </a>
-            
+
           </div>
 
           <div className="pt-4 border-t border-gray-800 text-gray-500">

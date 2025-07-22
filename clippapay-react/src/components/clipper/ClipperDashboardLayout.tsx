@@ -10,6 +10,7 @@ import {
   HiUpload,
   HiCurrencyDollar,
   HiCog,
+  HiOutlineInformationCircle,
 } from 'react-icons/hi';
 import { getUserFromToken } from '@/utils/getUserFromToken'; // Adjust path as needed
 

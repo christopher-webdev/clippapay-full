@@ -248,6 +248,24 @@ export default function HomePage() {
                         transition={{ duration: 0.6, delay: 0.1 }}
                         className="bg-white p-8 rounded-2xl shadow-md hover:shadow-xl border border-gray-100 transition"
                     >
+                        {/* Advertiser-Focused Video Ad */}
+                        {/* <motion.div
+                            initial={{ opacity: 0, y: 30 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.6, delay: 0.2 }}
+                            className="col-span-full bg-black rounded-2xl shadow-lg overflow-hidden"
+                        >
+                            <video
+                                src="/video20.mp4"
+                                className="w-full h-auto object-cover"
+                                autoPlay
+                                muted
+                                loop
+                                playsInline
+                                controls
+                            />
+                        </motion.div> */}
+
                         <div className="flex items-center mb-5">
                             <div className="bg-blue-100 p-3 rounded-full mr-4">
                                 <UsersIcon className="w-7 h-7 text-blue-600" />
