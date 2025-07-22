@@ -125,7 +125,7 @@ export default function CampaignDetail() {
         />
       </div> */}
 
-      <div className="mt-6 space-y-2">
+      {/* <div className="mt-6 space-y-2">
         <h3 className="text-lg font-medium text-gray-800">Campaign Instructions (optional)</h3>
         {campaign.instructions?.length > 0 ? (
           <ul className="list-disc list-inside text-gray-700 space-y-1">
@@ -136,7 +136,7 @@ export default function CampaignDetail() {
         ) : (
           <p className="text-gray-500 italic">No instructions provided.</p>
         )}
-      </div>
+      </div> */}
 
 
       <div className="mt-6">

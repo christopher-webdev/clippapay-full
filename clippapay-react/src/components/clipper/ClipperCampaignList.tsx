@@ -21,7 +21,7 @@ interface Campaign {
   updatedAt: string;
 }
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = 50;
 
 export default function ClipperCampaignList() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);

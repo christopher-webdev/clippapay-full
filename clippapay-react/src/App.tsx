@@ -30,6 +30,7 @@ import CampaignDetail from './components/clipper/CampaignDetail.tsx';
 import Submissions from './components/clipper/ClipperSubmissions.tsx';
 import ClipperWallet from './components/clipper/ClipperWallet.tsx';
 import ClipperSettings from './components/clipper/ClipperSettings.tsx';
+import ClipperHowTo from './components/clipper/ClipperHowTo'; 
 
 // Admin
 import AdminLayout from './components/admin/AdminLayout.tsx';
@@ -92,6 +93,7 @@ export default function App() {
         <Route path="submissions" element={<Submissions />} />
         <Route path="wallet" element={<ClipperWallet />} />
         <Route path="settings" element={<ClipperSettings />} />
+        <Route path="how-to" element={<ClipperHowTo />} />
       </Route>
 
        {/* ad-worker */}

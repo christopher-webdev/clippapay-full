@@ -21,7 +21,7 @@ const PLATFORM_LABELS = {
   youtube: 'YouTube',
   facebook: 'Facebook'
 };
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 50;
 
 function campaignIsCompleted(status) {
   return status === 'completed' || status === 'cancelled';
