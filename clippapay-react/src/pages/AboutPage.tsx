@@ -85,37 +85,29 @@ export default function AboutPage() {
   useEffect(() => {
     if (videoRef.current) videoRef.current.play().catch(e => console.log("Autoplay prevented:", e));
   }, []);
-  const videoAdRef = useRef<HTMLVideoElement>(null);
   const video20Ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    const setupVideo = (video: HTMLVideoElement | null) => {
-      if (!video) return;
-      const onLoaded = () => {
-        video.currentTime = 1.5;
-      };
-      const onSeeked = () => {
-        video.pause();
-      };
-      video.addEventListener("loadedmetadata", onLoaded);
-      video.addEventListener("seeked", onSeeked);
-      video.play().catch(() => { });
+    const video = video20Ref.current;
+    if (!video) return;
 
-      return () => {
-        video.removeEventListener("loadedmetadata", onLoaded);
-        video.removeEventListener("seeked", onSeeked);
-      };
+    const handleLoaded = () => {
+      video.currentTime = 1.5;
     };
 
-    const cleanup1 = setupVideo(videoAdRef.current);
-    const cleanup2 = setupVideo(video20Ref.current);
+    const handleSeeked = () => {
+      video.pause(); // Stop exactly at 1.5s
+    };
+
+    video.addEventListener("loadedmetadata", handleLoaded);
+    video.addEventListener("seeked", handleSeeked);
+    video.play().catch(() => { });
 
     return () => {
-      cleanup1?.();
-      cleanup2?.();
+      video.removeEventListener("loadedmetadata", handleLoaded);
+      video.removeEventListener("seeked", handleSeeked);
     };
   }, []);
-
 
   return (
 
@@ -265,12 +257,13 @@ export default function AboutPage() {
               transition={{ duration: 0.5 }}
               className="bg-black rounded-2xl overflow-hidden shadow-lg"
             >
-              <video
-                ref={videoAdRef}
+             <video
+                ref={video20Ref}
                 src="/video-ad.mp4"
-                className="w-full h-80 object-cover"
+                className="w-full h-89 object-cover"
                 muted
                 playsInline
+                controls
               />
               <div className="p-4 text-left">
                 <h3 className="text-white font-semibold text-lg">What Makes ClippaPay Different?</h3>
@@ -289,11 +282,11 @@ export default function AboutPage() {
               <video
                 ref={video20Ref}
                 src="/video20.mp4"
-                className="w-full h-80 object-cover"
+                className="w-full h-89 object-cover"
                 muted
                 playsInline
+                controls
               />
-
               <div className="p-4 text-left">
                 <h3 className="text-white font-semibold text-lg">Real Campaigns. Real People.</h3>
                 <p className="text-gray-400 text-sm mt-1">See how your video spreads across platforms like TikTok, YouTube & Instagram.</p>
