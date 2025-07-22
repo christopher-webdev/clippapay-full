@@ -177,11 +177,18 @@ export default function ClipperSubmissions() {
           return;
         }
         const needsProof = b.platform === 'TikTok' || b.platform === 'YouTube';
-        if (needsProof && !b.proofVideo && !b.proofImage && formMode === 'new') {
-          setFormError(`Video or image proof is required for ${b.platform}.`);
+        if (
+          needsProof &&
+          formMode === 'new' &&
+          parseInt(b.views || '0') > 1 &&
+          !b.proofVideo &&
+          !b.proofImage
+        ) {
+          setFormError(`Video or image proof is required for ${b.platform} if views are more than 1.`);
           setFormLoading(false);
           return;
         }
+
         const fd = new FormData();
         fd.append('platform', b.platform);
         fd.append('submissionUrl', b.submissionUrl);
@@ -280,7 +287,11 @@ export default function ClipperSubmissions() {
                   <input
                     type="file"
                     accept="video/*"
-                    required={['TikTok', 'YouTube'].includes(block.platform) && formMode === 'new'}
+                    required={
+                      ['TikTok', 'YouTube'].includes(block.platform) &&
+                      formMode === 'new' &&
+                      parseInt(block.views || '0') > 1
+                    }
                     onChange={e =>
                       handleBlockChange(idx, 'proofVideo', e.target.files?.[0] || null)
                     }
@@ -297,7 +308,11 @@ export default function ClipperSubmissions() {
                   <input
                     type="file"
                     accept="image/*"
-                    required={['TikTok', 'YouTube'].includes(block.platform) && formMode === 'new'}
+                    required={
+                      ['TikTok', 'YouTube'].includes(block.platform) &&
+                      formMode === 'new' &&
+                      parseInt(block.views || '0') > 1
+                    }
                     onChange={e =>
                       handleBlockChange(idx, 'proofImage', e.target.files?.[0] || null)
                     }
