@@ -10,7 +10,6 @@ import {
   HiUpload,
   HiCurrencyDollar,
   HiCog,
-  HiOutlineInformationCircle,
 } from 'react-icons/hi';
 import { getUserFromToken } from '@/utils/getUserFromToken'; // Adjust path as needed
 
@@ -20,7 +19,6 @@ const navItems = [
   { name: 'Submissions', to: 'submissions', icon: <HiUpload className="w-5 h-5" /> },
   { name: 'Earnings', to: 'wallet', icon: <HiCurrencyDollar className="w-5 h-5" /> },
   { name: 'Settings', to: 'settings', icon: <HiCog className="w-5 h-5" /> },
-  { name: 'How to Use', to: 'how-to', icon: <HiOutlineInformationCircle className="w-5 h-5" /> },
 ];
 
 export default function ClipperDashboardLayout() {
@@ -134,7 +132,8 @@ export default function ClipperDashboardLayout() {
         <div className="flex justify-between items-center mb-6">
           <div className="mb-6">
             <h2 className="text-2xl font-bold flex items-center gap-2">
-              👋 Welcome, <span className="text-cp-blue">{user?.firstName || 'Clipper'}</span>
+              👋 Welcome, <span className="text-cp-blue">{user?.name?.split(' ')[0] || 'Clipper'}</span>
+
             </h2>
             <div className="text-sm text-gray-500 mt-1">Let’s get you earning today!</div>
           </div>

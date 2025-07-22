@@ -53,9 +53,10 @@ import AdWorkerDashboard from './components/AdWorkerDashboard';
 import WorkerLayout from './components/WorkerLayout';
 
 import ForgotPasswordPage from './pages/ForgotPasswordPage.tsx';
-
+import { usePageView } from '@/utils/usePageView';
 
 export default function App() {
+  usePageView();
   return (
     <Routes>
       {/* Public */}
