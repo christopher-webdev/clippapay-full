@@ -56,7 +56,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage.tsx';
 import Terms from './pages/Terms.tsx'
 import Privacy from './pages/Privacy.tsx'
 import { usePageView } from '@/utils/usePageView';
-
+import Contact  from './pages/Contact.tsx';
 export default function App() {
   usePageView();
   return (
@@ -68,6 +68,7 @@ export default function App() {
       <Route path="about" element={<AboutPage />} />
       <Route path="terms" element={<Terms />} />
       <Route path="privacy" element={<Privacy />} />
+      <Route path="contact" element={<Contact />} />
       <Route path="forgot-password" element={<ForgotPasswordPage />} />
       {/* initial super-admin signup (remove or secure after first use) */}
       <Route path="/admin/signup" element={<AdminSignup />} />
