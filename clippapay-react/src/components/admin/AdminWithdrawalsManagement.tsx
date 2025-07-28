@@ -100,7 +100,7 @@ export default function AdminWithdrawalsManagement() {
   // Filter and paginate data
   const filtered = requests.filter(r =>
     (filterStatus === 'all' || r.status === filterStatus) &&
-    (!searchTerm || 
+    (!searchTerm ||
       r.userEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.accountNumber.includes(searchTerm))
@@ -123,7 +123,7 @@ export default function AdminWithdrawalsManagement() {
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-2xl font-bold text-gray-800 mb-6">Withdrawals Management</h1>
-      
+
       {/* Filters */}
       <div className="flex flex-col md:flex-row gap-4 mb-6">
         <div className="relative flex-1">
@@ -143,7 +143,7 @@ export default function AdminWithdrawalsManagement() {
             className="pl-10 pr-4 py-2 border rounded-lg w-full bg-white shadow-sm"
           />
         </div>
-        
+
         <select
           value={filterStatus}
           onChange={e => {
@@ -198,7 +198,7 @@ export default function AdminWithdrawalsManagement() {
                       <span className="font-medium text-gray-900">{r.userName || r.userEmail}</span>
                       <span className="text-xs text-gray-500">{r.role}</span>
                     </div>
-                    
+
                     <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
                         <div className="text-sm text-gray-500">Amount</div>
@@ -230,7 +230,7 @@ export default function AdminWithdrawalsManagement() {
                         </div>
                       </div>
                     </div>
-                    
+
                     {r.declineReason && (
                       <div className="mt-2">
                         <div className="text-sm text-gray-500">Decline Reason</div>
@@ -238,7 +238,7 @@ export default function AdminWithdrawalsManagement() {
                       </div>
                     )}
                   </div>
-                  
+
                   <div className="flex flex-col items-end gap-2">
                     {r.status === 'pending' ? (
                       <>
@@ -281,11 +281,11 @@ export default function AdminWithdrawalsManagement() {
           >
             Previous
           </button>
-          
+
           <div className="text-sm text-gray-600">
             Page {currentPage} of {totalPages}
           </div>
-          
+
           <button
             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
             disabled={currentPage === totalPages}
@@ -307,20 +307,43 @@ export default function AdminWithdrawalsManagement() {
               {actionType === 'paid' ? 'Confirm Payment' : 'Decline Withdrawal'}
             </h3>
             <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-base">
-              <div><span className="font-semibold">User:</span> {processing.userEmail}</div>
+              <div>
+                <span className="font-semibold">User:</span> {processing.userEmail}
+              </div>
               <div>
                 <span className="font-semibold">Amount:</span> ₦{processing.amount.toLocaleString()}
               </div>
-              <div>
-                <span className="font-semibold">Bank:</span> {processing.bankName}
-              </div>
-              <div>
-                <span className="font-semibold">Account No:</span> {processing.accountNumber}
-              </div>
-              <div>
-                <span className="font-semibold">Account Name:</span> {processing.accountName}
-              </div>
+
+              {processing.usdtAddress ? (
+                <>
+                  <div>
+                    <span className="font-semibold">Payment Method:</span> USDT
+                  </div>
+                  <div>
+                    <span className="font-semibold">USDT Address:</span> {processing.usdtAddress}
+                  </div>
+                  <div>
+                    <span className="font-semibold">Network:</span> {processing.usdtNetwork}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <span className="font-semibold">Payment Method:</span> Bank Transfer
+                  </div>
+                  <div>
+                    <span className="font-semibold">Bank:</span> {processing.bankName}
+                  </div>
+                  <div>
+                    <span className="font-semibold">Account No:</span> {processing.accountNumber}
+                  </div>
+                  <div>
+                    <span className="font-semibold">Account Name:</span> {processing.accountName}
+                  </div>
+                </>
+              )}
             </div>
+
 
             {actionType === 'declined' && (
               <textarea
@@ -343,9 +366,8 @@ export default function AdminWithdrawalsManagement() {
               </button>
               <button
                 type="submit"
-                className={`px-5 py-2 rounded font-semibold text-white ${
-                  actionType === 'paid' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
-                }`}
+                className={`px-5 py-2 rounded font-semibold text-white ${actionType === 'paid' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                  }`}
               >
                 {actionType === 'paid' ? 'Mark as Paid' : 'Decline'}
               </button>
