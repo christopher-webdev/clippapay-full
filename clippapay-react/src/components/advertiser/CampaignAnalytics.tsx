@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import axios from 'axios';
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  ResponsiveContainer,
 } from 'recharts';
 
 interface Campaign {
@@ -16,7 +23,7 @@ interface ClipperPerformance {
   name: string;
   platform: string;
   views: number;
-  status: 'approved' | 'pending'; // only approved or pending
+  status: 'approved' | 'pending';
   link: string;
 }
 
@@ -29,37 +36,34 @@ export default function CampaignAnalytics() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Fetch campaign list on mount
   useEffect(() => {
-    fetch('/api/campaigns/full?fields=title')
-      .then(res => res.json())
-      .then(data => {
+    axios
+      .get('/campaigns/full?fields=title')
+      .then((res) => {
+        const data = res.data;
         setCampaigns(data);
         if (data.length > 0) setSelectedId(data[0]._id);
       })
       .catch(() => setCampaigns([]));
   }, []);
 
-  // Fetch campaign analytics when selectedId changes
   useEffect(() => {
     if (!selectedId) return;
     setLoading(true);
     setErr(null);
-    fetch(`/api/campaigns/${selectedId}/analytics`)
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to fetch');
-        return res.json();
-      })
-      .then(data => {
-        // Only allow status "approved" or "pending" in UI
+
+    axios
+      .get(`/campaigns/${selectedId}/analytics`)
+      .then((res) => {
+        const data = res.data;
         const filteredClippers = (data.clippers || [])
           .filter((c: any) => c.status === 'approved' || c.status === 'pending')
           .map((c: any) => ({
             ...c,
-            // Only show first name (if space, use only first part)
             name: c.name?.split(' ')[0] || c.name,
             status: c.status === 'approved' ? 'approved' : 'pending',
           }));
+
         setHistory(data.history || []);
         setClippers(filteredClippers);
         setTotalVerified(data.totalVerifiedViews || 0);
@@ -74,18 +78,18 @@ export default function CampaignAnalytics() {
   }, [selectedId]);
 
   return (
-    <div className="space-y-8">
-      {/* Campaign selector */}
-      <div className="max-w-sm">
-        <label className="block text-sm font-medium text-gray-700 mb-1">
+    <div className="space-y-10 p-6 sm:p-8 bg-gray-50 min-h-screen">
+      {/* Campaign Selector */}
+      <div className="max-w-md">
+        <label className="block text-sm font-semibold text-gray-700 mb-2">
           Select Campaign
         </label>
         <select
           value={selectedId}
-          onChange={e => setSelectedId(e.target.value)}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:ring-cp-blue focus:border-cp-blue"
+          onChange={(e) => setSelectedId(e.target.value)}
+          className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2 text-gray-700 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 transition"
         >
-          {campaigns.map(c => (
+          {campaigns.map((c) => (
             <option key={c._id} value={c._id}>
               {c.title}
             </option>
@@ -95,76 +99,95 @@ export default function CampaignAnalytics() {
 
       {/* Error state */}
       {err && (
-        <div className="bg-red-100 text-red-800 p-4 rounded mb-4">{err}</div>
+        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-sm animate-pulse">
+          {err}
+        </div>
       )}
 
       {/* Loading state */}
       {loading ? (
         <div className="flex items-center justify-center h-64">
-          <span className="text-xl text-gray-400">Loading campaign analytics...</span>
+          <span className="text-xl font-medium text-gray-400 animate-pulse">
+            Loading campaign analytics...
+          </span>
         </div>
       ) : (
         <>
           {/* Total Verified Views */}
-          <div className="bg-white shadow rounded-lg p-6 flex items-center justify-between">
-            <p className="text-lg font-medium text-gray-700">
+          <div className="bg-white shadow-lg rounded-2xl p-8 flex items-center justify-between hover:shadow-xl transition">
+            <p className="text-lg font-semibold text-gray-700">
               Total Verified Views
             </p>
-            <p className="text-3xl font-bold text-gray-900">
+            <p className="text-4xl font-extrabold text-indigo-600">
               {totalVerified.toLocaleString()}
             </p>
           </div>
 
           {/* Views History Graph */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <p className="text-lg font-medium text-gray-700 mb-4">
+          <div className="bg-white shadow-lg rounded-2xl p-8 hover:shadow-xl transition">
+            <p className="text-lg font-semibold text-gray-700 mb-6">
               Views Over Time
             </p>
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={300}>
               <LineChart data={history}>
-                <CartesianGrid stroke="#eee" strokeDasharray="5 5" />
+                <CartesianGrid stroke="#f0f0f0" strokeDasharray="5 5" />
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip />
-                <Line type="monotone" dataKey="views" stroke="#4F46E5" strokeWidth={3} dot={{ r: 4 }} />
+                <Line
+                  type="monotone"
+                  dataKey="views"
+                  stroke="#4F46E5"
+                  strokeWidth={3}
+                  dot={{ r: 5 }}
+                  activeDot={{ r: 7 }}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>
 
-          {/* Clipper Performance Breakdown */}
-          <div className="bg-white shadow rounded-lg p-6 overflow-x-auto">
-            <p className="text-lg font-medium text-gray-700 mb-4">
+          {/* Clipper Performance Table */}
+          <div className="bg-white shadow-lg rounded-2xl p-8 overflow-x-auto hover:shadow-xl transition">
+            <p className="text-lg font-semibold text-gray-700 mb-6">
               Clipper Performance
             </p>
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-100 sticky top-0 z-10">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-6 py-3 text-left font-semibold text-gray-600 uppercase">
                     Clipper
                   </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-6 py-3 text-left font-semibold text-gray-600 uppercase">
                     Platform
                   </th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-6 py-3 text-right font-semibold text-gray-600 uppercase">
                     Views
                   </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-6 py-3 text-left font-semibold text-gray-600 uppercase">
                     Status
                   </th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {clippers.map(c => (
-                  <tr key={c.id}>
-                    <td className="px-4 py-2 text-sm text-gray-900">{c.name}</td>
-                    <td className="px-4 py-2 text-sm text-gray-900">{c.platform}</td>
-                    <td className="px-4 py-2 text-sm text-gray-900 text-right">{c.views.toLocaleString()}</td>
-                    <td className="px-4 py-2 text-sm">
+              <tbody className="divide-y divide-gray-100">
+                {clippers.map((c, index) => (
+                  <tr
+                    key={`${c.id}-${index}`}
+                    className="hover:bg-indigo-50 transition"
+                  >
+                    <td className="px-6 py-3 font-medium text-gray-900">
+                      {c.name}
+                    </td>
+                    <td className="px-6 py-3 text-gray-700">{c.platform}</td>
+                    <td className="px-6 py-3 text-gray-900 text-right font-semibold">
+                      {c.views.toLocaleString()}
+                    </td>
+                    <td className="px-6 py-3">
                       <span
-                        className={`px-2 inline-flex text-xs font-semibold rounded-full ${c.status === 'approved'
+                        className={`px-3 py-1 inline-flex text-xs font-semibold rounded-full ${
+                          c.status === 'approved'
                             ? 'bg-green-100 text-green-800'
                             : 'bg-yellow-100 text-yellow-800'
-                          }`}
+                        }`}
                       >
                         {c.status.charAt(0).toUpperCase() + c.status.slice(1)}
                       </span>
@@ -176,31 +199,36 @@ export default function CampaignAnalytics() {
           </div>
 
           {/* Repost Link Table */}
-          <div className="bg-white shadow rounded-lg p-6 overflow-x-auto">
-            <p className="text-lg font-medium text-gray-700 mb-4">
+          <div className="bg-white shadow-lg rounded-2xl p-8 overflow-x-auto hover:shadow-xl transition">
+            <p className="text-lg font-semibold text-gray-700 mb-6">
               Repost Links
             </p>
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-100 sticky top-0 z-10">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-6 py-3 text-left font-semibold text-gray-600 uppercase">
                     Clipper
                   </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-6 py-3 text-left font-semibold text-gray-600 uppercase">
                     Link
                   </th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {clippers.map(c => (
-                  <tr key={c.id}>
-                    <td className="px-4 py-2 text-sm text-gray-900">{c.name}</td>
-                    <td className="px-4 py-2 text-sm">
+              <tbody className="divide-y divide-gray-100">
+                {clippers.map((c, index) => (
+                  <tr
+                    key={`${c.id}-link-${index}`}
+                    className="hover:bg-indigo-50 transition"
+                  >
+                    <td className="px-6 py-3 font-medium text-gray-900">
+                      {c.name}
+                    </td>
+                    <td className="px-6 py-3">
                       <a
                         href={c.link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-indigo-600 hover:underline"
+                        className="text-indigo-600 hover:underline break-all"
                       >
                         {c.link}
                       </a>

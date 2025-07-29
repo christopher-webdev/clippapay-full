@@ -10,7 +10,7 @@ import getNextAdWorker from '../utils/getNextAdWorker.js';
 
 import Clip from '../models/Clip.js';
 import Wallet from '../models/Wallet.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdvertiser } from '../middleware/auth.js';
 
 
 import ClipSubmission from '../models/ClipSubmission.js';
@@ -37,99 +37,219 @@ const upload = multer({ storage: videoStorage });
 /**
  * POST /api/campaigns
  * Create a new campaign (advertiser only), with video upload
+
  */
+router.get(
+  '/full',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      const { fields, limit } = req.query;
+      const advertiserId = req.user._id;
+
+      // Build projection
+      let projection = {};
+      if (fields) {
+        fields.split(',').forEach((f) => (projection[f] = 1));
+      } else {
+        // Default for dropdown/search
+        projection = { title: 1, _id: 1 };
+      }
+
+      const qLimit = limit ? parseInt(limit, 10) : 100;
+
+      // Filter campaigns by advertiser
+      const campaigns = await Campaign.find({ advertiser: advertiserId }, projection)
+        .sort({ createdAt: -1 })
+        .limit(qLimit);
+
+      res.json(campaigns);
+    } catch (err) {
+      console.error('Error fetching campaigns:', err);
+      res.status(500).json({ error: 'Failed to fetch campaigns' });
+    }
+  }
+);
+
+/**
+ * GET /:id/analytics
+ * Fetch analytics for a single campaign (restricted to the owner advertiser)
+ */
+router.get(
+  '/:id/analytics',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const advertiserId = req.user._id;
+
+      // Ensure this campaign belongs to the advertiser
+      const campaign = await Campaign.findOne({ _id: id, advertiser: advertiserId });
+      if (!campaign) {
+        return res.status(403).json({ error: 'Not authorized to view this campaign' });
+      }
+
+      // 1. Fetch all submissions for this campaign
+      const submissions = await ClipSubmission.find({ campaign: id }).populate('clipper');
+
+      // 2. Flatten all proofs
+      let allProofs = [];
+      submissions.forEach((sub) => {
+        (sub.proofs || []).forEach((proof) => {
+          allProofs.push({
+            proof,
+            clipper: sub.clipper,
+          });
+        });
+      });
+
+      // 3. History by date (approved proofs, grouped by day)
+      const historyMap = {};
+      let totalVerifiedViews = 0;
+
+      allProofs.forEach(({ proof }) => {
+        if (proof.status === 'approved' && typeof proof.verifiedViews === 'number') {
+          totalVerifiedViews += proof.verifiedViews;
+          const d = proof.lastVerified || proof.updatedAt || proof.createdAt;
+          if (!d) return;
+          const dateStr = new Date(d).toISOString().slice(0, 10); // YYYY-MM-DD
+          if (!historyMap[dateStr]) historyMap[dateStr] = 0;
+          historyMap[dateStr] += proof.verifiedViews;
+        }
+      });
+
+      const history = Object.entries(historyMap)
+        .map(([date, views]) => ({ date, views }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      // 4. Clipper Performance Table
+      const clippers = await Promise.all(
+        allProofs.map(async ({ proof, clipper }) => {
+          let clipperName = '';
+          if (clipper && clipper.firstName) {
+            clipperName = `${clipper.firstName} ${clipper.lastName || ''}`.trim();
+          } else if (clipper && clipper.contactName) {
+            clipperName = clipper.contactName;
+          } else if (clipper && clipper.email) {
+            clipperName = clipper.email;
+          }
+          return {
+            id: clipper?._id?.toString() || '',
+            name: clipperName || 'Anonymous',
+            platform: proof.platform,
+            views: proof.verifiedViews || proof.views || 0,
+            status: proof.status,
+            link: proof.submissionUrl,
+          };
+        })
+      );
+
+      res.json({
+        history,
+        clippers,
+        totalVerifiedViews,
+      });
+    } catch (err) {
+      console.error('Error fetching campaign analytics:', err);
+      res.status(500).json({ error: 'Failed to fetch analytics.' });
+    }
+  }
+);
+
 
 
 // ...
-router.get('/full',  async (req, res) => {
-  try {
-    const { fields, limit } = req.query;
-    let projection = {};
-    if (fields) {
-      fields.split(',').forEach(f => projection[f] = 1);
-    } else {
-      // Default fields for dropdown/search
-      projection = { title: 1, _id: 1 };
-    }
-    const qLimit = limit ? parseInt(limit) : 100;
+// router.get('/full',  async (req, res) => {
+//   try {
+//     const { fields, limit } = req.query;
+//     let projection = {};
+//     if (fields) {
+//       fields.split(',').forEach(f => projection[f] = 1);
+//     } else {
+//       // Default fields for dropdown/search
+//       projection = { title: 1, _id: 1 };
+//     }
+//     const qLimit = limit ? parseInt(limit) : 100;
 
-    const campaigns = await Campaign.find({}, projection)
-      .sort({ createdAt: -1 })
-      .limit(qLimit);
-    res.json(campaigns);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch campaigns' });
-  }
-});
+//     const campaigns = await Campaign.find({}, projection)
+//       .sort({ createdAt: -1 })
+//       .limit(qLimit);
+//     res.json(campaigns);
+//   } catch (err) {
+//     res.status(500).json({ error: 'Failed to fetch campaigns' });
+//   }
+// });
 
-router.get('/:id/analytics', async (req, res) => {
-  try {
-    const { id } = req.params;
+// router.get('/:id/analytics', async (req, res) => {
+//   try {
+//     const { id } = req.params;
 
-    // 1. Fetch all submissions for campaign
-    const submissions = await ClipSubmission.find({ campaign: id }).populate('clipper');
+//     // 1. Fetch all submissions for campaign
+//     const submissions = await ClipSubmission.find({ campaign: id }).populate('clipper');
 
-    // 2. Flatten all proofs (each proof is a post on a platform)
-    let allProofs = [];
-    submissions.forEach(sub => {
-      sub.proofs.forEach(proof => {
-        allProofs.push({
-          proof,
-          clipper: sub.clipper,
-        });
-      });
-    });
+//     // 2. Flatten all proofs (each proof is a post on a platform)
+//     let allProofs = [];
+//     submissions.forEach(sub => {
+//       sub.proofs.forEach(proof => {
+//         allProofs.push({
+//           proof,
+//           clipper: sub.clipper,
+//         });
+//       });
+//     });
 
-    // 3. History by date (approved proofs, group by day)
-    // You can use 'lastVerified' or createdAt as the date, fallback to createdAt if not present
-    const historyMap = {};
-    let totalVerifiedViews = 0;
-    allProofs.forEach(({ proof }) => {
-      if (proof.status === 'approved' && typeof proof.verifiedViews === 'number') {
-        totalVerifiedViews += proof.verifiedViews;
-        const d = proof.lastVerified || proof.updatedAt || proof.createdAt;
-        if (!d) return;
-        const dateStr = new Date(d).toISOString().slice(0, 10); // YYYY-MM-DD
-        if (!historyMap[dateStr]) historyMap[dateStr] = 0;
-        historyMap[dateStr] += proof.verifiedViews;
-      }
-    });
-    // Convert to array & sort by date
-    const history = Object.entries(historyMap)
-      .map(([date, views]) => ({ date, views }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+//     // 3. History by date (approved proofs, group by day)
+//     // You can use 'lastVerified' or createdAt as the date, fallback to createdAt if not present
+//     const historyMap = {};
+//     let totalVerifiedViews = 0;
+//     allProofs.forEach(({ proof }) => {
+//       if (proof.status === 'approved' && typeof proof.verifiedViews === 'number') {
+//         totalVerifiedViews += proof.verifiedViews;
+//         const d = proof.lastVerified || proof.updatedAt || proof.createdAt;
+//         if (!d) return;
+//         const dateStr = new Date(d).toISOString().slice(0, 10); // YYYY-MM-DD
+//         if (!historyMap[dateStr]) historyMap[dateStr] = 0;
+//         historyMap[dateStr] += proof.verifiedViews;
+//       }
+//     });
+//     // Convert to array & sort by date
+//     const history = Object.entries(historyMap)
+//       .map(([date, views]) => ({ date, views }))
+//       .sort((a, b) => a.date.localeCompare(b.date));
 
-    // 4. Clipper Performance Table
-    // Each proof becomes a row in table, with clipper name, platform, views, status, link
-    const clippers = await Promise.all(allProofs.map(async ({ proof, clipper }) => {
-      let clipperName = "";
-      if (clipper && clipper.firstName) {
-        clipperName = `${clipper.firstName} ${clipper.lastName || ''}`.trim();
-      } else if (clipper && clipper.contactName) {
-        clipperName = clipper.contactName;
-      } else if (clipper && clipper.email) {
-        clipperName = clipper.email;
-      }
-      return {
-        id: clipper?._id?.toString() || "",
-        name: clipperName || "Anonymous",
-        platform: proof.platform,
-        views: proof.verifiedViews || proof.views || 0,
-        status: proof.status,
-        link: proof.submissionUrl,
-      };
-    }));
+//     // 4. Clipper Performance Table
+//     // Each proof becomes a row in table, with clipper name, platform, views, status, link
+//     const clippers = await Promise.all(allProofs.map(async ({ proof, clipper }) => {
+//       let clipperName = "";
+//       if (clipper && clipper.firstName) {
+//         clipperName = `${clipper.firstName} ${clipper.lastName || ''}`.trim();
+//       } else if (clipper && clipper.contactName) {
+//         clipperName = clipper.contactName;
+//       } else if (clipper && clipper.email) {
+//         clipperName = clipper.email;
+//       }
+//       return {
+//         id: clipper?._id?.toString() || "",
+//         name: clipperName || "Anonymous",
+//         platform: proof.platform,
+//         views: proof.verifiedViews || proof.views || 0,
+//         status: proof.status,
+//         link: proof.submissionUrl,
+//       };
+//     }));
 
-    res.json({
-      history,
-      clippers,
-      totalVerifiedViews,
-    });
-  } catch (err) {
-    console.error('Error fetching campaign analytics:', err);
-    res.status(500).json({ error: 'Failed to fetch analytics.' });
-  }
-});
+//     res.json({
+//       history,
+//       clippers,
+//       totalVerifiedViews,
+//     });
+//   } catch (err) {
+//     console.error('Error fetching campaign analytics:', err);
+//     res.status(500).json({ error: 'Failed to fetch analytics.' });
+//   }
+// });
 
 
 
