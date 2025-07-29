@@ -33,6 +33,9 @@ export default function ClipperWallet() {
   const [paymentMethod, setPaymentMethod] = useState<'bank' | 'usdt'>('bank');
   const [usdtAddress, setUsdtAddress] = useState('');
   const [usdtNetwork, setUsdtNetwork] = useState('');
+  const usdtRate = 1500; // ₦1500 per 1 USDT
+  const usdtEquivalent = wdrAmt > 0 ? (wdrAmt / usdtRate).toFixed(2) : '0.00';
+
 
   // fetch wallet & withdrawals
   const fetchAll = async () => {
@@ -283,6 +286,9 @@ export default function ClipperWallet() {
               {/* USDT Wallet Fields */}
               {paymentMethod === 'usdt' && (
                 <>
+                  <div className="text-sm text-gray-600 mb-2">
+                    You will receive approximately <span className="font-semibold text-black">{usdtEquivalent} USDT</span> (₦{usdtRate} = 1 USDT)
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">USDT Wallet Address</label>
                     <input
@@ -305,6 +311,7 @@ export default function ClipperWallet() {
                   </div>
                 </>
               )}
+
 
               {/* ACTION BUTTONS */}
               <div className="flex justify-end space-x-3 pt-4">

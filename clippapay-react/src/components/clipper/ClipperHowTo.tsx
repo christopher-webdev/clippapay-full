@@ -60,7 +60,7 @@ const steps: Step[] = [
     img: img13,
     title: "Update Your Views",
     text:
-      "Once your views increase, go to the Submissions tab and click Update.\n\nUpload proof:\n• YouTube/TikTok: short video from Studio\n• Instagram/Facebook: screenshot showing views\n\nUpdate the view count, then click Submit again.",
+      "Once your views increase, go to the Submissions tab and click Update.\n\nUpload proof:\n• YouTube/TikTok: short video from Studio\n• Instagram/Facebook: screenshot showing views\n\nUpdate the view count, then click Submit again.\n\n💡 Please update as soon as possible — ideally every 100 views — to avoid missing rewards.",
     icon: <HiArrowUpTray />,
     accent: "purple",
   },
