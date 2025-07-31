@@ -159,7 +159,7 @@ export default function ClipperCampaignList() {
                     <button
                       className="bg-cp-blue text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition"
                     >
-                      View Clips
+                      Join
                     </button>
                   </div>
                 </div>
