@@ -421,7 +421,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
 
             {/* Upload Clip Form */}
             {(details.campaign.adWorkerStatus === 'processing' || details.campaign.adWorkerStatus === 'ready') &&
-              (!clips || clips.length < 6) && (
+               (
                 <form
                   onSubmit={uploadClip}
                   className="mt-6 flex flex-col sm:flex-row items-center gap-3"
