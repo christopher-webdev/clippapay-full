@@ -1,3 +1,4 @@
+//component adworker
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Briefcase, Film, User, Loader2 } from 'lucide-react'; // Example icons
@@ -53,6 +54,7 @@ export default function AdWorkerDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+
   const fetchCampaigns = async () => {
     setLoading(true);
     try {
@@ -88,7 +90,7 @@ export default function AdWorkerDashboard() {
             <div className="flex items-center gap-3 mb-4">
               <Briefcase className="w-7 h-7 text-cp-blue/70" />
               <div>
-                <div className="font-semibold text-lg text-gray-900 truncate">{c.title}</div>
+                <div className="font-semibold text-lg text-gray-900">{c.title}</div>
                 <div className="text-gray-500 text-sm flex items-center gap-2">
                   <User className="w-4 h-4 inline" />
                   {
@@ -178,6 +180,37 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
       }, 1200);
     } catch {
       setError('Could not update status.');
+    }
+  };
+  const uploadThumbnail = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setUploading(true);
+    setError(null);
+    setSuccess(null);
+
+    const input = (e.currentTarget.elements.namedItem('thumbnail') as HTMLInputElement);
+    if (!input.files || input.files.length === 0) {
+      setError('Please select a thumbnail image');
+      setUploading(false);
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('thumbnail', input.files[0]);
+
+    try {
+      const res = await axios.post(`/campaigns/${campaignId}/thumbnail`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      setSuccess('Thumbnail uploaded successfully!');
+      // Refresh the details to show the new thumbnail
+      const detailsRes = await axios.get(`/campaigns/${campaignId}/details`);
+      setDetails(detailsRes.data);
+    } catch (err) {
+      setError('Failed to upload thumbnail');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -298,7 +331,53 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
                 </button>
               </div>
             )}
-
+            {/* Thumbnail Upload Section */}
+            <div className="mb-4">
+              <h3 className="font-medium mb-2">Campaign Thumbnail</h3>
+              {details.campaign.thumb_url ? (
+                <div className="flex items-center gap-4 mb-3">
+                  <img
+                    src={details.campaign.thumb_url}
+                    alt="Campaign thumbnail"
+                    className="w-20 h-20 object-cover rounded"
+                  />
+                  <button
+                    onClick={async () => {
+                      try {
+                        await axios.delete(`/campaigns/${campaignId}/thumbnail`);
+                        setSuccess('Thumbnail removed!');
+                        const detailsRes = await axios.get(`/campaigns/${campaignId}/details`);
+                        setDetails(detailsRes.data);
+                      } catch {
+                        setError('Failed to remove thumbnail');
+                      }
+                    }}
+                    className="text-red-600 text-sm hover:underline"
+                    disabled={uploading}
+                  >
+                    Remove Thumbnail
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={uploadThumbnail} className="flex items-center gap-3">
+                  <input
+                    type="file"
+                    name="thumbnail"
+                    accept="image/*"
+                    required
+                    disabled={uploading}
+                    className="block border px-2 py-1 rounded text-sm"
+                  />
+                  <button
+                    type="submit"
+                    disabled={uploading}
+                    className="px-3 py-1 bg-cp-blue text-white rounded shadow hover:bg-cp-indigo text-sm"
+                  >
+                    {uploading ? 'Uploading...' : 'Upload Thumbnail'}
+                  </button>
+                </form>
+              )}
+            </div>
             {/* Campaign Info Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-gray-700 mb-6">
               <Info label="Platforms" value={details.campaign.platforms.join(', ')} />

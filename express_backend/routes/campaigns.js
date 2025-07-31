@@ -33,7 +33,28 @@ const videoStorage = multer.diskStorage({
 });
 const upload = multer({ storage: videoStorage });
 // ──────────────────────────────────────────────────────────────────────────────
+// Add this near your other multer setup (around line 20)
 
+const thumbnailStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, path.join(process.cwd(), 'uploads/thumbnails')),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const unique = `${Date.now()}-${Math.round(Math.random()*1e9)}`;
+    cb(null, unique + ext);
+  }
+});
+const thumbnailUpload = multer({ 
+  storage: thumbnailStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPEG, PNG, and WebP images are allowed'));
+    }
+  }
+});
 /**
  * POST /api/campaigns
  * Create a new campaign (advertiser only), with video upload
@@ -157,167 +178,6 @@ router.get(
     }
   }
 );
-
-
-
-// ...
-// router.get('/full',  async (req, res) => {
-//   try {
-//     const { fields, limit } = req.query;
-//     let projection = {};
-//     if (fields) {
-//       fields.split(',').forEach(f => projection[f] = 1);
-//     } else {
-//       // Default fields for dropdown/search
-//       projection = { title: 1, _id: 1 };
-//     }
-//     const qLimit = limit ? parseInt(limit) : 100;
-
-//     const campaigns = await Campaign.find({}, projection)
-//       .sort({ createdAt: -1 })
-//       .limit(qLimit);
-//     res.json(campaigns);
-//   } catch (err) {
-//     res.status(500).json({ error: 'Failed to fetch campaigns' });
-//   }
-// });
-
-// router.get('/:id/analytics', async (req, res) => {
-//   try {
-//     const { id } = req.params;
-
-//     // 1. Fetch all submissions for campaign
-//     const submissions = await ClipSubmission.find({ campaign: id }).populate('clipper');
-
-//     // 2. Flatten all proofs (each proof is a post on a platform)
-//     let allProofs = [];
-//     submissions.forEach(sub => {
-//       sub.proofs.forEach(proof => {
-//         allProofs.push({
-//           proof,
-//           clipper: sub.clipper,
-//         });
-//       });
-//     });
-
-//     // 3. History by date (approved proofs, group by day)
-//     // You can use 'lastVerified' or createdAt as the date, fallback to createdAt if not present
-//     const historyMap = {};
-//     let totalVerifiedViews = 0;
-//     allProofs.forEach(({ proof }) => {
-//       if (proof.status === 'approved' && typeof proof.verifiedViews === 'number') {
-//         totalVerifiedViews += proof.verifiedViews;
-//         const d = proof.lastVerified || proof.updatedAt || proof.createdAt;
-//         if (!d) return;
-//         const dateStr = new Date(d).toISOString().slice(0, 10); // YYYY-MM-DD
-//         if (!historyMap[dateStr]) historyMap[dateStr] = 0;
-//         historyMap[dateStr] += proof.verifiedViews;
-//       }
-//     });
-//     // Convert to array & sort by date
-//     const history = Object.entries(historyMap)
-//       .map(([date, views]) => ({ date, views }))
-//       .sort((a, b) => a.date.localeCompare(b.date));
-
-//     // 4. Clipper Performance Table
-//     // Each proof becomes a row in table, with clipper name, platform, views, status, link
-//     const clippers = await Promise.all(allProofs.map(async ({ proof, clipper }) => {
-//       let clipperName = "";
-//       if (clipper && clipper.firstName) {
-//         clipperName = `${clipper.firstName} ${clipper.lastName || ''}`.trim();
-//       } else if (clipper && clipper.contactName) {
-//         clipperName = clipper.contactName;
-//       } else if (clipper && clipper.email) {
-//         clipperName = clipper.email;
-//       }
-//       return {
-//         id: clipper?._id?.toString() || "",
-//         name: clipperName || "Anonymous",
-//         platform: proof.platform,
-//         views: proof.verifiedViews || proof.views || 0,
-//         status: proof.status,
-//         link: proof.submissionUrl,
-//       };
-//     }));
-
-//     res.json({
-//       history,
-//       clippers,
-//       totalVerifiedViews,
-//     });
-//   } catch (err) {
-//     console.error('Error fetching campaign analytics:', err);
-//     res.status(500).json({ error: 'Failed to fetch analytics.' });
-//   }
-// });
-
-
-
-// router.post(
-//   '/',
-//   requireAuth,
-//   upload.single('video'),
-//   async (req, res) => {
-//     try {
-//       const {
-//         title, cpv, budget, platforms, countries, hashtags,
-//         directions, cta_url, categories, numClipsSuggested,
-//       } = req.body;
-
-//       const ratePerView = parseFloat(cpv);  // should be 0.6
-//       const budgetVal = parseFloat(budget);
-//       const viewsPurchased = Math.floor(budgetVal / ratePerView);
-
-//       const campaignData = {
-//         advertiser: req.user._id,
-//         title,
-//         rate_per_1000: 600, // for reference
-//         clipper_cpm: 200,   // for reference
-//         rate_per_view: ratePerView,
-//         budget_total: budgetVal,
-//         budget_remaining: budgetVal,
-//         views_purchased: viewsPurchased,
-//         views_left: viewsPurchased,
-//         platforms: JSON.parse(platforms),
-//         countries: JSON.parse(countries),
-//         hashtags: JSON.parse(hashtags),
-//         directions: JSON.parse(directions),
-//         cta_url: cta_url || undefined,
-//         categories: JSON.parse(categories),
-//         numClipsSuggested: parseInt(numClipsSuggested, 10),
-//       };
-
-//       if (req.file) {
-//         campaignData.video_url = `/uploads/videos/${req.file.filename}`;
-//       }
-
-//       // Assign ad worker here:
-//       const worker = await getNextAdWorker();
-//       if (worker) campaignData.assignedWorker = worker._id;
-
-//       // ---- WALLET LOGIC ----
-//       // 1. Find advertiser's wallet
-//       const advertiserWallet = await Wallet.findOne({ user: req.user._id });
-//       if (!advertiserWallet) return res.status(400).json({ error: 'Wallet not found.' });
-
-//       // 2. Check balance
-//       if (advertiserWallet.balance < budgetVal)
-//         return res.status(400).json({ error: 'Insufficient wallet balance.' });
-
-//       // 3. Move budget to escrow
-//       await advertiserWallet.lockEscrow(budgetVal); // throws if insufficient
-
-//       // 4. Create campaign
-//       const campaign = new Campaign(campaignData);
-//       await campaign.save();
-
-//       return res.status(201).json(campaign);
-//     } catch (err) {
-//       console.error(err);
-//       return res.status(500).json({ error: 'Server error creating campaign.' });
-//     }
-//   }
-// );
 
 router.post(
   '/',
@@ -575,28 +435,6 @@ router.put(
   }
 );
 
-/**
- * DELETE /api/campaigns/:id
- * Delete your own campaign (advertiser only)
- */
-// router.delete(
-//   '/:id',
-//   requireAuth,
- 
-//   async (req, res) => {
-//     try {
-//       const camp = await Campaign.findById(req.params.id);
-//       if (!camp || !camp.advertiser.equals(req.user._id)) {
-//         return res.status(404).json({ error: 'Campaign not found or access denied.' });
-//       }
-//       await camp.remove();
-//       return res.status(204).end();
-//     } catch (err) {
-//       console.error(err);
-//       return res.status(500).json({ error: 'Server error deleting campaign.' });
-//     }
-//   }
-// );
 router.delete(
   '/:id',
   requireAuth,
@@ -670,4 +508,124 @@ router.get('/:id/details', requireAuth, async (req, res) => {
 
 
 
+/**
+ * POST /api/campaigns/:id/thumbnail
+ * Upload or update a thumbnail for a campaign
+ * - Advertisers can update their own campaigns
+ * - Ad-workers can update campaigns assigned to them
+ */
+router.post(
+  '/:id/thumbnail',
+  requireAuth,
+  thumbnailUpload.single('thumbnail'),
+  async (req, res) => {
+    try {
+      const campaign = await Campaign.findById(req.params.id);
+      if (!campaign) {
+        return res.status(404).json({ error: 'Campaign not found' });
+      }
+
+      // Authorization check
+      const isAdvertiser = req.user.role === 'advertiser' && 
+                          campaign.advertiser.equals(req.user._id);
+      const isAssignedWorker = req.user.role === 'ad-worker' && 
+                             campaign.assignedWorker?.equals(req.user._id);
+      
+      if (!isAdvertiser && !isAssignedWorker) {
+        return res.status(403).json({ error: 'Not authorized to update this campaign' });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'No thumbnail file provided' });
+      }
+
+      // Delete old thumbnail if it exists
+      if (campaign.thumb_url) {
+        const oldPath = path.join(process.cwd(), campaign.thumb_url);
+        try {
+          await fs.promises.unlink(oldPath);
+        } catch (err) {
+          console.warn('Failed to delete old thumbnail:', err.message);
+        }
+      }
+
+      // Update campaign with new thumbnail path
+      campaign.thumb_url = `/uploads/thumbnails/${req.file.filename}`;
+      await campaign.save();
+
+      res.json({ 
+        thumb_url: campaign.thumb_url,
+        message: 'Thumbnail uploaded successfully' 
+      });
+
+    } catch (err) {
+      console.error('Thumbnail upload error:', err);
+      
+      // Clean up uploaded file if there was an error
+      if (req.file) {
+        try {
+          await fs.promises.unlink(req.file.path);
+        } catch (cleanupErr) {
+          console.error('Failed to clean up thumbnail:', cleanupErr);
+        }
+      }
+
+      const status = err.message.includes('Not authorized') ? 403 : 
+                    err.message.includes('allowed') ? 400 : 500;
+      
+      res.status(status).json({ 
+        error: err.message || 'Failed to upload thumbnail' 
+      });
+    }
+  }
+);
+
+/**
+ * DELETE /api/campaigns/:id/thumbnail
+ * Remove the thumbnail from a campaign
+ */
+router.delete(
+  '/:id/thumbnail',
+  requireAuth,
+  async (req, res) => {
+    try {
+      const campaign = await Campaign.findById(req.params.id);
+      if (!campaign) {
+        return res.status(404).json({ error: 'Campaign not found' });
+      }
+
+      // Authorization check (same as upload)
+      const isAdvertiser = req.user.role === 'advertiser' && 
+                          campaign.advertiser.equals(req.user._id);
+      const isAssignedWorker = req.user.role === 'ad-worker' && 
+                             campaign.assignedWorker?.equals(req.user._id);
+      
+      if (!isAdvertiser && !isAssignedWorker) {
+        return res.status(403).json({ error: 'Not authorized to update this campaign' });
+      }
+
+      if (!campaign.thumb_url) {
+        return res.status(400).json({ error: 'No thumbnail to remove' });
+      }
+
+      // Delete the file
+      const thumbPath = path.join(process.cwd(), campaign.thumb_url);
+      try {
+        await fs.promises.unlink(thumbPath);
+      } catch (err) {
+        console.warn('Failed to delete thumbnail file:', err.message);
+      }
+
+      // Update campaign
+      campaign.thumb_url = '';
+      await campaign.save();
+
+      res.json({ message: 'Thumbnail removed successfully' });
+
+    } catch (err) {
+      console.error('Thumbnail removal error:', err);
+      res.status(500).json({ error: 'Failed to remove thumbnail' });
+    }
+  }
+);
 export default router;

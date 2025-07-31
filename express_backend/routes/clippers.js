@@ -125,32 +125,6 @@ router.patch('/:id/update-proof/:proofId', requireAuth, uploadProof.any(), async
   }
 });
 
-// router.post('/:id/submit-clip', requireAuth, uploadProof.single('proofVideo'), async (req, res) => {
-//   try {
-//     const { submissionUrl, platform, views } = req.body;
-//     const clipper = req.user._id;
-//     const campaign = req.params.id;
-//     const proofVideo = req.file ? `api/uploads/proofs/${req.file.filename}` : undefined;
-
-//     let sub = await ClipSubmission.findOne({ campaign, clipper, platform, submissionUrl });
-//     if (sub) {
-//       // Update views, proofVideo if needed, re-verify
-//       sub.views = views || sub.views;
-//       if (proofVideo) sub.proofVideo = proofVideo;
-//       sub.status = 'pending';
-//       await sub.save();
-//       return res.json(sub);
-//     }
-
-//     // New link/post
-//     sub = new ClipSubmission({ campaign, clipper, platform, submissionUrl, views, proofVideo });
-//     await sub.save();
-//     res.status(201).json(sub);
-//   } catch (err) {
-//     res.status(500).json({ error: 'Could not submit.' });
-//   }
-// });
-
 
 /**
  * GET /api/clippers/overview
@@ -223,23 +197,6 @@ router.get('/my-submissions', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Could not fetch submissions.' });
   }
 });
-// routes/clippers.js
-// router.get('/my-submissions', requireAuth, async (req, res) => {
-//   try {
-//     const subs = await Submission.find({ clipper: req.user._id })
-//       .populate({
-//         path: 'campaign',
-//         select: 'title thumb_url video_url rate_per_1000 clipper_cpm budget_total budget_remaining views_purchased views_left platforms countries hashtags directions cta_url categories adWorkerStatus clippersCount status',
-//         // Optionally also populate advertiser for richer details
-//         populate: { path: 'advertiser', select: 'contactName email' }
-//       })
-//       .sort({ createdAt: -1 });
-//     res.json(subs);
-//   } catch (err) {
-//     res.status(500).json({ error: 'Could not fetch submissions.' });
-//   }
-// });
-
 
 
 /**

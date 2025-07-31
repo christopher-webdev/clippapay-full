@@ -57,28 +57,20 @@ export default function ClipperCampaignList() {
       }
     };
 
-    // Initial fetch
     fetchAll();
-
-    // Set up interval for periodic fetching
     const intervalId = setInterval(fetchAll, 15000); // 15 seconds
-
-    // Clean up interval on component unmount
     return () => clearInterval(intervalId);
   }, []);
 
   const navigate = (url: string) => window.location.href = url;
 
-  // Filter campaigns by search
   const filtered = campaigns.filter(c =>
     c.title.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Pagination calculations
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // Handle search or campaign count change: reset to page 1
   useEffect(() => { setPage(1); }, [search, campaigns.length]);
 
   return (
@@ -102,7 +94,8 @@ export default function ClipperCampaignList() {
         <div className="text-center py-10 text-red-500">{error}</div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-7">
+          <div className="flex flex-wrap justify-center sm:justify-start gap-4">
+
             {paged.map(c => {
               const percentCompleted = 1 - c.views_left / c.views_purchased;
               const is80Done = percentCompleted >= 0.8;
@@ -112,104 +105,78 @@ export default function ClipperCampaignList() {
               return (
                 <div
                   key={c._id}
-                  className="bg-white rounded-2xl border shadow-sm hover:shadow-xl transition overflow-hidden flex flex-col px-4 py-4 relative"
-                  style={{ minWidth: 270 }}
+                  className="relative rounded-xl overflow-hidden shadow-md hover:shadow-xl transition group cursor-pointer"
+                  style={{ width: '260px', height: '330px', backgroundColor: '#1a1f2b' }}
+                  onClick={() => {
+                    if (!is80Done && !fullyCompleted) {
+                      navigate(`/dashboard/clipper/campaigns/${c._id}`);
+                    }
+                  }}
                 >
-                  {/* Icon + Status Row */}
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center">
-                        <HiOutlineFilm className="w-6 h-6 text-gray-300" />
-                      </div>
-                      <span className="font-semibold text-lg text-gray-900">{c.title}</span>
-                    </div>
-                    <span
-                      className={`px-3 py-1 text-xs rounded-full font-medium
-                        ${c.status === 'active'
-                          ? 'bg-green-100 text-green-700'
-                          : c.status === 'completed'
-                            ? 'bg-gray-100 text-gray-500'
-                            : 'bg-yellow-100 text-yellow-700'
-                        }`}
-                    >
-                      {c.status === 'active' ? 'Live' : c.status.charAt(0).toUpperCase() + c.status.slice(1)}
-                    </span>
+                  {/* CPM Badge */}
+                  <div className="absolute top-2 left-2 bg-cp-blue text-white text-xs font-semibold px-3 py-1 rounded-full z-10">
+                    ₦{c.clipper_cpm || c.rate_per_1000} / 1k
                   </div>
 
-                  {/* Details Grid */}
-                  <div className="grid grid-cols-2 gap-2 mb-2 text-[13px] text-gray-700">
-                    <div>
-                      <span className="block font-medium">Budget:</span>
-                      ₦{c.budget_total.toLocaleString()}
-                    </div>
-                    <div>
-                      <span className="block font-medium">Budget Rem.:</span>
-                      ₦{c.budget_remaining.toLocaleString()}
-                    </div>
-                    <div>
-                      <span className="block font-medium">Views Purchased:</span>
-                      {c.views_purchased.toLocaleString()}
-                    </div>
-                    <div>
-                      <span className="block font-medium">Views Left:</span>
-                      {c.views_left.toLocaleString()}
-                    </div>
-                    <div>
-                      <span className="block font-medium">Created:</span>
-                      {new Date(c.createdAt).toLocaleDateString()}
-                    </div>
+                  {/* LIVE Badge */}
+                  <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse z-10">
+                    LIVE
                   </div>
 
-                  {/* Progress bar */}
-                  <div className="mb-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-gray-500">Progress</span>
-                      <span className="text-xs text-gray-700 font-semibold">{Math.round(percentCompleted * 100)}%</span>
-                    </div>
-                    <div className="w-full bg-gray-200 h-2 rounded-lg">
+                  {/* Thumbnail */}
+                  <div className="flex mt-8 items-center justify-center h-48 px-4 pt-8">
+                    {c.thumb_url ? (
+                      <img
+                        src={c.thumb_url}
+                        alt={c.title}
+                        className="object-contain h-49 w-49 rounded-md"
+                      />
+                    ) : (
+                      <HiOutlineFilm className="text-gray-500 w-49 h-49" />
+                    )}
+                  </div>
+
+                  {/* Title */}
+                  <div className="text-white text-xl font-medium text-center px-3 mt-0 truncate">
+                    {c.title}
+                  </div>
+
+                  {/* Progress */}
+                  <div className="absolute bottom-12 left-0 right-0 px-4 z-10">
+                    <div className="w-full bg-gray-700 h-1 rounded-full mb-1">
                       <div
-                        className={`h-2 rounded-lg ${percentCompleted === 1
-                          ? 'bg-gray-400'
-                          : 'bg-cp-blue'
-                          }`}
+                        className="h-1 bg-cp-blue rounded-full"
                         style={{ width: `${Math.round(percentCompleted * 100)}%` }}
                       />
                     </div>
+                    <div className="text-gray-300 text-xs text-center">
+                      {Math.round(percentCompleted * 100)}% completed
+                    </div>
                   </div>
 
-                  {/* Button */}
-                  <button
-                    disabled={is80Done || fullyCompleted}
-                    className={`mt-2 w-full text-center px-4 py-2 rounded-lg font-semibold ${!is80Done && !fullyCompleted
-                        ? 'bg-cp-blue text-white hover:bg-cp-indigo'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      } transition`}
-                    onClick={() => {
-                      if (!is80Done && !fullyCompleted) {
-                        navigate(`/dashboard/clipper/campaigns/${c._id}`);
-                      }
-                    }}
-                  >
-                    View Clips
-                  </button>
-                  {(is80Done || fullyCompleted) && (
-                    <div className="text-xs text-red-500 mt-2 text-center font-medium">
-                      {fullyCompleted
-                        ? "Campaign fully completed"
-                        : "Campaign is now locked for new submissions"}
-                    </div>
-                  )}
+                  {/* View Button */}
+                  <div className="absolute bottom-3 left-1/2 transform -translate-x-1/2 z-10">
+                    <button
+                      className="bg-cp-blue text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition"
+                    >
+                      View Clips
+                    </button>
+                  </div>
                 </div>
+
+
+
               );
             })}
+
             {paged.length === 0 && (
-              <div className="text-center col-span-full text-gray-500 py-10">
+              <div className="text-center w-full text-gray-500 py-10">
                 No campaigns match your search.
               </div>
             )}
           </div>
 
-          {/* Pagination Controls & Footer */}
+          {/* Pagination Controls */}
           <div className="flex flex-col sm:flex-row justify-between items-center mt-8 gap-3">
             <div className="text-sm text-gray-500">
               Page {page} of {totalPages}
@@ -232,7 +199,9 @@ export default function ClipperCampaignList() {
             </div>
           </div>
         </>
-      )}
-    </div>
+      )
+      }
+    </div >
   );
+
 }
