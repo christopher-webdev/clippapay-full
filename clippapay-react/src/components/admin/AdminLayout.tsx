@@ -30,6 +30,8 @@ const navItems: NavItem[] = [
   { name: 'Wallets', to: '/dashboard/admin/wallets', icon: <HiOutlineCash className="w-5 h-5" /> },
   { name: 'Withdrawals', to: '/dashboard/admin/withdrawals', icon: <HiOutlineExclamationCircle className="w-5 h-5" /> },
   { name: 'Settings', to: '/dashboard/admin/settings', icon: <HiCog className="w-5 h-5" /> },
+  { name: 'Correct', to: '/dashboard/admin/correct', icon: <HiOutlineUsers className="w-5 h-5" /> },
+
 ];
 
 export default function AdminLayout() {

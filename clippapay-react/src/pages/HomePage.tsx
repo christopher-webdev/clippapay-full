@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useInView, motion, AnimatePresence, useScroll, useTransform, useSpring } from "framer-motion";
 import { useRef, useEffect, useState } from "react";
-import heroImage from "/hero-clip.png";
+// import heroImage from "/hero-clip.png";
 import { PlayIcon, SparklesIcon, UsersIcon } from "@heroicons/react/24/outline";
 import { ChevronDown } from 'lucide-react';
 import NavBar from "../components/NavBar";
@@ -568,11 +568,11 @@ export default function HomePage() {
             {/* === FINAL CALL TO ACTION === */}
             <section className="relative bg-indigo-700 text-white py-28 px-6 sm:px-10 text-center overflow-hidden">
                 <div className="absolute inset-0 opacity-10">
-                    <img
+                    {/* <img
                         src={heroImage}
                         alt="Background layer"
                         className="w-full h-full object-cover blur-lg"
-                    />
+                    /> */}
                 </div>
 
                 <div className="relative z-10 max-w-4xl mx-auto">

@@ -41,6 +41,7 @@ import AdminSubmissionsManagement from './components/admin/AdminSubmissionsManag
 import AdminWalletsManagement from './components/admin/AdminWalletsManagement.tsx';
 import AdminWithdrawalsManagement from './components/admin/AdminWithdrawalsManagement.tsx';
 import AdminSettings from './components/admin/AdminSettings.tsx';
+import AdminCorrectApproval from './components/admin/AdminCorrectApproval.tsx';
 // import AdminSubscriptions   from './components/admin/AdminSubscriptions';
 
 import AdminSignup from '@/components/admin/AdminSignup';
@@ -125,6 +126,7 @@ export default function App() {
         <Route path="submissions" element={<AdminSubmissionsManagement />} />
         <Route path="wallets" element={<AdminWalletsManagement />} />
         <Route path="withdrawals" element={<AdminWithdrawalsManagement />} />
+        <Route path='correct' element={<AdminCorrectApproval />} />
         <Route path="settings" element={<AdminSettings />} />
       </Route>
 

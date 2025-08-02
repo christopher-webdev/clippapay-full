@@ -65,6 +65,17 @@ campaignSchema.methods.deductViewsAndBudget = async function(views) {
   }
   await this.save();
 };
+// In models/Campaign.js
+
+campaignSchema.methods.restoreViewsAndBudget = async function(views) {
+  const CPM = this.clipper_cpm || 200;
+  const viewRate = CPM / 1000;
+  const budgetRestore = views * viewRate;
+
+  this.views_left += views;
+  this.budget_remaining += budgetRestore;
+  await this.save();
+}
 
 /**
  * Prevent joining if campaign is >= 80% completed

@@ -188,5 +188,244 @@ router.post('/:submissionId/proof/:proofId/reject',requireAdminAuth, async (req,
   }
 });
 
-export default router;
 
+// routes/adminSubmissions.js (add this new route)
+
+/**
+ * GET approved submissions for a specific clipper
+ * Query params:
+ * - clipper: user ID of the clipper
+ * - status: filter by status (approved/pending/rejected)
+ */
+// In your AdminCorrectApproval.tsx component
+
+
+// In express_backend/routes/adminSubmissions.js
+// Remove the TypeScript type annotations for JavaScript files
+
+// Helper to find user by email
+router.get('/find-user', requireAdminAuth, async (req, res) => {
+  
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const user = await User.findOne({ email })
+      .select('_id email firstName lastName')
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Format name
+    user.name = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Not provided';
+    
+    res.json(user);
+  } catch (err) {
+    console.error('Failed to find user:', err);
+    res.status(500).json({ error: 'Failed to find user' });
+  }
+});
+
+// Get submissions for user
+router.get('/user-submissions', requireAdminAuth, async (req, res) => {
+  
+  try {
+    const { userId, status } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    const query = { clipper: userId };
+    if (status) {
+      query['proofs.status'] = status;
+    }
+
+    const submissions = await ClipSubmission.find(query)
+      .populate([
+        { path: 'clipper', select: 'email firstName lastName' },
+        { path: 'campaign', select: 'title advertiser metrics' }
+      ])
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!submissions.length) {
+      return res.status(404).json({ error: 'No submissions found' });
+    }
+
+    const formatted = submissions.map(formatSubmission);
+    res.json(formatted);
+  } catch (err) {
+    console.error('Failed to fetch submissions:', err);
+    res.status(500).json({ error: 'Failed to fetch submissions' });
+  }
+});
+
+// Helper function to format submission
+function formatSubmission(sub) {
+  return {
+    _id: sub._id,
+    campaign: sub.campaign ? {
+      _id: sub.campaign._id,
+      title: sub.campaign.title || 'Deleted Campaign',
+      advertiser: sub.campaign.advertiser,
+      metrics: sub.campaign.metrics || {}
+    } : {
+      _id: 'deleted',
+      title: 'Deleted Campaign',
+      advertiser: null,
+      metrics: {}
+    },
+    clipper: sub.clipper ? {
+      _id: sub.clipper._id,
+      email: sub.clipper.email,
+      name: `${sub.clipper.firstName || ''} ${sub.clipper.lastName || ''}`.trim() || sub.clipper.email
+    } : {
+      _id: 'deleted',
+      email: 'deleted@user.com',
+      name: 'Deleted User'
+    },
+    proofs: (sub.proofs || []).map(p => ({
+      _id: p._id,
+      platform: p.platform,
+      submissionUrl: p.submissionUrl,
+      proofVideo: p.proofVideo,
+      proofImage: p.proofImage,
+      views: p.views || 0,
+      verifiedViews: p.verifiedViews || 0,
+      status: p.status || 'pending',
+      rewardAmount: p.rewardAmount || 0,
+      adminNote: p.adminNote || '',
+      lastVerified: p.lastVerified || new Date(),
+      createdAt: p.createdAt || new Date()
+    }))
+  };
+}
+// Add this new route to handle correction of wrong approvals
+router.post('/correct-approval', requireAdminAuth, async (req, res) => {
+  try {
+    const { submissionId, proofId, correctViews } = req.body;
+
+    const submission = await ClipSubmission.findById(submissionId)
+      .populate('campaign clipper');
+
+    if (!submission) {
+      return res.status(404).json({ error: 'Submission not found' });
+    }
+
+    const incorrectProof = submission.proofs.id(proofId);
+    if (!incorrectProof || incorrectProof.status !== 'approved') {
+      return res.status(400).json({ error: 'Approved proof not found' });
+    }
+
+    const campaign = await Campaign.findById(submission.campaign._id).populate('advertiser');
+    const advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id });
+    const clipperWallet = await Wallet.findOne({ user: submission.clipper._id });
+
+    const platformUser = await User.findOne({ role: 'platform' });
+    const platformWallet = await Wallet.findOne({ user: platformUser._id });
+
+    const incorrectViews = incorrectProof.verifiedViews || 0;
+    const incorrectClipperAmount = incorrectProof.rewardAmount || 0;
+    const incorrectPlatformAmount = (incorrectViews * PLATFORM_CPM) / 1000;
+    const totalToReverse = incorrectClipperAmount + incorrectPlatformAmount;
+
+    if (clipperWallet.balance < incorrectClipperAmount) {
+      return res.status(400).json({ 
+        error: `Clipper wallet has insufficient balance (${clipperWallet.balance} available, need ${incorrectClipperAmount})` 
+      });
+    }
+
+    if (platformWallet.balance < incorrectPlatformAmount) {
+      return res.status(400).json({ 
+        error: `Platform wallet has insufficient balance (${platformWallet.balance} available, need ${incorrectPlatformAmount})` 
+      });
+    }
+
+    // ✅ Step 1: Reverse previous payment
+    clipperWallet.balance -= incorrectClipperAmount;
+    platformWallet.balance -= incorrectPlatformAmount;
+    advertiserWallet.escrowLocked += totalToReverse;
+
+    // ✅ Step 2: Add views and budget back to campaign
+    await campaign.restoreViewsAndBudget(incorrectViews); // You must define this function
+    await Promise.all([
+      clipperWallet.save(),
+      platformWallet.save(),
+      advertiserWallet.save()
+    ]);
+
+    // ✅ Step 3: Update the old proof
+    incorrectProof.status = 'rejected';
+    incorrectProof.adminNote = `Corrected - originally approved in error for ${incorrectViews} views`;
+    incorrectProof.rewardAmount = 0;
+
+    let newProof = null;
+    if (correctViews && correctViews > 0) {
+      const CPM = campaign.clipper_cpm || 200;
+      const correctClipperAmount = (correctViews * CPM) / 1000;
+      const correctPlatformAmount = (correctViews * PLATFORM_CPM) / 1000;
+      const correctTotal = correctClipperAmount + correctPlatformAmount;
+
+      if (advertiserWallet.escrowLocked < correctTotal) {
+        return res.status(400).json({ 
+          error: `Advertiser has insufficient escrow (${advertiserWallet.escrowLocked} available, need ${correctTotal})` 
+        });
+      }
+
+      newProof = {
+        platform: incorrectProof.platform,
+        submissionUrl: incorrectProof.submissionUrl,
+        views: correctViews,
+        proofVideo: incorrectProof.proofVideo,
+        proofImage: incorrectProof.proofImage,
+        status: 'approved',
+        verifiedViews: correctViews,
+        rewardAmount: correctClipperAmount,
+        adminNote: 'Corrected approval',
+        lastVerified: new Date()
+      };
+
+      submission.proofs.push(newProof);
+
+      advertiserWallet.escrowLocked -= correctTotal;
+      clipperWallet.balance += correctClipperAmount;
+      platformWallet.balance += correctPlatformAmount;
+
+      await Promise.all([
+        advertiserWallet.save(),
+        clipperWallet.save(),
+        platformWallet.save()
+      ]);
+
+      await campaign.deductViewsAndBudget(correctViews);
+    }
+
+    await submission.save();
+
+    res.json({
+      message: 'Correction completed successfully',
+      correctionsMade: {
+        reversedClipperAmount: incorrectClipperAmount,
+        reversedPlatformAmount: incorrectPlatformAmount,
+        viewsRestored: incorrectViews,
+        newApproval: newProof ? {
+          views: newProof.verifiedViews,
+          rewardAmount: newProof.rewardAmount
+        } : null,
+        submissionId: submission._id,
+        proofId: incorrectProof._id
+      }
+    });
+
+  } catch (err) {
+    console.error('Error correcting approval:', err);
+    res.status(500).json({ error: 'Failed to correct approval', details: err.message });
+  }
+});
+
+export default router;

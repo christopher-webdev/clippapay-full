@@ -122,4 +122,165 @@ router.post('/', requireAdminAuth, async (req, res) => {
   }
 });
 
+
+
+// Correct an incorrect approval
+router.post('/correct-approval', requireAdminAuth, async (req, res) => {
+  try {
+    const { userEmail, submissionId, proofId, correctViews } = req.body;
+
+    // 1. Find the user
+    const user = await User.findOne({ email: userEmail });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // 2. Find the submission (either by provided ID or search user's submissions)
+    let submission;
+    if (submissionId) {
+      submission = await ClipSubmission.findById(submissionId)
+        .populate('campaign clipper');
+    } else {
+      // Search all submissions by this user with approved proofs
+      submission = await ClipSubmission.findOne({
+        clipper: user._id,
+        'proofs.status': 'approved'
+      })
+      .populate('campaign clipper')
+      .sort({ createdAt: -1 }); // Get most recent first
+    }
+
+    if (!submission) {
+      return res.status(404).json({ error: 'No approved submissions found for this user' });
+    }
+
+    // 3. Find the specific proof (either by provided ID or most recent approved)
+    let proof;
+    if (proofId) {
+      proof = submission.proofs.id(proofId);
+    } else {
+      // Find the most recently approved proof
+      proof = submission.proofs
+        .filter(p => p.status === 'approved')
+        .sort((a, b) => new Date(b.lastVerified) - new Date(a.lastVerified))[0];
+    }
+
+    if (!proof) {
+      return res.status(404).json({ error: 'No approved proof found to correct' });
+    }
+
+    // 4. Get all wallets involved
+    const campaign = await Campaign.findById(submission.campaign._id).populate('advertiser');
+    const advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id });
+    const clipperWallet = await Wallet.findOne({ user: submission.clipper._id });
+    
+    // Find platform user and wallet
+    let platformUser = await User.findOne({ role: 'platform' });
+    if (!platformUser) {
+      platformUser = await User.create({ 
+        role: 'platform', 
+        email: 'platform@clippapay.com', 
+        passwordHash: 'PLATFORM_USER_DOES_NOT_LOGIN', 
+        isSuperAdmin: false, 
+        company: 'ClippaPay Platform' 
+      });
+    }
+    const platformWallet = await Wallet.findOne({ user: platformUser._id }) || 
+      await Wallet.create({ user: platformUser._id, balance: 0, escrowLocked: 0 });
+
+    // 5. Calculate amounts to reverse
+    const CPM = campaign.clipper_cpm || 200;
+    const platformCPM = PLATFORM_CPM || 400;
+    
+    const incorrectClipperAmount = proof.rewardAmount;
+    const incorrectPlatformAmount = (proof.verifiedViews * platformCPM) / 1000;
+    const totalToReverse = incorrectClipperAmount + incorrectPlatformAmount;
+
+    // 6. Verify wallets have sufficient balance
+    if (clipperWallet.balance < incorrectClipperAmount) {
+      return res.status(400).json({ 
+        error: `Clipper wallet has insufficient balance (${clipperWallet.balance} available, need ${incorrectClipperAmount})` 
+      });
+    }
+
+    // 7. Perform the corrections
+    // Reverse clipper payment
+    clipperWallet.balance -= incorrectClipperAmount;
+    await clipperWallet.save();
+
+    // Reverse platform payment
+    platformWallet.balance -= incorrectPlatformAmount;
+    await platformWallet.save();
+
+    // Return funds to advertiser's escrow
+    advertiserWallet.escrowLocked += totalToReverse;
+    await advertiserWallet.save();
+
+    // 8. Update the proof record
+    proof.status = 'rejected';
+    proof.adminNote = `Corrected - originally approved in error for ${proof.verifiedViews} views`;
+    
+    // If correctViews was provided, create a new approved proof with correct views
+    if (correctViews && correctViews > 0) {
+      const correctClipperAmount = (correctViews * CPM) / 1000;
+      const correctPlatformAmount = (correctViews * platformCPM) / 1000;
+      const correctTotal = correctClipperAmount + correctPlatformAmount;
+
+      // Verify advertiser has enough in escrow
+      if (advertiserWallet.escrowLocked < correctTotal) {
+        return res.status(400).json({ 
+          error: `Advertiser has insufficient escrow (${advertiserWallet.escrowLocked} available, need ${correctTotal})` 
+        });
+      }
+
+      // Create new correct proof
+      submission.proofs.push({
+        platform: proof.platform,
+        submissionUrl: proof.submissionUrl,
+        views: correctViews,
+        proofVideo: proof.proofVideo,
+        proofImage: proof.proofImage,
+        status: 'approved',
+        verifiedViews: correctViews,
+        rewardAmount: correctClipperAmount,
+        adminNote: 'Corrected approval',
+        lastVerified: new Date()
+      });
+
+      // Deduct from advertiser escrow
+      advertiserWallet.escrowLocked -= correctTotal;
+      await advertiserWallet.save();
+
+      // Pay clipper
+      clipperWallet.balance += correctClipperAmount;
+      await clipperWallet.save();
+
+      // Pay platform
+      platformWallet.balance += correctPlatformAmount;
+      await platformWallet.save();
+
+      // Update campaign metrics
+      await campaign.deductViewsAndBudget(correctViews);
+    }
+
+    await submission.save();
+
+    res.json({
+      message: 'Correction completed successfully',
+      correctionsMade: {
+        reversedClipperAmount: incorrectClipperAmount,
+        reversedPlatformAmount: incorrectPlatformAmount,
+        newApprovalAmount: correctViews ? (correctViews * CPM) / 1000 : null,
+        proofStatus: 'rejected',
+        submissionId: submission._id,
+        proofId: proof._id
+      }
+    });
+
+  } catch (err) {
+    console.error('Error correcting approval:', err);
+    res.status(500).json({ error: 'Failed to correct approval', details: err.message });
+  }
+});
+
 export default router;

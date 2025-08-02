@@ -1,6 +1,6 @@
 import React, { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { HiOutlineArrowDown } from 'react-icons/hi';
+import { HiOutlineArrowDown, HiOutlineInformationCircle } from 'react-icons/hi';
 
 type Withdrawal = {
   _id: string;
@@ -15,7 +15,6 @@ type Withdrawal = {
   declineReason?: string;
   createdAt: string;
 };
-
 
 export default function ClipperWallet() {
   const [balance, setBalance] = useState(0);
@@ -36,6 +35,9 @@ export default function ClipperWallet() {
   const usdtRate = 1500; // ₦1500 per 1 USDT
   const usdtEquivalent = wdrAmt > 0 ? (wdrAmt / usdtRate).toFixed(2) : '0.00';
 
+  // Minimum withdrawal amounts
+  const MIN_BANK_WITHDRAWAL = 200; // ₦200
+  const MIN_USDT_WITHDRAWAL = 1; // 1 USDT
 
   // fetch wallet & withdrawals
   const fetchAll = async () => {
@@ -59,6 +61,15 @@ export default function ClipperWallet() {
     fetchAll();
   }, []);
 
+  // Check if withdrawal amount meets minimum requirements
+  const isValidWithdrawalAmount = () => {
+    if (paymentMethod === 'bank') {
+      return wdrAmt >= MIN_BANK_WITHDRAWAL;
+    } else {
+      return (wdrAmt / usdtRate) >= MIN_USDT_WITHDRAWAL;
+    }
+  };
+
   // submit withdrawal request
   const submitWithdraw = async (e: FormEvent) => {
     e.preventDefault();
@@ -68,6 +79,17 @@ export default function ClipperWallet() {
     // Check basic amount validity
     if (wdrAmt <= 0 || wdrAmt > balance) {
       setMsg('Invalid withdrawal amount.');
+      setProcessing(false);
+      return;
+    }
+
+    // Check minimum withdrawal amount
+    if (!isValidWithdrawalAmount()) {
+      setMsg(
+        paymentMethod === 'bank'
+          ? `Minimum bank withdrawal is ₦${MIN_BANK_WITHDRAWAL.toLocaleString()}`
+          : `Minimum USDT withdrawal is ${MIN_USDT_WITHDRAWAL} USDT (₦${(MIN_USDT_WITHDRAWAL * usdtRate).toLocaleString()})`
+      );
       setProcessing(false);
       return;
     }
@@ -128,13 +150,21 @@ export default function ClipperWallet() {
   return (
     <div className="space-y-6 max-w-3xl mx-auto p-4">
       {msg && (
-        <div className="px-4 py-2 bg-blue-100 text-blue-800 rounded">{msg}</div>
+        <div className={`px-4 py-2 rounded ${msg.includes('Failed') ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
+          {msg}
+        </div>
       )}
 
       <h2 className="text-2xl font-semibold">My Wallet</h2>
-      <div className="bg-white p-6 rounded-lg shadow mb-6">
+      <div className="bg-white p-6 rounded-lg shadow mb-6 relative">
         <p className="text-sm text-gray-600">Available Balance</p>
         <p className="text-3xl font-bold">₦{balance.toLocaleString()}</p>
+        <div className="mt-2 flex items-center text-sm">
+          <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
+            <HiOutlineInformationCircle className="inline mr-1" />
+            Minimum withdrawal: ₦200 or 1 USDT
+          </span>
+        </div>
       </div>
       <button
         onClick={() => setShowWdrModal(true)}
@@ -197,7 +227,6 @@ export default function ClipperWallet() {
               </tr>
             )}
           </tbody>
-
         </table>
       </div>
 
@@ -234,17 +263,31 @@ export default function ClipperWallet() {
 
               {/* Common Amount Input */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₦)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Amount {paymentMethod === 'bank' ? '(₦)' : '(USDT)'}
+                </label>
+                <div className="text-xs text-gray-500 mb-1">
+                  Minimum: {paymentMethod === 'bank' ? `₦${MIN_BANK_WITHDRAWAL.toLocaleString()}` : `${MIN_USDT_WITHDRAWAL} USDT`}
+                  {paymentMethod === 'usdt' && (
+                    <span className="ml-1">(≈ ₦{(MIN_USDT_WITHDRAWAL * usdtRate).toLocaleString()})</span>
+                  )}
+                </div>
                 <input
                   type="number"
-                  min={1}
+                  min={paymentMethod === 'bank' ? MIN_BANK_WITHDRAWAL : MIN_USDT_WITHDRAWAL * usdtRate}
+                  step={paymentMethod === 'bank' ? 100 : 0.01}
                   max={balance}
                   value={wdrAmt}
                   onChange={e => setWdrAmt(Number(e.target.value))}
                   required
                   className="w-full px-4 py-3 border rounded-lg"
-                  placeholder="Enter amount"
+                  placeholder={`Enter amount (min ${paymentMethod === 'bank' ? `₦${MIN_BANK_WITHDRAWAL.toLocaleString()}` : `${MIN_USDT_WITHDRAWAL} USDT`})`}
                 />
+                {paymentMethod === 'usdt' && wdrAmt > 0 && (
+                  <div className="text-xs text-gray-500 mt-1">
+                    You will receive: {(wdrAmt / usdtRate).toFixed(6)} USDT
+                  </div>
+                )}
               </div>
 
               {/* Bank Transfer Fields */}
@@ -277,7 +320,7 @@ export default function ClipperWallet() {
                       value={wdrAcctName}
                       onChange={e => setWdrAcctName(e.target.value)}
                       className="w-full px-4 py-3 border rounded-lg"
-                      placeholder="Account holder’s name"
+                      placeholder="Account holder's name"
                     />
                   </div>
                 </>
@@ -286,9 +329,6 @@ export default function ClipperWallet() {
               {/* USDT Wallet Fields */}
               {paymentMethod === 'usdt' && (
                 <>
-                  <div className="text-sm text-gray-600 mb-2">
-                    You will receive approximately <span className="font-semibold text-black">{usdtEquivalent} USDT</span> (₦{usdtRate} = 1 USDT)
-                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">USDT Wallet Address</label>
                     <input
@@ -312,7 +352,6 @@ export default function ClipperWallet() {
                 </>
               )}
 
-
               {/* ACTION BUTTONS */}
               <div className="flex justify-end space-x-3 pt-4">
                 <button
@@ -325,8 +364,8 @@ export default function ClipperWallet() {
                 </button>
                 <button
                   type="submit"
-                  disabled={processing}
-                  className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={processing || !isValidWithdrawalAmount()}
+                  className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
                   {processing ? 'Processing…' : 'Withdraw Funds'}
                 </button>
@@ -335,7 +374,6 @@ export default function ClipperWallet() {
           </div>
         </div>
       )}
-
     </div>
   );
 }
