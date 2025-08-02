@@ -151,7 +151,7 @@ export default function CampaignDetail() {
                 <video
                   src={clip.url}
                   controls
-                  className="w-full h-96 object-cover mb-2 rounded"
+                  className="w-full h-full object-cover mb-2 rounded"
                 />
                 <a
                   href={clip.url}

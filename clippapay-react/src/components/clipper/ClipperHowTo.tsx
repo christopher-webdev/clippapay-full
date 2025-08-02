@@ -28,7 +28,7 @@ const steps: Step[] = [
     img: img10,
     title: "Browse Campaigns",
     text:
-      "From your dashboard, click on Campaigns.\n\nYou’ll see a list of jobs you can join, each showing its budget, view targets, and progress.",
+      "From your dashboard, click on Campaigns.\n\nYou’ll see a list of jobs you can join. Click the Join button to open the campaign detail page",
     icon: <HiFingerPrint />,
     accent: "purple",
   },
@@ -36,23 +36,15 @@ const steps: Step[] = [
     img: img11,
     title: "View Campaign Details",
     text:
-      "Click the View Clips button to open the campaign. You’ll see available clips, reward rate per view, and platforms you're allowed to post on.\n\nDownload any of the clips you prefer.",
+      "On the campaign detail page, you'll see one or multiple clips available for the campaign.\n\nYou don't have to post all of them — just pick the one you believe will get you the most views and download it. Post it on the suggested platforms that are eligible for rewards.\n\nAfter sharing the clip on your social media accounts, return to this page and click the green Start Promoting button to continue and you will be taken to the submission tab where you will post the link to the link of the posted video.\n\n📥 Download any clip you prefer and get started.",
     icon: <HiArrowDownCircle />,
-    accent: "purple",
-  },
-  {
-    img: img11,
-    title: "Post Your Clip",
-    text:
-      "Upload the clip to the listed social platforms (e.g. TikTok, YouTube, Instagram).\n\nReturn and click the green Start Promoting button to continue.",
-    icon: <HiPlayCircle />,
     accent: "purple",
   },
   {
     img: img12,
     title: "Submit Your Post",
     text:
-      "On the submission form:\n• Remove unused platforms.\n• Paste your post link (must start with https://).\n• Set views to 1 if it's your first time.\n• No proof needed yet.\n\nThen click Submit.",
+      "On the submission form:\n• Remove any platforms you didn't post the campaign video to.\n• Paste your post link (must start with https://).\n• Set views to 1 if it’s your first submission and your video hasn’t received views yet.\n• Uploading proof (screenshot or video) is optional — only required if requested by an admin to verify views in case of suspected bot activity or misuse.\n\nThen click Submit.",
     icon: <HiClipboardDocumentCheck />,
     accent: "purple",
   },
@@ -60,18 +52,11 @@ const steps: Step[] = [
     img: img13,
     title: "Update Your Views",
     text:
-      "Once your views increase, go to the Submissions tab and click Update.\n\nUpload proof:\n• YouTube/TikTok: short video from Studio\n• Instagram/Facebook: screenshot showing views\n\nUpdate the view count, then click Submit again.\n\n💡 Please update as soon as possible — ideally every 100 views — to avoid missing rewards.",
+      "Once your views increase, go to the Submissions tab and click Update.\n\nUpdate the view count based on your latest results/view count, then click Submit again.\n\n📎 Uploading proof (screenshot or short video) is optional — only do this if requested by an admin to verify your submission.\n\n💡 Try to update your view count regularly — ideally every 10 - 100 views — to avoid delays or missed rewards. \n\n💡 If you views are rejected, follow the admin instruction to rectify the issue by clicking the update button to update the refused submission",
     icon: <HiArrowUpTray />,
     accent: "purple",
   },
-  {
-    img: img13,
-    title: "Get Verified & Paid",
-    text:
-      "After review, your status will change to Approved.\n\nVerified views are credited to your wallet automatically.\n\nIf a submission is rejected, read the admin note or use Live Chat to resolve it.",
-    icon: <HiCheckCircle />,
-    accent: "purple",
-  },
+
 ];
 
 export default function ClipperHowTo() {

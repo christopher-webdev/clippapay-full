@@ -171,20 +171,8 @@ export default function ClipperSubmissions() {
     try {
       const token = localStorage.getItem('token');
       for (let b of platformBlocks) {
-        if (!b.platform || !b.submissionUrl || !b.views) {
-          setFormError('All fields are required.');
-          setFormLoading(false);
-          return;
-        }
-        const needsProof = b.platform === 'TikTok' || b.platform === 'YouTube';
-        if (
-          needsProof &&
-          formMode === 'new' &&
-          parseInt(b.views || '0') > 1 &&
-          !b.proofVideo &&
-          !b.proofImage
-        ) {
-          setFormError(`Video or image proof is required for ${b.platform} if views are more than 1.`);
+        if (!b.platform || !b.submissionUrl) {  // Only submissionUrl is required now
+          setFormError('Platform and Submission Link are required.');
           setFormLoading(false);
           return;
         }
@@ -192,7 +180,7 @@ export default function ClipperSubmissions() {
         const fd = new FormData();
         fd.append('platform', b.platform);
         fd.append('submissionUrl', b.submissionUrl);
-        fd.append('views', b.views);
+        fd.append('views', b.views || '0');  // Default to 0 if not provided
         if (b.proofVideo) fd.append('proofVideo', b.proofVideo);
         if (b.proofImage) fd.append('proofImage', b.proofImage);
 
@@ -271,27 +259,18 @@ export default function ClipperSubmissions() {
                 <input
                   value={block.views}
                   onChange={e => handleBlockChange(idx, 'views', e.target.value)}
-                  placeholder="Views"
+                  placeholder="Views (optional)"
                   type="number"
                   min={0}
                   className="border p-2 rounded mb-2 block w-full"
-                  required
                 />
                 <div className="mb-2">
                   <label className="text-xs block mb-1">
-                    Upload Video Proof{' '}
-                    {['TikTok', 'YouTube'].includes(block.platform) && (
-                      <span className="text-red-500">*</span>
-                    )}
+                    Upload Video Proof (optional: Unless requested by admin)
                   </label>
                   <input
                     type="file"
                     accept="video/*"
-                    required={
-                      ['TikTok', 'YouTube'].includes(block.platform) &&
-                      formMode === 'new' &&
-                      parseInt(block.views || '0') > 1
-                    }
                     onChange={e =>
                       handleBlockChange(idx, 'proofVideo', e.target.files?.[0] || null)
                     }
@@ -300,19 +279,11 @@ export default function ClipperSubmissions() {
                 </div>
                 <div className="mb-2">
                   <label className="text-xs block mb-1">
-                    Upload Image Proof{' '}
-                    {['TikTok', 'YouTube'].includes(block.platform) && (
-                      <span className="text-red-500">*</span>
-                    )}
+                    Upload Image Proof (optional: Unless requested by admin)
                   </label>
                   <input
                     type="file"
                     accept="image/*"
-                    required={
-                      ['TikTok', 'YouTube'].includes(block.platform) &&
-                      formMode === 'new' &&
-                      parseInt(block.views || '0') > 1
-                    }
                     onChange={e =>
                       handleBlockChange(idx, 'proofImage', e.target.files?.[0] || null)
                     }
