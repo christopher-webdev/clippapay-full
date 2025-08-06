@@ -139,7 +139,7 @@ export default function CampaignsManagement() {
     setErr(null);
     setIsSubmitting(true);
     try {
-      const res = await axios.put(`/admin-campaigns/admin-campaigns/${currentCampaign._id}`, editForm);
+      const res = await axios.put(`/admin-campaigns/adworker-campaign/${currentCampaign._id}`, editForm);
       setCampaigns(prev =>
         prev.map(c =>
           c._id === currentCampaign._id ? { ...c, ...res.data } : c
@@ -268,7 +268,13 @@ export default function CampaignsManagement() {
                   </td>
                   <td className="px-2 py-3 align-top text-xs">
                     <div className="flex flex-col gap-2">
-                     
+                      <button
+                        title="View"
+                        className="flex items-center gap-1 px-2 py-1 rounded bg-gray-100 hover:bg-gray-200"
+                        onClick={() => window.open(`/admin/campaigns/${c._id}`, "_blank")}
+                      >
+                        <HiEye className="w-4 h-4" /> View
+                      </button>
                       <button
                         title="Edit"
                         className="flex items-center gap-1 px-2 py-1 rounded bg-indigo-100 hover:bg-indigo-200 text-indigo-800"

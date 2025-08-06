@@ -22,6 +22,7 @@ const platformOptions = [
   { label: 'Instagram', value: 'instagram' },
   { label: 'YouTube', value: 'youtube' },
   { label: 'Facebook', value: 'facebook' },
+  { label: 'X', value: 'X' },
 ];
 
 const categoryOptions = [

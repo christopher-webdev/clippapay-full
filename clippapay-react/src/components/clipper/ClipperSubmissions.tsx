@@ -10,16 +10,18 @@ import {
   HiPencilAlt
 } from 'react-icons/hi';
 
-const ALL_PLATFORMS = ['TikTok', 'Instagram', 'YouTube', 'Facebook'];
+const ALL_PLATFORMS = ['TikTok', 'Instagram', 'YouTube', 'Facebook', 'X'];
 const PLATFORM_LABELS = {
   TikTok: 'TikTok',
   Instagram: 'Instagram',
   YouTube: 'YouTube',
   Facebook: 'Facebook',
+  X: 'X',
   tiktok: 'TikTok',
   instagram: 'Instagram',
   youtube: 'YouTube',
-  facebook: 'Facebook'
+  facebook: 'Facebook',
+  x: 'X',
 };
 const PAGE_SIZE = 50;
 

@@ -10,7 +10,7 @@ import Wallet from '../models/Wallet.js';
 const router = express.Router();
 
 // --- GET ALL CAMPAIGNS (with stats) ---
-router.get('/', requireAdminAuth,  async (req, res) => {
+router.get('/', requireAdminAuth, async (req, res) => {
   try {
     const campaigns = await Campaign.find({})
       .populate('advertiser', 'email firstName lastName contactName company')
@@ -23,6 +23,92 @@ router.get('/', requireAdminAuth,  async (req, res) => {
     res.status(500).json({ error: 'Could not fetch campaigns.' });
   }
 });
+
+
+
+router.get('/adworker-campaign', requireAuth, async (req, res) => {
+  try {
+    const campaigns = await Campaign.find({})
+      .populate('advertiser', 'email firstName lastName contactName company')
+      .populate('assignedWorker', 'email firstName lastName')
+      .sort({ createdAt: -1 });
+
+    res.json(campaigns);
+  } catch (err) {
+    console.error('Error fetching campaigns:', err);
+    res.status(500).json({ error: 'Could not fetch campaigns.' });
+  }
+});
+
+
+router.put('/admin-campaigns/:id', requireAdminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    
+    // Only allow updating specific fields
+    const allowedUpdates = {
+      title: updates.title,
+      platforms: updates.platforms,
+      hashtags: updates.hashtags,
+      directions: updates.directions
+    };
+    
+    const campaign = await Campaign.findByIdAndUpdate(
+      id, 
+      { $set: allowedUpdates },
+      { new: true, runValidators: true }
+    );
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    res.json(campaign);
+  } catch (err) {
+    console.error('Error updating campaign:', err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+
+
+
+// routes/adminCampaigns.js
+
+router.put('/adworker-campaign/:id',requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    
+    // Only allow updating specific fields
+    const allowedUpdates = {
+      title: updates.title,
+      platforms: updates.platforms,
+      hashtags: updates.hashtags,
+      directions: updates.directions
+    };
+    
+    const campaign = await Campaign.findByIdAndUpdate(
+      id, 
+      { $set: allowedUpdates },
+      { new: true, runValidators: true }
+    );
+    
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    res.json(campaign);
+  } catch (err) {
+    console.error('Error updating campaign:', err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+
+
+
 
 // --- GET CAMPAIGN BY ID (details + submissions + proofs) ---
 router.get('/:id', requireAdminAuth, async (req, res) => {

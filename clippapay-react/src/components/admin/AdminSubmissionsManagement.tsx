@@ -31,7 +31,7 @@ const CPM_CLIPPER = 200;
 const CPM_PLATFORM = 400;
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
-const platformList = ["tiktok", "instagram", "youtube", "facebook"];
+const platformList = ["tiktok", "instagram", "youtube", "facebook","X"];
 const statusList = ["pending", "approved", "rejected"];
 
 export default function SubmissionsManagement() {

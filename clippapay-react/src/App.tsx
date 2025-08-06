@@ -50,6 +50,7 @@ import AdminWorkerCreation from '@/components/admin/AdminWorkerCreation';
 
 //Ad-Workers
 import AdWorkerDashboard from './components/AdWorkerDashboard';
+import AdWorkerCampaign from './components/AdWorkerCampaign.tsx'
 
 import WorkerLayout from './components/WorkerLayout';
 
@@ -106,8 +107,8 @@ export default function App() {
        {/* ad-worker */}
       <Route path="dashboard/ad-worker" element={<WorkerLayout />}>
         <Route index element={<AdWorkerDashboard />} />
-        {/* <Route path="campaigns" element={<CampaignListClipper />} />
-        <Route path="campaigns/:id" element={<CampaignDetail />} />
+         <Route path="campaigns" element={<AdWorkerCampaign />} />
+        {/* <Route path="campaigns/:id" element={<CampaignDetail />} />
         <Route path="submissions" element={<Submissions />} />
         <Route path="wallet" element={<ClipperWallet />} />
         <Route path="settings" element={<ClipperSettings />} /> */}

@@ -28,7 +28,7 @@ const steps: Step[] = [
     img: img10,
     title: "Browse Campaigns",
     text:
-      "From your dashboard, click on Campaigns.\n\nYou’ll see a list of jobs you can join. Click the Join button to open the campaign detail page",
+      "From your dashboard, click on Campaigns.\n\nYou'll see a list of jobs you can join. Click the Join button to open the campaign detail page",
     icon: <HiFingerPrint />,
     accent: "purple",
   },
@@ -44,7 +44,7 @@ const steps: Step[] = [
     img: img12,
     title: "Submit Your Post",
     text:
-      "On the submission form:\n• Remove any platforms you didn't post the campaign video to.\n• Paste your post link (must start with https://).\n• Set views to 1 if it’s your first submission and your video hasn’t received views yet.\n• Uploading proof (screenshot or video) is optional — only required if requested by an admin to verify views in case of suspected bot activity or misuse.\n\nThen click Submit.",
+      "On the submission form:\n• Remove any platforms you didn't post the campaign video to.\n• Paste your post link (must start with https://).\n• Set views to 1 if it's your first submission and your video hasn't received views yet.\n• Uploading proof (screenshot or video) is optional — only required if requested by an admin to verify views in case of suspected bot activity or misuse.\n\nThen click Submit.",
     icon: <HiClipboardDocumentCheck />,
     accent: "purple",
   },
@@ -56,7 +56,6 @@ const steps: Step[] = [
     icon: <HiArrowUpTray />,
     accent: "purple",
   },
-
 ];
 
 export default function ClipperHowTo() {
@@ -67,8 +66,51 @@ export default function ClipperHowTo() {
       <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-br from-purple-100 via-pink-100 to-rose-100 dark:from-purple-200/10 dark:via-pink-200/10 dark:to-rose-200/10" />
 
       <div className="mx-auto max-w-6xl space-y-24">
+        {/* Video Tutorial Section */}
+        <section className="text-center space-y-8">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="relative"
+          >
+            <div className="absolute inset-0 rounded-3xl bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 opacity-20 blur-2xl -z-10" />
+            <div className="relative bg-white/90 backdrop-blur-sm rounded-3xl p-1 shadow-xl ring-1 ring-black/5 overflow-hidden">
+              <div className="relative aspect-video rounded-2xl overflow-hidden">
+                <iframe
+                  className="w-full h-full"
+                  src="https://www.youtube.com/embed/OYyy314ks20?autoplay=0&rel=0"
+                  title="ClippaPay Tutorial for Clippers"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                ></iframe>
+              </div>
+              <div className="p-6 space-y-4">
+                <h2 className="text-3xl font-bold text-gray-800">
+                  <span className="inline-flex items-center gap-2">
+                    <HiPlayCircle className="text-purple-600" />
+                    Watch Our Tutorial Video
+                  </span>
+                </h2>
+                <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+                  Learn how to use ClippaPay effectively in just 3 minutes. This video covers everything from joining campaigns to submitting your links and getting paid.
+                </p>
+                <div className="flex items-center justify-center gap-4 pt-2">
+                  <a
+                    href="#steps"
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-full font-medium shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"
+                  >
+                    <HiArrowDownCircle />
+                    Or read the step-by-step guide below
+                  </a>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
         {/* Page header */}
-        <header className="text-center space-y-6">
+        <header id="steps" className="text-center space-y-6">
           <h1 className="text-5xl font-extrabold tracking-tight bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 bg-clip-text text-transparent drop-shadow-sm">
             How to Earn on ClippaPay as a Clipper
           </h1>

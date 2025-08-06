@@ -18,7 +18,7 @@ const campaignSchema = new Schema({
   views_purchased: { type: Number, required: true }, // NEW
   views_left: { type: Number, required: true }, // updated as clippers' views are verified
 
-  platforms: { type: [String], enum: ['tiktok','instagram','youtube','facebook'], required: true },
+  platforms: { type: [String], enum: ['tiktok','instagram','youtube','facebook', 'X'], required: true },
   countries: [String],
   hashtags:  [String],
   directions:[String],

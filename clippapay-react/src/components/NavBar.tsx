@@ -10,6 +10,7 @@ const navItems = [
   // { name: 'FAQs',    to: '/faqs'    },
   { name: 'About', to: '/about' },
   { name: 'Login', to: '/login' },
+  { name: 'Home', to: '/' },
 ];
 
 export default function NavBar() {
