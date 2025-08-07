@@ -11,8 +11,8 @@ const campaignSchema = new Schema({
   video_url: String,
 
   // FINANCIALS & VIEWS
-  rate_per_1000: { type: Number, default: 600, required: true }, // advertiser pays per 1000 views
-  clipper_cpm: { type: Number, default: 200 }, // amount clippers get per 1000 views
+  rate_per_1000: { type: Number, default: 1200, required: true }, // advertiser pays per 1000 views
+  clipper_cpm: { type: Number, default: 500 }, // amount clippers get per 1000 views
   budget_total: { type: Number, required: true },
   budget_remaining: { type: Number, required: true },
   views_purchased: { type: Number, required: true }, // NEW
@@ -68,7 +68,7 @@ campaignSchema.methods.deductViewsAndBudget = async function(views) {
 // In models/Campaign.js
 
 campaignSchema.methods.restoreViewsAndBudget = async function(views) {
-  const CPM = this.clipper_cpm || 200;
+  const CPM = this.clipper_cpm || 500;
   const viewRate = CPM / 1000;
   const budgetRestore = views * viewRate;
 

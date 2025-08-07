@@ -275,8 +275,8 @@ router.post('/correct-approval', requireAdminAuth, async (req, res) => {
       await Wallet.create({ user: platformUser._id, balance: 0, escrowLocked: 0 });
 
     // 5. Calculate amounts to reverse
-    const CPM = campaign.clipper_cpm || 200;
-    const platformCPM = PLATFORM_CPM || 400;
+    const CPM = campaign.clipper_cpm || 500;
+    const platformCPM = PLATFORM_CPM || 700;
     
     const incorrectClipperAmount = proof.rewardAmount;
     const incorrectPlatformAmount = (proof.verifiedViews * platformCPM) / 1000;

@@ -83,6 +83,22 @@ router.get('/', requireAuth, async (req, res) => {
         platformWalletBalance = platformWallet.balance;
       }
     }
+    const totalViewsSoldResult = await Campaign.aggregate([
+      {
+        $project: {
+          viewsSold: { $subtract: ['$views_purchased', '$views_left'] }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalViewsSold: { $sum: '$viewsSold' }
+        }
+      }
+    ]);
+
+    const totalViewsSold = totalViewsSoldResult[0]?.totalViewsSold || 0;
+
 
     return res.json({
       totalClippers,
@@ -100,6 +116,7 @@ router.get('/', requireAuth, async (req, res) => {
       totalSubscriptions,
       totalEscrowLocked,
       platformWalletBalance,
+      totalViewsSold,
     });
   } catch (err) {
     console.error(err);

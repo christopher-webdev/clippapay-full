@@ -33,7 +33,7 @@ const categoryOptions = [
 ];
 
 // CONSTANTS
-const NAIRA_PER_VIEW = 0.6; // ₦600 per 1000 = ₦0.6 per view
+const NAIRA_PER_VIEW = 1.2; // ₦600 per 1000 = ₦0.6 per view
 
 interface CreateCampaignFormProps {
   onClose: () => void;
@@ -251,7 +251,7 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
           Create New Campaign
         </h2>
         <p className="mb-5 text-gray-500 text-sm">
-          <span className="font-semibold text-cp-blue">₦600 per 1,000 views (₦0.6 per view)</span>. Enter your budget, upload a video, select platforms and targeting, and see your estimated reach.
+          <span className="font-semibold text-cp-blue">₦1200 per 1,000 views (₦1.2 per view)</span>. Enter your budget, upload a video, select platforms and targeting, and see your estimated reach.
         </p>
         <form onSubmit={handleSubmit} className="space-y-7">
 
@@ -342,7 +342,7 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
                 className="mt-1 block w-full rounded-md border-gray-100 shadow-none bg-gray-100 text-gray-700 cursor-not-allowed"
               />
               <p className="mt-1 text-xs text-gray-500">
-                (₦600 = 1,000 views)
+                (₦1200 = 1,000 views)
               </p>
             </div>
           </div>

@@ -252,7 +252,7 @@ router.post(
       }
 
       // Validate budget minimum
-      const MIN_BUDGET = 600; // ₦600 minimum (1000 views)
+      const MIN_BUDGET = 1200; // ₦600 minimum (1000 views)
       if (budgetVal < MIN_BUDGET) {
         return res.status(400).json({
           error: `Minimum budget is ₦${MIN_BUDGET} (1000 views)`
@@ -305,8 +305,8 @@ router.post(
       const campaignData = {
         advertiser: req.user._id,
         title,
-        rate_per_1000: 600,
-        clipper_cpm: 200,
+        rate_per_1000: 1200,
+        clipper_cpm: 500,
         rate_per_view: ratePerView,
         budget_total: budgetVal,
         budget_remaining: budgetVal,

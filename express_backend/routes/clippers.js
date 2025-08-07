@@ -214,10 +214,10 @@ router.get('/available', requireAuth, async (req, res) => {
       adWorkerStatus: 'ready',
       views_left: { $gt: 0 },
       $or: [
-        { $expr: { $gt: ['$views_left', { $multiply: ['$views_purchased', 0.2] } ] } },
+        { $expr: { $gt: ['$views_left', { $multiply: ['$views_purchased', 0.5] } ] } },
         {
           $and: [
-            { $expr: { $lte: ['$views_left', { $multiply: ['$views_purchased', 0.2] } ] } },
+            { $expr: { $lte: ['$views_left', { $multiply: ['$views_purchased', 0.5] } ] } },
             { updatedAt: { $gte: twentyFourHoursAgo } }
           ]
         }
@@ -263,7 +263,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       advertiser: campaign.advertiser?.contactName || 'Advertiser',
       description: campaign.description || '',
       thumbUrl: campaign.thumb_url,
-      payPerView: campaign.clipper_cpm ?? 200,
+      payPerView: campaign.clipper_cpm ?? 500,
       totalViews: campaign.views_purchased,
       clippersCount: campaign.clippersCount,
       platforms: campaign.platforms,

@@ -13,6 +13,7 @@ import {
   HiOutlinePuzzle,
   HiOutlineUserGroup,
   HiLockClosed,
+  HiEye,
 } from 'react-icons/hi';
 
 interface AdminStats {
@@ -31,6 +32,7 @@ interface AdminStats {
   totalSubscriptions: number;
   platformWalletBalance: number;
   totalEscrowLocked: number;
+  totalViewsSold: number;
 }
 
 const ICON_MAP: Record<keyof AdminStats, React.ComponentType<{ className?: string }>> = {
@@ -49,29 +51,26 @@ const ICON_MAP: Record<keyof AdminStats, React.ComponentType<{ className?: strin
   totalSubscriptions: HiOutlineDocument,
   platformWalletBalance: HiOutlineCash,
   totalEscrowLocked: HiLockClosed,
+  totalViewsSold: HiEye,
 };
 
 const VARIANTS: Record<keyof AdminStats, string> = {
-  // User-related stats (cool colors)
   totalClippers: 'teal',
   totalAdvertisers: 'blue',
   totalAdminWorkers: 'indigo',
   totalSuperAdmins: 'violet',
-
-  // Campaign-related stats (purple/pink range)
   totalCampaigns: 'purple',
   activeCampaigns: 'fuchsia',
   totalSubmissions: 'rose',
   pendingSubscriptions: 'pink',
   activeClipperPendingApproval: 'lightBlue',
-
-  // Financial stats (warm colors)
   totalRevenue: 'amber',
   pendingWithdrawals: 'orange',
   pendingDeposits: 'orange',
   platformWalletBalance: 'green',
   totalEscrowLocked: 'emerald',
-  totalSubscriptions: 'cyan'
+  totalSubscriptions: 'cyan',
+  totalViewsSold: 'cyan',
 };
 
 export default function AdminOverview() {
@@ -96,7 +95,7 @@ export default function AdminOverview() {
       fetchStats();
     }, 15000); // 15 seconds
 
-    return () => clearInterval(interval); // cleanup on unmount
+    return () => clearInterval(interval);
   }, []);
 
   if (error) {
@@ -106,7 +105,6 @@ export default function AdminOverview() {
     return <p className="text-gray-500 text-center py-10">Loading overview…</p>;
   }
 
-  // Transform into cards
   const cards: {
     key: keyof AdminStats;
     label: string;
@@ -124,9 +122,7 @@ export default function AdminOverview() {
       { key: 'totalRevenue', label: 'Total Wallets Balance (₦)', value: `₦${stats.totalRevenue.toLocaleString()}` },
       { key: 'platformWalletBalance', label: 'Platform Wallet (₦)', value: `₦${stats.platformWalletBalance.toLocaleString()}` },
       { key: 'totalEscrowLocked', label: 'Total Escrowed Funds Locked (₦)', value: `₦${stats.totalEscrowLocked.toLocaleString()}` },
-
-      // { key: 'totalSubscriptions', label: 'Subscriptions (total)',  value: stats.totalSubscriptions },
-      // { key: 'pendingSubscriptions', label: 'Subscriptions (pending)', value: stats.pendingSubscriptions },
+      { key: 'totalViewsSold', label: 'Verified Views Delivered', value: stats.totalViewsSold.toLocaleString() },
     ];
 
   return (
