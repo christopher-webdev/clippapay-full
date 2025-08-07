@@ -1,4 +1,3 @@
-// src/components/clipper/ClipperDashboardOverview.tsx
 import React, { useEffect, useState } from 'react';
 import {
   HiClipboardCheck,
@@ -7,10 +6,9 @@ import {
   HiCurrencyDollar,
   HiClock,
   HiCheckCircle,
-  
-  
 } from 'react-icons/hi';
 import axios from 'axios';
+import { motion, AnimatePresence } from 'framer-motion'; // ✅ Install this if not already
 
 interface ClipperStats {
   joinedCampaigns: number;
@@ -29,21 +27,27 @@ const ICONS: Record<keyof ClipperStats, React.ComponentType<{ className?: string
   walletBalance: HiCurrencyDollar,
   totalEarned: HiCheckCircle,
 };
+
 const VARIANTS: Record<keyof ClipperStats, string> = {
-  joinedCampaigns: 'indigo',       // Primary action (bold)
-  submissions: 'teal',            // Core metric (professional)
-  pendingVerifications: 'amber',   // Needs attention (warning)
-  activeCampaigns: 'sky',         // Current activity (fresh)
-  walletBalance: 'emerald',       // Financial (stable)
-  totalEarned: 'violet'           // Achievement (premium)
+  joinedCampaigns: 'indigo',
+  submissions: 'teal',
+  pendingVerifications: 'amber',
+  activeCampaigns: 'sky',
+  walletBalance: 'emerald',
+  totalEarned: 'violet',
 };
+
 export default function ClipperDashboardOverview() {
   const [stats, setStats] = useState<ClipperStats | null>(null);
+  const [showBanner, setShowBanner] = useState(true);
 
   useEffect(() => {
     axios.get('/clippers/overview')
       .then(res => setStats(res.data))
       .catch(() => setStats(null));
+
+    const timer = setTimeout(() => setShowBanner(false), 90000); // Hide after 60s
+    return () => clearTimeout(timer);
   }, []);
 
   if (!stats) {
@@ -60,20 +64,39 @@ export default function ClipperDashboardOverview() {
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-      {cards.map(({ key, label, value }) => {
-        const Icon = ICONS[key];
-        const variant = VARIANTS[key];
-        return (
-          <div key={key} className="card p-6" data-variant={variant}>
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium opacity-90">{label}</p>
-              <Icon className="w-6 h-6 opacity-80" />
+    <div className="space-y-6">
+      {/* 🔔 Scrolling Notification Banner */}
+      <AnimatePresence>
+        {showBanner && (
+          <motion.div
+            initial={{ y: -20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -20, opacity: 0 }}
+            className="bg-yellow-300 text-black-900 px-4 py-3 rounded-md shadow text-sm font-medium overflow-hidden relative"
+          >
+            <div className="animate-marquee whitespace-nowrap">
+              📢 <strong>ClippaPay Update:</strong> Earnings per 1,000 views have increased from ₦200 to ₦500! This applies to all new campaigns.
             </div>
-            <p className="mt-3 text-3xl font-extrabold">{value}</p>
-          </div>
-        );
-      })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 🔢 Stat Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {cards.map(({ key, label, value }) => {
+          const Icon = ICONS[key];
+          const variant = VARIANTS[key];
+          return (
+            <div key={key} className="card p-6" data-variant={variant}>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium opacity-90">{label}</p>
+                <Icon className="w-6 h-6 opacity-80" />
+              </div>
+              <p className="mt-3 text-3xl font-extrabold">{value}</p>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -57,12 +57,16 @@ export default function CampaignAnalytics() {
       .then((res) => {
         const data = res.data;
         const filteredClippers = (data.clippers || [])
-          .filter((c: any) => c.status === 'approved' || c.status === 'pending')
+          .filter((c: any) =>
+            (c.status === 'approved' || c.status === 'pending') &&
+            c.views >= 2
+          )
           .map((c: any) => ({
             ...c,
             name: c.name?.split(' ')[0] || c.name,
             status: c.status === 'approved' ? 'approved' : 'pending',
           }));
+
 
         setHistory(data.history || []);
         setClippers(filteredClippers);
@@ -183,11 +187,10 @@ export default function CampaignAnalytics() {
                     </td>
                     <td className="px-6 py-3">
                       <span
-                        className={`px-3 py-1 inline-flex text-xs font-semibold rounded-full ${
-                          c.status === 'approved'
+                        className={`px-3 py-1 inline-flex text-xs font-semibold rounded-full ${c.status === 'approved'
                             ? 'bg-green-100 text-green-800'
                             : 'bg-yellow-100 text-yellow-800'
-                        }`}
+                          }`}
                       >
                         {c.status.charAt(0).toUpperCase() + c.status.slice(1)}
                       </span>
