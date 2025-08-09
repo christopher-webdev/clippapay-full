@@ -33,7 +33,6 @@ const proofStorage = multer.diskStorage({
 });
 const uploadProof = multer({ storage: proofStorage });
 const getRelPath = f => f ? `/uploads/proofs/${path.basename(f.path)}` : undefined;
-
 router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res) => {
   try {
     const { submissionUrl, views } = req.body;
@@ -45,7 +44,15 @@ router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res)
     const proofImage = getRelPath(req.files?.find(f => f.fieldname === 'proofImage'));
     const viewsNum = Number(views) || 0;
 
-    // Find by campaign+clipper (ignore platform for unique join)
+    // --- GLOBAL DUPLICATE CHECK ---
+    const existingProof = await ClipSubmission.findOne({
+      'proofs.submissionUrl': submissionUrl
+    });
+    if (existingProof) {
+      return res.status(409).json({ error: 'This proof link has already been submitted by another clipper.' });
+    }
+
+    // Find by campaign+clipper
     let isNewClipper = false;
     let submission = await ClipSubmission.findOne({ campaign, clipper });
 
@@ -54,17 +61,12 @@ router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res)
       submission = new ClipSubmission({ campaign, clipper, proofs: [] });
     }
 
-    // Prevent duplicate proof (same link for this campaign/platform)
-    if (submission.proofs.some(p => p.submissionUrl === submissionUrl && p.platform === platform)) {
-      return res.status(409).json({ error: 'This proof link has already been submitted for this campaign and platform.' });
-    }
-
     // Require at least one type of proof
     if (!submissionUrl && !proofVideo && !proofImage) {
       return res.status(400).json({ error: 'Proof link or file required.' });
     }
 
-    // Add new proof to proofs array
+    // Add new proof
     submission.proofs.push({
       platform,
       submissionUrl,
@@ -76,7 +78,6 @@ router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res)
 
     await submission.save();
 
-    // --- Increment clippersCount if first submission for this campaign ---
     if (isNewClipper) {
       await Campaign.findByIdAndUpdate(
         campaign,

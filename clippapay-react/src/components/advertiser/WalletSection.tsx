@@ -226,14 +226,14 @@ export default function WalletSection() {
           <UploadCloud className="w-5 h-5" />
           Add Funds
         </button>
-        <button
+        {/* <button
           onClick={() => setShowWdrModal(true)}
           disabled={withdrawable <= 0}
           className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 bg-white border border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 transition disabled:opacity-50"
         >
           <ArrowDownCircle className="w-5 h-5" />
           Withdraw Funds
-        </button>
+        </button> */}
       </div>
 
       {/* Deposit Requests */}
