@@ -407,6 +407,10 @@ router.put(
         if (!camp.advertiser.equals(req.user._id)) {
           return res.status(403).json({ error: 'Access denied.' });
         }
+        // (optional) prevent advertisers from forcing worker/status changes
+        // const { adWorkerStatus, status, ...safe } = req.body;
+        // Object.assign(camp, safe);
+
         Object.assign(camp, req.body);
         await camp.save();
         return res.json(camp);
@@ -417,11 +421,19 @@ router.put(
         if (!camp.assignedWorker.equals(req.user._id)) {
           return res.status(403).json({ error: 'Access denied.' });
         }
+
         const { adWorkerStatus } = req.body;
         if (!['pending','processing','ready','rejected'].includes(adWorkerStatus)) {
           return res.status(400).json({ error: 'Invalid status.' });
         }
+
         camp.adWorkerStatus = adWorkerStatus;
+
+        // 🚀 When worker marks READY, ensure campaign is ACTIVE
+        if (adWorkerStatus === 'ready' && camp.status !== 'active') {
+          camp.status = 'active';
+        }
+
         await camp.save();
         return res.json(camp);
       }
@@ -628,4 +640,379 @@ router.delete(
     }
   }
 );
+
+
+
+
+
+
+////////////////////////////////////////////////////ugc
+// --- UGC assets upload (images/videos/docs for briefs) ---
+const ugcAssetsDir = path.join(process.cwd(), 'uploads/ugc-assets');
+fs.mkdirSync(ugcAssetsDir, { recursive: true });
+
+const ugcAssetStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, ugcAssetsDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const unique = `${Date.now()}-${Math.round(Math.random()*1e9)}`;
+    cb(null, unique + ext);
+  }
+});
+const ugcAssetUpload = multer({
+  storage: ugcAssetStorage,
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB per file
+});
+
+// Utility: safe JSON parse for array fields
+const parseArr = (val, fallback = []) => {
+  try {
+    if (val == null || val === '') return fallback;
+    const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch { return fallback; }
+};
+
+
+/**
+ * POST /api/campaigns/ugc
+ * Create a UGC campaign (advertiser only)
+ * - Locks FULL escrow = budget (uses UGC rate_per_1000 = 5000)
+ * - Sets clipper_cpm = 2000
+ */
+router.post(
+  '/ugc',
+  requireAuth,
+  requireAdvertiser,
+  ugcAssetUpload.array('assets', 12), // optional files from form field `assets`
+  async (req, res) => {
+    try {
+      const advertiserId = req.user._id;
+
+      // BODY: title, budget, platforms[], countries[], hashtags[], directions[], categories[], numClipsSuggested
+      // UGC meta: brief, deliverables[], draftRequired, captionTemplate, usageRights, creativeDeadline, postDeadline
+      const {
+        title,
+        budget,
+        platforms, countries, hashtags, directions, categories,
+        numClipsSuggested,
+
+        brief,
+        deliverables,
+        draftRequired,
+        captionTemplate,
+        usageRights,
+        creativeDeadline,
+        postDeadline,
+      } = req.body;
+
+      // Required
+      if (!title) return res.status(400).json({ error: 'title is required' });
+      const budgetVal = Number(budget);
+      if (!Number.isFinite(budgetVal) || budgetVal <= 0) {
+        return res.status(400).json({ error: 'Invalid budget' });
+      }
+
+      const platformsArr   = parseArr(platforms);
+      const countriesArr   = parseArr(countries);
+      const hashtagsArr    = parseArr(hashtags);
+      const directionsArr  = parseArr(directions);
+      const categoriesArr  = parseArr(categories);
+      const deliverablesArr= parseArr(deliverables);
+
+      if (platformsArr.length === 0) return res.status(400).json({ error: 'At least one platform is required' });
+      if (categoriesArr.length === 0) return res.status(400).json({ error: 'At least one category is required' });
+
+      // UGC fixed economics
+      const UGC_ADVERTISER_CPM = 5000; // advertiser pays
+      const UGC_CLIPPER_CPM    = 2000; // clipper earns
+      const costPerView        = UGC_ADVERTISER_CPM / 1000; // ₦5 per view
+
+      // Minimum 1,000 views (₦5,000)
+      if (budgetVal < 1000 * costPerView) {
+        return res.status(400).json({ error: 'Minimum budget for UGC is ₦5,000 (1,000 views)' });
+      }
+
+      // Views purchasable from budget at advertiser rate
+      const viewsPurchased = Math.floor(budgetVal / costPerView);
+
+      // Wallet + escrow
+      const advertiserWallet = await Wallet.findOne({ user: advertiserId });
+      if (!advertiserWallet) return res.status(400).json({ error: 'Wallet not found' });
+      if (advertiserWallet.balance < budgetVal) {
+        return res.status(400).json({
+          error: 'Insufficient wallet balance',
+          currentBalance: advertiserWallet.balance,
+          required: budgetVal
+        });
+      }
+
+      // Build assets list (relative paths)
+      const assetPaths = (req.files || []).map(f => `/uploads/ugc-assets/${path.basename(f.path)}`);
+
+      // Create campaign document
+      const campaign = new Campaign({
+        kind: 'ugc',
+        advertiser: advertiserId,
+        title,
+
+        // Financials
+        rate_per_1000: UGC_ADVERTISER_CPM,
+        clipper_cpm: UGC_CLIPPER_CPM,
+
+        // Budget/Views
+        budget_total: budgetVal,
+        budget_remaining: budgetVal,
+        views_purchased: viewsPurchased,
+        views_left: viewsPurchased,
+
+        // Targeting/Meta
+        platforms: platformsArr,
+        countries: countriesArr,
+        hashtags: hashtagsArr,
+        directions: directionsArr,
+        cta_url: req.body.cta_url || undefined,
+        categories: categoriesArr,
+        numClipsSuggested: Number.parseInt(numClipsSuggested || '1', 10) || 1,
+
+        // UGC meta
+        ugc: {
+          brief: brief || '',
+          deliverables: deliverablesArr,
+          assets: assetPaths,
+          draftRequired: typeof draftRequired === 'string' ? draftRequired === 'true' : (draftRequired ?? true),
+          captionTemplate: captionTemplate || '',
+          usageRights: usageRights || '',
+          creativeDeadline: creativeDeadline ? new Date(creativeDeadline) : undefined,
+          postDeadline: postDeadline ? new Date(postDeadline) : undefined,
+          hashtags: hashtagsArr, // can override/append if you want different behavior
+        },
+
+        status: 'pending',
+      });
+
+      // Assign ad worker (optional – reuse your helper)
+      const worker = await getNextAdWorker();
+      if (worker) campaign.assignedWorker = worker._id;
+
+      // Lock FULL advertiser cost in escrow
+      await advertiserWallet.lockEscrow(budgetVal);
+
+      await campaign.save();
+      return res.status(201).json(campaign);
+    } catch (err) {
+      console.error('UGC create error:', err);
+      // cleanup uploaded files on error
+      for (const f of (req.files || [])) {
+        try { await fs.promises.unlink(f.path); } catch {}
+      }
+      return res.status(500).json({ error: 'Server error creating UGC campaign' });
+    }
+  }
+);
+/**
+ * GET /api/campaigns/ugc
+ * List advertiser's UGC campaigns
+ */
+router.get(
+  '/ugc',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      const rows = await Campaign.find({ advertiser: req.user._id, kind: 'ugc' })
+        .sort({ createdAt: -1 });
+      return res.json(rows);
+    } catch (err) {
+      console.error('UGC list error:', err);
+      return res.status(500).json({ error: 'Failed to fetch UGC campaigns' });
+    }
+  }
+);
+/**
+ * PATCH /api/campaigns/:id/ugc
+ * Update UGC-specific fields (owner advertiser only)
+ */
+router.patch(
+  '/:id/ugc',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      const camp = await Campaign.findById(req.params.id);
+      if (!camp) return res.status(404).json({ error: 'Campaign not found' });
+      if (!camp.advertiser.equals(req.user._id)) return res.status(403).json({ error: 'Access denied' });
+      if (camp.kind !== 'ugc') return res.status(400).json({ error: 'Not a UGC campaign' });
+
+      const {
+        brief, deliverables, captionTemplate, usageRights,
+        draftRequired, creativeDeadline, postDeadline, hashtags
+      } = req.body;
+
+      camp.ugc = camp.ugc || {};
+      if (brief !== undefined) camp.ugc.brief = brief;
+      if (deliverables !== undefined) camp.ugc.deliverables = parseArr(deliverables, camp.ugc.deliverables || []);
+      if (captionTemplate !== undefined) camp.ugc.captionTemplate = captionTemplate;
+      if (usageRights !== undefined) camp.ugc.usageRights = usageRights;
+      if (hashtags !== undefined) camp.ugc.hashtags = parseArr(hashtags, camp.ugc.hashtags || []);
+      if (draftRequired !== undefined) {
+        camp.ugc.draftRequired = typeof draftRequired === 'string' ? draftRequired === 'true' : !!draftRequired;
+      }
+      if (creativeDeadline !== undefined) camp.ugc.creativeDeadline = creativeDeadline ? new Date(creativeDeadline) : undefined;
+      if (postDeadline !== undefined) camp.ugc.postDeadline = postDeadline ? new Date(postDeadline) : undefined;
+
+      await camp.save();
+      return res.json(camp);
+    } catch (err) {
+      console.error('UGC update error:', err);
+      return res.status(500).json({ error: 'Failed to update UGC campaign' });
+    }
+  }
+);
+/**
+ * POST /api/campaigns/:id/ugc/assets
+ * Append assets to UGC campaign
+ */
+router.post(
+  '/:id/ugc/assets',
+  requireAuth,
+  requireAdvertiser,
+  ugcAssetUpload.array('assets', 12),
+  async (req, res) => {
+    try {
+      const camp = await Campaign.findById(req.params.id);
+      if (!camp) return res.status(404).json({ error: 'Campaign not found' });
+      if (!camp.advertiser.equals(req.user._id)) return res.status(403).json({ error: 'Access denied' });
+      if (camp.kind !== 'ugc') return res.status(400).json({ error: 'Not a UGC campaign' });
+
+      const newAssets = (req.files || []).map(f => `/uploads/ugc-assets/${path.basename(f.path)}`);
+      camp.ugc = camp.ugc || {};
+      camp.ugc.assets = [...(camp.ugc.assets || []), ...newAssets];
+
+      await camp.save();
+      return res.json({ assets: camp.ugc.assets });
+    } catch (err) {
+      console.error('UGC assets upload error:', err);
+      // cleanup uploaded files on error
+      for (const f of (req.files || [])) {
+        try { await fs.promises.unlink(f.path); } catch {}
+      }
+      return res.status(500).json({ error: 'Failed to upload assets' });
+    }
+  }
+);
+/**
+ * DELETE /api/campaigns/:id/ugc/assets/:index
+ * Remove an asset from UGC campaign (and delete file)
+ */
+router.delete(
+  '/:id/ugc/assets/:index',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      const idx = Number(req.params.index);
+      const camp = await Campaign.findById(req.params.id);
+      if (!camp) return res.status(404).json({ error: 'Campaign not found' });
+      if (!camp.advertiser.equals(req.user._id)) return res.status(403).json({ error: 'Access denied' });
+      if (camp.kind !== 'ugc') return res.status(400).json({ error: 'Not a UGC campaign' });
+
+      const assets = camp.ugc?.assets || [];
+      if (!(idx >= 0 && idx < assets.length)) {
+        return res.status(400).json({ error: 'Invalid asset index' });
+      }
+
+      const [removed] = assets.splice(idx, 1);
+      camp.ugc.assets = assets;
+      await camp.save();
+
+      // delete file
+      if (removed) {
+        const abs = path.join(process.cwd(), removed);
+        try { await fs.promises.unlink(abs); } catch {}
+      }
+
+      return res.json({ assets });
+    } catch (err) {
+      console.error('UGC asset delete error:', err);
+      return res.status(500).json({ error: 'Failed to delete asset' });
+    }
+  }
+);
+/**
+ * POST /api/campaigns/:id/activate
+ * Move campaign to 'active' (owner advertiser)
+ * (Escrow should already be locked at creation; this is just a status change)
+ */
+router.post(
+  '/:id/activate',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      const camp = await Campaign.findById(req.params.id);
+      if (!camp) return res.status(404).json({ error: 'Campaign not found' });
+      if (!camp.advertiser.equals(req.user._id)) return res.status(403).json({ error: 'Access denied' });
+      if (camp.status === 'active') return res.json(camp);
+
+      camp.status = 'active';
+      await camp.save();
+      return res.json(camp);
+    } catch (err) {
+      console.error('UGC activate error:', err);
+      return res.status(500).json({ error: 'Failed to activate campaign' });
+    }
+  }
+);
+/**
+ * POST /api/campaigns/:id/fund
+ * Top-up budget for a campaign (locks full advertiser cost to escrow)
+ * body: { amount: number }
+ */
+router.post(
+  '/:id/fund',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      const amount = Number(req.body.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ error: 'Invalid amount' });
+      }
+
+      const camp = await Campaign.findById(req.params.id);
+      if (!camp) return res.status(404).json({ error: 'Campaign not found' });
+      if (!camp.advertiser.equals(req.user._id)) return res.status(403).json({ error: 'Access denied' });
+
+      const wallet = await Wallet.findOne({ user: req.user._id });
+      if (!wallet) return res.status(400).json({ error: 'Wallet not found' });
+      if (wallet.balance < amount) {
+        return res.status(400).json({
+          error: 'Insufficient wallet balance',
+          currentBalance: wallet.balance,
+          required: amount
+        });
+      }
+
+      // Lock full amount in escrow
+      await wallet.lockEscrow(amount);
+
+      // Update campaign financials/views based on advertiser CPM
+      const costPerView = camp.rate_per_1000 / 1000; // e.g., 5 for UGC
+      const addViews = Math.floor(amount / costPerView);
+
+      camp.budget_total     += amount;
+      camp.budget_remaining += amount;
+      camp.views_purchased  += addViews;
+      camp.views_left       += addViews;
+
+      await camp.save();
+      return res.json(camp);
+    } catch (err) {
+      console.error('UGC fund error:', err);
+      return res.status(500).json({ error: 'Failed to fund campaign' });
+    }
+  }
+);
+
 export default router;

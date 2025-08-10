@@ -9,19 +9,20 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },  
- server: {
-    proxy: {
-      '/api': {
-        target: 'http://clippapay.com',//'http://localhost:5000'
-        changeOrigin: true,
-      },
-      '/uploads': {
-        target: 'http://clippapay.com', // 'http://localhost:5000', // // ← this is required
-        changeOrigin: true,
-        secure: false,
-      },
-    }
+server: {
+  proxy: {
+    '/api': {
+      target: 'http://clippapay.com', //'http://localhost:5000',
+      changeOrigin: true,
+      secure: false,
+    },
+    '/uploads': {
+      target: 'http://clippapay.com', //'http://localhost:5000',
+      changeOrigin: true,
+      secure: false,
+    },
   },
+},
   build: {
     outDir: 'build',
     emptyOutDir: true, // clean build folder on each build

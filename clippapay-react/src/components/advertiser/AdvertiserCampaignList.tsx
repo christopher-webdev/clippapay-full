@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { Film, Loader2 } from 'lucide-react';
+import CampaignKindBadge from './CampaignKindBadge';
 
 interface Campaign {
   _id: string;
@@ -16,7 +17,10 @@ interface Campaign {
   views_purchased: number;
   views_left: number;
   numClipsSuggested: number;
+  kind?: 'normal' | 'ugc';            // <-- added
+  clippersCount?: number;             // <-- used in UI
 }
+
 
 interface CampaignDetails {
   campaign: {
@@ -41,6 +45,14 @@ interface CampaignDetails {
     adWorkerPercentage: number;
     clippersCount: number;
     lowFundsThreshold: number;
+    kind?: 'normal' | 'ugc';          // <-- added
+    ugc?: {                           // <-- added
+      assets?: string[];
+      brief?: string;
+      deliverables?: string[];
+      captionTemplate?: string;
+      usageRights?: string;
+    };
   };
   clips: {
     _id: string;
@@ -50,7 +62,6 @@ interface CampaignDetails {
     adWorker: { contactName: string, email: string };
   }[];
 }
-
 const PER_PAGE = 10;
 
 export default function AdvertiserCampaignList() {
@@ -106,13 +117,22 @@ export default function AdvertiserCampaignList() {
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900">
           Your Campaigns
         </h1>
-        <button
-          onClick={() => navigate('/dashboard/advertiser/create-campaign')}
-          className="px-5 py-3 bg-cp-blue text-white rounded-lg font-semibold shadow hover:bg-cp-indigo transition"
-        >
-          + Create Campaign
-        </button>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={() => navigate('/dashboard/advertiser/create-campaign')}
+            className="px-5 py-3 bg-cp-blue text-white rounded-lg font-semibold shadow hover:bg-cp-indigo transition"
+          >
+            + Create Campaign
+          </button>
+          <button
+            onClick={() => navigate('/dashboard/advertiser/create-ugc')}
+            className="px-5 py-3 bg-green-600 text-white rounded-lg font-semibold shadow hover:bg-green-700 transition"
+          >
+            + Create UGC Campaign
+          </button>
+        </div>
       </div>
+
 
       {loading && (
         <div className="flex items-center gap-2 text-gray-500 text-lg"><Loader2 className="animate-spin" />Loading…</div>
@@ -231,6 +251,7 @@ function CampaignCard({ c, setSelectedId }: { c: Campaign; setSelectedId: (id: s
         )}
         <div>
           <div className="text-lg font-bold text-gray-900">{c.title}</div>
+          <CampaignKindBadge kind={c.kind} />
           <span
             className={`inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold border ${statusColor}`}
           >
@@ -315,7 +336,7 @@ function Pagination({
     </div>
   );
 }
-
+// 3) Replace your current CampaignDetailsModal with this version
 function CampaignDetailsModal({ campaignId, onClose }: {
   campaignId: string;
   onClose: () => void;
@@ -323,6 +344,13 @@ function CampaignDetailsModal({ campaignId, onClose }: {
   const [details, setDetails] = useState<CampaignDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // close on Esc
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
 
   useEffect(() => {
     setLoading(true);
@@ -344,11 +372,46 @@ function CampaignDetailsModal({ campaignId, onClose }: {
     )
     : 0;
 
+  // UGC assets
+  const assets = details?.campaign?.ugc?.assets || [];
+
+  // Detect by file extension
+  const getKind = (url: string) => {
+    const u = url.toLowerCase();
+    if (u.match(/\.(png|jpe?g|webp|gif|svg)$/)) return 'image';
+    if (u.match(/\.(mp4|mov|webm|avi|mkv)$/)) return 'video';
+    if (u.match(/\.(mp3|wav|m4a|aac|ogg)$/)) return 'audio';
+    if (u.endsWith('.pdf')) return 'pdf';
+    return 'file';
+  };
+
+  // Backdrop click closes
+  function Backdrop({ children }: { children: React.ReactNode }) {
+    return (
+      <div
+        className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center px-2"
+        onClick={onClose}
+      >
+        {/* stop propagation so inner clicks don't close */}
+        <div onClick={e => e.stopPropagation()} className="w-full max-w-2xl">
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-2">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-auto relative animate-fadeIn">
-        <button className="absolute top-4 right-4 text-3xl text-gray-400 hover:text-gray-900"
-          onClick={onClose} aria-label="Close">&times;</button>
+    <Backdrop>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-2xl mx-auto relative animate-fadeIn
+                      max-h-[90vh] overflow-y-auto">
+        <button
+          className="sticky top-0 ml-auto mr-2 mt-2 z-10 text-3xl text-gray-400 hover:text-gray-900"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          &times;
+        </button>
+
         {loading ? (
           <div className="p-12 text-center flex items-center justify-center">
             <Loader2 className="animate-spin mr-2" />Loading…
@@ -356,7 +419,8 @@ function CampaignDetailsModal({ campaignId, onClose }: {
         ) : !details ? (
           <div className="p-12 text-center text-red-500">{error || 'Failed to load details.'}</div>
         ) : (
-          <div className="p-7">
+          <div className="p-6 sm:p-7">
+            {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-2xl font-bold mb-1">{details.campaign.title}</h2>
@@ -381,7 +445,8 @@ function CampaignDetailsModal({ campaignId, onClose }: {
                   : details.campaign.adWorkerStatus.toUpperCase()}
               </span>
             </div>
-            {/* Progress Bar in Modal */}
+
+            {/* Progress */}
             <div className="w-full mb-6">
               <div className="flex justify-between items-center text-[11px] font-semibold mb-1">
                 <span>Progress</span>
@@ -389,7 +454,7 @@ function CampaignDetailsModal({ campaignId, onClose }: {
               </div>
               <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-all`}
+                  className="h-full rounded-full transition-all"
                   style={{
                     width: `${progress}%`,
                     background: progress >= 100
@@ -401,9 +466,9 @@ function CampaignDetailsModal({ campaignId, onClose }: {
                 />
               </div>
             </div>
+
             {/* Info grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-gray-700 mb-6">
-              <InfoRow label="Rate Per Thousand View (₦)" value={details.campaign.rate_per_view} />
               <InfoRow label="Total Budget (₦)" value={details.campaign.budget_total.toLocaleString()} />
               <InfoRow label="Budget Remaining (₦)" value={details.campaign.budget_remaining.toLocaleString()} />
               <InfoRow label="Views Purchased" value={details.campaign.views_purchased?.toLocaleString()} />
@@ -415,6 +480,10 @@ function CampaignDetailsModal({ campaignId, onClose }: {
               <InfoRow label="Categories" value={details.campaign.categories.join(', ')} />
               <InfoRow label="Directions" value={details.campaign.directions.join(' | ')} />
               <InfoRow label="Suggested Clips" value={details.campaign.numClipsSuggested} />
+              <InfoRow label="brief" value={details?.campaign?.ugc?.brief} />
+              <InfoRow label="deliverables" value={details?.campaign?.ugc?.deliverables} />
+              <InfoRow label="caption template" value={details?.campaign?.ugc?.captionTemplate} />
+            
               {details.campaign.cta_url && (
                 <InfoRow label="CTA URL" value={
                   <a href={details.campaign.cta_url} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">
@@ -424,7 +493,58 @@ function CampaignDetailsModal({ campaignId, onClose }: {
               )}
               <InfoRow label="Status" value={details.campaign.status} />
             </div>
-            {/* Clips section */}
+
+            {/* UGC Assets */}
+            {details.campaign.kind === 'ugc' && assets.length > 0 && (
+              <div className="mt-6">
+                <h3 className="font-semibold mb-2">Campaign Assets</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {assets.map((url, i) => {
+                    const kind = getKind(url);
+                    if (kind === 'image') {
+                      return (
+                        <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="block border rounded-lg overflow-hidden bg-gray-50">
+                          <img src={url} alt={`asset-${i}`} className="w-40 h-40" />
+                          <div className="px-3 py-2 text-xs text-gray-600 truncate">{url}</div>
+                        </a>
+                      );
+                    }
+                    if (kind === 'video') {
+                      return (
+                        <div key={i} className="border rounded-lg overflow-hidden bg-gray-50">
+                          <video controls src={url} className="w-40 h-60" />
+                          <div className="px-3 py-2 text-xs text-gray-600 truncate">{url}</div>
+                        </div>
+                      );
+                    }
+                    if (kind === 'audio') {
+                      return (
+                        <div key={i} className="border rounded-lg p-3 bg-gray-50">
+                          <audio controls src={url} className="w-40" />
+                          <div className="mt-2 text-xs text-gray-600 truncate">{url}</div>
+                        </div>
+                      );
+                    }
+                    if (kind === 'pdf') {
+                      return (
+                        <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                          className="border rounded-lg p-3 bg-gray-50 hover:bg-gray-100 transition text-sm text-blue-700 underline">
+                          Open PDF: {url.split('/').pop()}
+                        </a>
+                      );
+                    }
+                    return (
+                      <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                        className="border rounded-lg p-3 bg-gray-50 hover:bg-gray-100 transition text-sm text-blue-700 underline truncate">
+                        Open file: {url}
+                      </a>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Clips */}
             <div className="mt-7">
               <h3 className="font-semibold mb-2 flex items-center gap-2">
                 <Film className="w-5 h-5" />
@@ -434,7 +554,7 @@ function CampaignDetailsModal({ campaignId, onClose }: {
                 <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                   {clips.map(clip => (
                     <div key={clip._id} className="p-3 rounded-lg border bg-gray-50">
-                      <video src={clip.url} controls className="w-full h-36 rounded mb-2" />
+                      <video src={clip.url} controls className="w-36 h-36 rounded mb-2" />
                       <div className="text-xs text-gray-500">
                         Uploaded: {new Date(clip.createdAt).toLocaleString()}
                       </div>
@@ -451,10 +571,9 @@ function CampaignDetailsModal({ campaignId, onClose }: {
           </div>
         )}
       </div>
-    </div>
+    </Backdrop>
   );
 }
-
 // Info grid row for modal
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (

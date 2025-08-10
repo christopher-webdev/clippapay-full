@@ -20,6 +20,7 @@ import WalletSection from './components/advertiser/WalletSection';
 import NotificationsPanel from './components/advertiser/NotificationsPanel';
 import SettingsPanel from './components/advertiser/SettingsPanel';
 import AdvertiserHowTo from './components/advertiser/AdvertiserHowTo';  
+import CreateUGCCampaignForm from './components/advertiser/Create-Ugc.tsx';
 
 
 // Clipper
@@ -91,6 +92,7 @@ export default function App() {
         <Route path="notifications" element={<NotificationsPanel />} />
         <Route path="settings" element={<SettingsPanel />} />
         <Route path="how-to" element={<AdvertiserHowTo />} />
+        <Route path="create-ugc" element={<CreateUGCCampaignForm />} />
       </Route>
 
       {/* Clipper */}

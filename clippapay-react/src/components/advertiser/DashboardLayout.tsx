@@ -144,7 +144,7 @@ export default function AdvertiserDashboardLayout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 bg-gray-50 overflow-y-auto p-6 pt-20 md:pt-6">
+      <main className="flex-1 bg-gray-0 overflow-y-auto p-6 pt-20 md:pt-6">
         <div className="flex justify-between items-center mb-6">
           <div className="mb-6">
             <h2 className="text-2xl font-bold flex items-center gap-2">

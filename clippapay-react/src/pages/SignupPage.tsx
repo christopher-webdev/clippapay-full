@@ -1,16 +1,23 @@
-// signup 
+// signup
 
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { getData } from "country-list";
+import {
+  HiVideoCamera,
+  HiPhotograph,
+  HiTrendingUp,
+  HiCash,
+  HiSpeakerphone,
+  HiShieldCheck,
+  HiBadgeCheck,
+} from "react-icons/hi";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // grab & sort ISO country list
-const countryOptions = getData().sort((a, b) =>
-  a.name.localeCompare(b.name)
-);
+const countryOptions = getData().sort((a, b) => a.name.localeCompare(b.name));
 
 // Creator types for advertisers to select
 const CREATOR_TYPES = [
@@ -30,6 +37,93 @@ const CREATOR_TYPES = [
   "Entrepreneur / Business Owner / Brand",
   "Other (please specify)"
 ];
+
+// ---- New: small role explainer card ----
+function RoleInfo({ role }: { role: "clipper" | "advertiser" }) {
+  const variants = {
+    initial: { opacity: 0, y: 8 },
+    animate: { opacity: 1, y: 0, transition: { duration: 0.25 } },
+    exit: { opacity: 0, y: -8, transition: { duration: 0.2 } },
+  };
+
+  if (role === "clipper") {
+    return (
+      <motion.div
+        key="clipper-info"
+        variants={variants}
+        initial="initial"
+        animate="animate"
+        exit="exit"
+        className="mt-3 rounded-2xl border border-purple-100 bg-gradient-to-br from-purple-50 to-white p-4"
+      >
+        <div className="flex items-start gap-3">
+          <div className="shrink-0 rounded-xl bg-purple-600/10 p-2">
+            <HiVideoCamera className="h-6 w-6 text-purple-600" />
+          </div>
+          <div>
+            <h4 className="font-semibold text-gray-800">Sign up as a Clipper</h4>
+            <p className="mt-1 text-sm text-gray-600">
+              You create and post short clips for active campaigns, then submit proof links or media.
+              When your views are verified, you get paid automatically.
+            </p>
+            <ul className="mt-3 grid gap-2 text-sm text-gray-700">
+              <li className="flex items-center gap-2">
+                <HiBadgeCheck className="h-5 w-5 text-green-600" />
+                Join campaigns across TikTok, Instagram, YouTube, Facebook, and X.
+              </li>
+              <li className="flex items-center gap-2">
+                <HiTrendingUp className="h-5 w-5 text-indigo-600" />
+                Earn per 1,000 verified views (CPM). Higher quality = better approval rate.
+              </li>
+              <li className="flex items-center gap-2">
+                <HiCash className="h-5 w-5 text-emerald-600" />
+                Instant wallet credit on approval; withdraw when you’re ready.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  return (
+    <motion.div
+      key="advertiser-info"
+      variants={variants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      className="mt-3 rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white p-4"
+    >
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 rounded-xl bg-sky-600/10 p-2">
+          <HiSpeakerphone className="h-6 w-6 text-sky-600" />
+
+        </div>
+        <div>
+          <h4 className="font-semibold text-gray-800">Sign up as an Advertiser</h4>
+          <p className="mt-1 text-sm text-gray-600">
+            You create campaigns and set budgets/targets. Clippers post content that drives views; you pay only for verified results.
+          </p>
+          <ul className="mt-3 grid gap-2 text-sm text-gray-700">
+            <li className="flex items-center gap-2">
+              <HiShieldCheck className="h-5 w-5 text-green-600" />
+              Funds are escrowed and released only after verification.
+            </li>
+            <li className="flex items-center gap-2">
+              <HiPhotograph className="h-5 w-5 text-indigo-600" />
+              Run standard or UGC-style briefs with assets, captions, and deadlines.
+            </li>
+            <li className="flex items-center gap-2">
+              <HiTrendingUp className="h-5 w-5 text-rose-600" />
+              Track remaining views & budget in real time; scale what’s working.
+            </li>
+          </ul>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
 
 export default function SignupPage() {
   const navigate = useNavigate();
@@ -89,6 +183,7 @@ export default function SignupPage() {
     if (!res.ok) throw new Error(data.error || data.message);
     return data;
   }
+
   const submitSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -120,7 +215,6 @@ export default function SignupPage() {
       setLoading(false);
     }
   };
-
 
   const submitOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -187,6 +281,11 @@ export default function SignupPage() {
                     <option value="clipper">Clipper</option>
                     <option value="advertiser">Advertiser</option>
                   </select>
+
+                  {/* New: Role explainer appears here */}
+                  <AnimatePresence mode="wait">
+                    <RoleInfo role={formData.role as "clipper" | "advertiser"} />
+                  </AnimatePresence>
                 </div>
 
                 {/* Email */}

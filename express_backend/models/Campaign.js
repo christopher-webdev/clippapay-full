@@ -1,5 +1,4 @@
-// model campaign.js
-
+// // model campaign.js
 
 import mongoose from 'mongoose';
 const { Schema } = mongoose;
@@ -9,6 +8,20 @@ const campaignSchema = new Schema({
   title: { type: String, required: true },
   thumb_url: String,
   video_url: String,
+  kind: { type: String, enum: ['normal', 'ugc'], default: 'normal', index: true },
+  
+  ugc: {
+    brief:        { type: String },
+    deliverables: { type: [String], default: [] },
+    assets:       { type: [String], default: [] },
+    draftRequired:{ type: Boolean, default: true },
+    creativeDeadline: Date,
+    postDeadline:     Date,
+    captionTemplate:  String,
+    hashtags:         { type: [String], default: [] },
+    usageRights:      { type: String },
+  },
+
 
   // FINANCIALS & VIEWS
   rate_per_1000: { type: Number, default: 1200, required: true }, // advertiser pays per 1000 views
@@ -42,6 +55,13 @@ const campaignSchema = new Schema({
   }
 }, { timestamps: true });
 
+campaignSchema.pre('validate', function(next){
+  if (this.kind === 'ugc') {
+    if (!this.isModified('rate_per_1000')) this.rate_per_1000 = 5000; // advertiser cost
+    if (!this.isModified('clipper_cpm'))   this.clipper_cpm   = 2000; // clipper payout
+  }
+  next();
+});
 /**
  * Increment participant count when a clipper joins.
  */

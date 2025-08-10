@@ -13,6 +13,11 @@ const transactionSchema = new mongoose.Schema({
     required: true
   },
   amount:    { type: Number, required: true },
+  // newly addied
+  rateSnapshot: { type: Number },
+  proofId:      { type: mongoose.Schema.Types.ObjectId },
+  campaignKind: { type: String, enum: ['normal','ugc'] },
+//end of newly added
 
   // optional links back to campaign or submission
   campaign:           { type: mongoose.Schema.Types.ObjectId, ref: 'Campaign' },

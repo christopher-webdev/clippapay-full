@@ -15,6 +15,8 @@ import fs from 'fs';
 import multer from 'multer';
 import path from 'path';
 import Wallet from '../models/Wallet.js';
+import User from '../models/User.js';
+import Transaction from '../models/Transaction.js';
 
 
 const router = express.Router();
@@ -238,41 +240,51 @@ router.get('/available', requireAuth, async (req, res) => {
 
 
 
+// routes/clippers.js  (inside router.get('/:id', ...))
 router.get('/:id', requireAuth, async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.id)
-      .populate('advertiser', 'contactName email');
+      .populate('advertiser', 'contactName email')
+      .lean(); // <— return plain object so we can shape output easily
 
     if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
 
     // Only show to clippers if campaign is active & ready
-    if (
-      campaign.status !== 'active' ||
-      campaign.adWorkerStatus !== 'ready'
-    ) {
+    if (campaign.status !== 'active' || campaign.adWorkerStatus !== 'ready') {
       return res.status(403).json({ error: 'Campaign not available.' });
     }
 
-    // Get the AD-WORKER CLIPS for this campaign
     const clips = await Clip.find({ campaign: campaign._id })
       .sort('index')
-      .select('_id url index'); // only basic info
+      .select('_id url index createdAt')
+      .lean();
 
+    // Shape the response your UI expects, plus UGC when present
     res.json({
-      id: campaign._id,
+      id: campaign._id.toString(),
       title: campaign.title,
       advertiser: campaign.advertiser?.contactName || 'Advertiser',
       description: campaign.description || '',
       thumbUrl: campaign.thumb_url,
-      payPerView: campaign.clipper_cpm ?? 500,
+      payPerView: campaign.clipper_cpm ?? 500, // still "per 1000" in your label
       totalViews: campaign.views_purchased,
+      views_left: campaign.views_left,
       clippersCount: campaign.clippersCount,
       platforms: campaign.platforms,
       instructions: campaign.directions,
       hashtags: campaign.hashtags,
       status: campaign.status,
+      // NEW:
+      kind: campaign.kind,                // 'ugc' | 'normal'
+      ugc: campaign.kind === 'ugc' ? {
+        assets: campaign.ugc?.assets || [],
+        brief: campaign.ugc?.brief || '',
+        deliverables: campaign.ugc?.deliverables || [],
+        captionTemplate: campaign.ugc?.captionTemplate || '',
+        usageRights: campaign.ugc?.usageRights || '',
+      } : undefined,
       clips: clips.map(c => ({
-        id: c._id,
+        id: c._id.toString(),
         url: c.url,
         index: c.index,
       })),
@@ -282,6 +294,292 @@ router.get('/:id', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Could not fetch campaign details.' });
   }
 });
+
+// ========================= UGC (Clipper) ROUTES ==============================
+
+/**
+ * GET /api/clippers/ugc/available
+ * List ACTIVE UGC campaigns a clipper can work on.
+ */
+router.get('/ugc/available', requireAuth, async (req, res) => {
+  try {
+    const now = new Date();
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const campaigns = await Campaign.find({
+      kind: 'ugc',
+      status: 'active',
+      adWorkerStatus: 'ready',
+      views_left: { $gt: 0 },
+      $or: [
+        { $expr: { $gt: ['$views_left', { $multiply: ['$views_purchased', 0.5] } ] } },
+        {
+          $and: [
+            { $expr: { $lte: ['$views_left', { $multiply: ['$views_purchased', 0.5] } ] } },
+            { updatedAt: { $gte: twentyFourHoursAgo } }
+          ]
+        }
+      ]
+    })
+    .sort({ updatedAt: -1 })
+    .select(
+      '_id title thumb_url rate_per_1000 clipper_cpm budget_total budget_remaining views_purchased views_left categories hashtags status adWorkerStatus createdAt updatedAt ugc'
+    );
+
+    res.json(campaigns);
+  } catch (err) {
+    console.error('UGC available error:', err);
+    res.status(500).json({ error: 'Could not fetch available UGC campaigns.' });
+  }
+});
+
+
+/**
+ * GET /api/clippers/ugc/:id
+ * Details page for a single UGC campaign (clipper-facing).
+ */
+router.get('/ugc/:id', requireAuth, async (req, res) => {
+  try {
+    const campaign = await Campaign.findById(req.params.id)
+      .populate('advertiser', 'contactName email');
+
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+    if (campaign.kind !== 'ugc') return res.status(400).json({ error: 'Not a UGC campaign.' });
+
+    // Only show to clippers if campaign is active & ready
+    if (campaign.status !== 'active' || campaign.adWorkerStatus !== 'ready') {
+      return res.status(403).json({ error: 'Campaign not available.' });
+    }
+
+    res.json({
+      id: campaign._id,
+      kind: campaign.kind,
+      title: campaign.title,
+      advertiser: campaign.advertiser?.contactName || 'Advertiser',
+      brief: campaign.ugc?.brief || '',
+      deliverables: campaign.ugc?.deliverables || [],
+      assets: campaign.ugc?.assets || [],
+      captionTemplate: campaign.ugc?.captionTemplate || '',
+      usageRights: campaign.ugc?.usageRights || '',
+      creativeDeadline: campaign.ugc?.creativeDeadline,
+      postDeadline: campaign.ugc?.postDeadline,
+
+      thumbUrl: campaign.thumb_url,
+      payPerView: (campaign.clipper_cpm || 0) / 1000, // e.g. 2000/k => 2 per view
+      advertiserCostPerView: (campaign.rate_per_1000 || 0) / 1000, // e.g. 5 per view
+      totalViews: campaign.views_purchased,
+      clippersCount: campaign.clippersCount,
+      platforms: campaign.platforms,
+      instructions: campaign.directions,
+      hashtags: campaign.hashtags,
+      status: campaign.status
+    });
+  } catch (err) {
+    console.error('UGC details error:', err);
+    res.status(500).json({ error: 'Could not fetch UGC campaign details.' });
+  }
+});
+
+
+/**
+ * POST /api/clippers/ugc/:campaignId/join
+ * Create (or get) a submission doc so clipper is attached to the job.
+ */
+router.post('/ugc/:campaignId/join', requireAuth, requireClipper, async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+    const clipper = req.user._id;
+
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+    if (campaign.kind !== 'ugc') return res.status(400).json({ error: 'Not a UGC campaign.' });
+    if (campaign.status !== 'active' || campaign.adWorkerStatus !== 'ready') {
+      return res.status(403).json({ error: 'Campaign not available.' });
+    }
+
+    let submission = await ClipSubmission.findOne({ campaign: campaign._id, clipper });
+    let created = false;
+
+    if (!submission) {
+      submission = await ClipSubmission.create({ campaign: campaign._id, clipper, proofs: [] });
+      created = true;
+      await Campaign.findByIdAndUpdate(campaign._id, { $inc: { clippersCount: 1 } });
+    }
+
+    res.status(created ? 201 : 200).json({ submission });
+  } catch (err) {
+    console.error('UGC join error:', err);
+    res.status(500).json({ error: 'Could not join UGC campaign.' });
+  }
+});
+
+
+/**
+ * POST /api/clippers/ugc/:id/submit-proof
+ * Submit a posted UGC proof (separate path, same storage rules).
+ * Body: { submissionUrl, platform, views }
+ * Files (optional): proofVideo, proofImage
+ */
+router.post('/ugc/:id/submit-proof', requireAuth, requireClipper, uploadProof.any(), async (req, res) => {
+  try {
+    const { submissionUrl, views } = req.body;
+    const platform = req.body.platform;
+    const clipper = req.user._id;
+    const campaignId = req.params.id;
+
+    const proofVideo = getRelPath(req.files?.find(f => f.fieldname === 'proofVideo'));
+    const proofImage = getRelPath(req.files?.find(f => f.fieldname === 'proofImage'));
+    const viewsNum = Number(views) || 0;
+
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+    if (campaign.kind !== 'ugc') return res.status(400).json({ error: 'Not a UGC campaign.' });
+    if (campaign.status !== 'active' || campaign.adWorkerStatus !== 'ready') {
+      return res.status(403).json({ error: 'Campaign not available.' });
+    }
+
+    // Global duplicate prevention
+    if (submissionUrl) {
+      const existingProof = await ClipSubmission.findOne({ 'proofs.submissionUrl': submissionUrl });
+      if (existingProof) {
+        return res.status(409).json({ error: 'This proof link has already been submitted by another clipper.' });
+      }
+    }
+
+    let isNewClipper = false;
+    let submission = await ClipSubmission.findOne({ campaign: campaignId, clipper });
+
+    if (!submission) {
+      isNewClipper = true;
+      submission = new ClipSubmission({ campaign: campaignId, clipper, proofs: [] });
+    }
+
+    if (!submissionUrl && !proofVideo && !proofImage) {
+      return res.status(400).json({ error: 'Proof link or file required.' });
+    }
+
+    submission.proofs.push({
+      platform,
+      submissionUrl,
+      views: viewsNum,
+      proofVideo,
+      proofImage,
+      status: 'pending'
+    });
+
+    await submission.save();
+
+    if (isNewClipper) {
+      await Campaign.findByIdAndUpdate(campaignId, { $inc: { clippersCount: 1 } });
+    }
+
+    res.status(201).json(submission);
+  } catch (err) {
+    console.error('UGC submit-proof error:', err);
+    res.status(500).json({ error: 'Could not submit UGC proof.' });
+  }
+});
+
+
+/**
+ * PATCH /api/clippers/ugc/submissions/:id/proofs/:proofId
+ * Update an existing UGC proof (re-verifies on update).
+ * Body: { views? }
+ * Files (optional): proofVideo, proofImage
+ */
+router.patch('/ugc/submissions/:id/proofs/:proofId', requireAuth, requireClipper, uploadProof.any(), async (req, res) => {
+  try {
+    const { id, proofId } = req.params;
+    const { views } = req.body;
+
+    const submission = await ClipSubmission.findById(id);
+    if (!submission) return res.status(404).json({ error: 'Submission not found.' });
+    if (String(submission.clipper) !== String(req.user._id)) {
+      return res.status(403).json({ error: 'Not your submission.' });
+    }
+
+    const proof = submission.proofs.id(proofId);
+    if (!proof) return res.status(404).json({ error: 'Proof not found.' });
+
+    const proofVideo = getRelPath(req.files?.find(f => f.fieldname === 'proofVideo'));
+    const proofImage = getRelPath(req.files?.find(f => f.fieldname === 'proofImage'));
+
+    if (views !== undefined) proof.views = Number(views) || proof.views;
+    if (proofVideo) proof.proofVideo = proofVideo;
+    if (proofImage) proof.proofImage = proofImage;
+
+    // Re-queue for verification
+    proof.status = 'pending';
+    await submission.save();
+
+    res.json(submission);
+  } catch (err) {
+    console.error('UGC update-proof error:', err);
+    res.status(500).json({ error: 'Could not update UGC proof.' });
+  }
+});
+
+
+/**
+ * GET /api/clippers/ugc/my
+ * List my UGC submissions with lightweight campaign info and totals.
+ */
+router.get('/ugc/my', requireAuth, requireClipper, async (req, res) => {
+  try {
+    const subs = await ClipSubmission.find({ clipper: req.user._id })
+      .populate('campaign', 'title kind rate_per_1000 clipper_cpm status')
+      .sort({ createdAt: -1 });
+
+    // Compute per-sub totals
+    const formatted = subs.map(s => {
+      const approved = (s.proofs || []).filter(p => p.status === 'approved');
+      const totalViews = approved.reduce((acc, p) => acc + (p.verifiedViews || 0), 0);
+      const totalEarnings = approved.reduce((acc, p) => acc + (p.rewardAmount || 0), 0);
+      return {
+        _id: s._id,
+        campaign: s.campaign,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+        totalApprovedViews: totalViews,
+        totalEarnings
+      };
+    });
+
+    res.json(formatted);
+  } catch (err) {
+    console.error('UGC my-submissions error:', err);
+    res.status(500).json({ error: 'Could not fetch UGC submissions.' });
+  }
+});
+
+
+/**
+ * GET /api/clippers/ugc/earnings
+ * Simple earnings summary for UGC + normal combined, so clippers see totals.
+ */
+router.get('/ugc/earnings', requireAuth, requireClipper, async (req, res) => {
+  try {
+    const agg = await ClipSubmission.aggregate([
+      { $match: { clipper: req.user._id } },
+      { $unwind: '$proofs' },
+      { $match: { 'proofs.status': 'approved' } },
+      { $group: {
+          _id: null,
+          totalEarnings: { $sum: '$proofs.rewardAmount' },
+          totalVerifiedViews: { $sum: '$proofs.verifiedViews' }
+      } }
+    ]);
+
+    const totals = agg[0] || { totalEarnings: 0, totalVerifiedViews: 0 };
+    res.json(totals);
+  } catch (err) {
+    console.error('UGC earnings error:', err);
+    res.status(500).json({ error: 'Could not fetch earnings.' });
+  }
+});
+
+// ======================= END UGC (Clipper) ROUTES ============================
+
 export default router;
 
 

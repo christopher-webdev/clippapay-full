@@ -8,41 +8,86 @@ import User from '../models/User.js';
 import { requireAuth } from '../middleware/auth.js'
 import { requireAdminAuth } from '../middleware/adminAuth.js'
 const router = express.Router();
-const PLATFORM_CPM = 400; // ₦400 per 1000 views
+// somewhere near the top of the file
+const DEFAULTS = {
+  normal: { CLIPPER_CPM: 500, PLATFORM_CPM: 700 },
+  ugc:    { CLIPPER_CPM: 2000, PLATFORM_CPM: 3000 }
+};
+
+function getCPMsForCampaign(campaign) {
+  const kind = campaign.kind === 'ugc' ? 'ugc' : 'normal';
+  // Prefer campaign’s stored CPMs when present
+  const clipper = Number(campaign.clipper_cpm) || DEFAULTS[kind].CLIPPER_CPM;
+  const platform = DEFAULTS[kind].PLATFORM_CPM; // or read from DB/config if you store it
+  return { kind, clipper, platform };
+}
 
 // GET all proofs across all submissions (admin table)
+// add this import if it's in a utils file you already use in the verify route
+// import { getCPMsForCampaign } from '../utils/getCPMsForCampaign.js';
+
 router.get('/', requireAdminAuth, async (req, res) => {
   try {
     const submissions = await ClipSubmission.find({})
       .populate([
         { path: 'clipper', select: 'name email' },
-        { path: 'campaign', select: 'title views_left budget_remaining' }
+        // 👇 include kind + CPM-related fields so we can expose them to the UI
+        { path: 'campaign', select: 'title kind clipper_cpm rate_per_1000 views_left budget_remaining ugc' }
       ])
       .sort({ createdAt: -1 });
 
-    // Flatten all proofs for admin UI (each proof gets its own row, with its _id)
-    const result = submissions.flatMap(sub =>
-      (sub.proofs || []).map((proof) => ({
+    const result = submissions.flatMap(sub => {
+      const camp = sub.campaign;
+      // Safe defaults if helper isn’t available
+      let clipperCPM = camp?.clipper_cpm ?? undefined;
+      let platformCPM;
+
+      // If you have the same helper used in the verify endpoint, prefer it
+      try {
+        if (typeof getCPMsForCampaign === 'function' && camp) {
+          const { clipper, platform } = getCPMsForCampaign(camp);
+          clipperCPM = clipper;
+          platformCPM = platform;
+        }
+      } catch (_) {
+        // fall back to nothing; frontend will use its DEFAULT_CPMS
+      }
+
+      return (sub.proofs || []).map((proof) => ({
         submissionId: sub._id,
-        proofId: proof._id, // Unique proof _id
+        proofId: proof._id,
+
         clipperName: sub.clipper?.name || sub.clipper?.email || 'Unknown Clipper',
-        campaignTitle: sub.campaign?.title || 'Unknown Campaign',
+        campaignTitle: camp?.title || 'Unknown Campaign',
+
         platform: proof.platform,
         proofUrl: proof.proofVideo || proof.proofImage || proof.submissionUrl,
         proofVideo: proof.proofVideo,
         proofImage: proof.proofImage,
         submissionUrl: proof.submissionUrl,
+
         reportedViews: proof.views,
         verifiedViews: proof.verifiedViews,
         dateSubmitted: sub.createdAt,
         status: proof.status,
         adminNote: proof.adminNote || "",
         rewardAmount: proof.rewardAmount || 0,
-        // ADD THESE:
-        campaignViewsLeft: sub.campaign?.views_left,
-        campaignBudgetRemaining: sub.campaign?.budget_remaining,
-      }))
-    );
+
+        // existing summaries
+        campaignViewsLeft: camp?.views_left,
+        campaignBudgetRemaining: camp?.budget_remaining,
+
+        // 🔥 add kind + CPMs (both styles)
+        kind: camp?.kind,                 // for your current getKind fallback
+        campaignKind: camp?.kind,         // camel
+        campaign_kind: camp?.kind,        // snake
+        clipper_cpm: clipperCPM,          // snake
+        clipperCPM,                       // camel
+        platform_cpm: platformCPM,        // snake (may be undefined; frontend will fallback)
+        platformCPM,                      // camel
+        ugc: camp?.ugc || undefined,      // lets UI treat UGC specially when needed
+      }));
+    });
 
     res.json(result);
   } catch (err) {
@@ -51,8 +96,10 @@ router.get('/', requireAdminAuth, async (req, res) => {
   }
 });
 
+
+
 // Approve a specific proof by proof _id
-router.post('/:submissionId/proof/:proofId/verify',requireAdminAuth, async (req, res) => {
+router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req, res) => {
   try {
     const { verifiedViews, note } = req.body;
     if (!Number.isFinite(verifiedViews) || verifiedViews < 0)
@@ -60,18 +107,14 @@ router.post('/:submissionId/proof/:proofId/verify',requireAdminAuth, async (req,
 
     const { submissionId, proofId } = req.params;
 
-    // Find submission
     const sub = await ClipSubmission.findById(submissionId).populate('campaign clipper');
     if (!sub) return res.status(404).json({ error: 'Submission not found' });
 
-    // Find proof by _id
     const proof = sub.proofs.id(proofId);
     if (!proof) return res.status(404).json({ error: 'Proof not found' });
 
-    // Protect against reducing views (clipper error or fraud)
     const lastVerified = proof.verifiedViews || 0;
     const newVerified = Number(verifiedViews);
-
     if (newVerified < lastVerified)
       return res.status(400).json({ error: "Submitted view count can't be less than last approved" });
 
@@ -79,56 +122,54 @@ router.post('/:submissionId/proof/:proofId/verify',requireAdminAuth, async (req,
     if (deltaViews <= 0)
       return res.status(400).json({ error: "No new views to approve" });
 
-    // Get campaign and wallets
     const campaign = await Campaign.findById(sub.campaign._id).populate('advertiser');
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
-    let advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id });
-    if (!advertiserWallet) advertiserWallet = await Wallet.create({ user: campaign.advertiser._id, balance: 0, escrowLocked: 0 });
+    // >>> Use kind-aware CPMs
+    const { kind: campaignKind, clipper: CLIPPER_CPM, platform: PLATFORM_CPM } = getCPMsForCampaign(campaign);
 
-    let clipperWallet = await Wallet.findOne({ user: sub.clipper._id });
-    if (!clipperWallet) clipperWallet = await Wallet.create({ user: sub.clipper._id, balance: 0, escrowLocked: 0 });
+    let advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id }) ||
+      await Wallet.create({ user: campaign.advertiser._id, balance: 0, escrowLocked: 0 });
 
-    let platformUser = await User.findOne({ role: 'platform' });
-    if (!platformUser) platformUser = await User.create({ role: 'platform', email: 'platform@clippapay.com', passwordHash: 'PLATFORM_USER_DOES_NOT_LOGIN', isSuperAdmin: false, company: 'ClippaPay Platform' });
+    let clipperWallet = await Wallet.findOne({ user: sub.clipper._id }) ||
+      await Wallet.create({ user: sub.clipper._id, balance: 0, escrowLocked: 0 });
 
-    let platformWallet = await Wallet.findOne({ user: platformUser._id });
-    if (!platformWallet) platformWallet = await Wallet.create({ user: platformUser._id, balance: 0, escrowLocked: 0 });
+    let platformUser = await User.findOne({ role: 'platform' }) ||
+      await User.create({ role: 'platform', email: 'platform@clippapay.com', passwordHash: 'PLATFORM_USER_DOES_NOT_LOGIN', isSuperAdmin: false, company: 'ClippaPay Platform' });
 
-    // Calculate payouts **for deltaViews**
-    const CPM = campaign.clipper_cpm || 200;
-    const payoutClipper = (deltaViews * CPM) / 1000;
+    let platformWallet = await Wallet.findOne({ user: platformUser._id }) ||
+      await Wallet.create({ user: platformUser._id, balance: 0, escrowLocked: 0 });
+
+    // Calculate payouts for deltaViews using kind-aware CPMs
+    const payoutClipper = (deltaViews * CLIPPER_CPM) / 1000;
     const payoutPlatform = (deltaViews * PLATFORM_CPM) / 1000;
     const totalDeduct = payoutClipper + payoutPlatform;
 
     if (advertiserWallet.escrowLocked < totalDeduct)
       return res.status(400).json({ error: 'Insufficient escrow balance' });
 
-    // Approve this proof, update only the incremental part
+    // Update proof
     proof.status = 'approved';
     proof.verifiedViews = newVerified;
-    proof.rewardAmount = (proof.rewardAmount || 0) + payoutClipper; // accumulate
+    proof.rewardAmount = (proof.rewardAmount || 0) + payoutClipper;
     proof.adminNote = note || "";
     proof.lastVerified = new Date();
-
-    // Save submission (with proof update)
     await sub.save();
 
-    // Deduct campaign views & budget using deltaViews
+    // Update campaign/budgets
     await campaign.deductViewsAndBudget(deltaViews);
 
-    // Deduct from advertiser escrow
+    // Wallet moves
     advertiserWallet.escrowLocked -= totalDeduct;
     await advertiserWallet.save();
 
-    // Credit clipper
     clipperWallet.balance += payoutClipper;
     await clipperWallet.save();
 
-    // Credit platform
     platformWallet.balance += payoutPlatform;
     await platformWallet.save();
 
+    // <<< Include kind + CPMs so the UI can show UGC math
     res.json({
       submissionId: sub._id,
       proofId: proof._id,
@@ -143,6 +184,11 @@ router.post('/:submissionId/proof/:proofId/verify',requireAdminAuth, async (req,
       adminNote: proof.adminNote,
       campaignStatus: campaign.status,
       campaignViewsLeft: campaign.views_left,
+
+      // NEW FIELDS:
+      campaignKind,
+      clipperCPM: CLIPPER_CPM,
+      platformCPM: PLATFORM_CPM
     });
   } catch (err) {
     console.error(err);
@@ -305,14 +351,13 @@ function formatSubmission(sub) {
     }))
   };
 }
-// Add this new route to handle correction of wrong approvals
+// Add this new route to handle correction of wrong approvals (normal + UGC)
 router.post('/correct-approval', requireAdminAuth, async (req, res) => {
   try {
     const { submissionId, proofId, correctViews } = req.body;
 
     const submission = await ClipSubmission.findById(submissionId)
       .populate('campaign clipper');
-
     if (!submission) {
       return res.status(404).json({ error: 'Submission not found' });
     }
@@ -323,57 +368,107 @@ router.post('/correct-approval', requireAdminAuth, async (req, res) => {
     }
 
     const campaign = await Campaign.findById(submission.campaign._id).populate('advertiser');
-    const advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id });
-    const clipperWallet = await Wallet.findOne({ user: submission.clipper._id });
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
 
-    const platformUser = await User.findOne({ role: 'platform' });
-    const platformWallet = await Wallet.findOne({ user: platformUser._id });
+    // --- Resolve CPMs in a kind-aware way (normal vs UGC) ---
+    // Prefer your existing helper if available.
+    let CLIPPER_CPM, PLATFORM_CPM, campaignKind;
+    try {
+      if (typeof getCPMsForCampaign === 'function') {
+        const { kind, clipper, platform } = getCPMsForCampaign(campaign);
+        campaignKind = kind;
+        CLIPPER_CPM = clipper;
+        PLATFORM_CPM = platform;
+      }
+    } catch (_) {}
 
+    // Fallbacks if helper not present:
+    if (!CLIPPER_CPM || !PLATFORM_CPM) {
+      campaignKind = campaignKind || campaign.kind || 'normal';
+      // Use stored CPMs when present
+      const storedClipper = Number(campaign.clipper_cpm);
+      // If you store platform CPM separately, use it; else derive a default
+      const storedPlatform = Number(campaign.platform_cpm);
+
+      if (campaignKind === 'ugc') {
+        CLIPPER_CPM = Number.isFinite(storedClipper) && storedClipper > 0 ? storedClipper : 2000;
+        PLATFORM_CPM = Number.isFinite(storedPlatform) && storedPlatform > 0 ? storedPlatform : 3000;
+      } else {
+        CLIPPER_CPM = Number.isFinite(storedClipper) && storedClipper > 0 ? storedClipper : 500;
+        PLATFORM_CPM = Number.isFinite(storedPlatform) && storedPlatform > 0 ? storedPlatform : 700;
+      }
+    }
+
+    // --- Wallets ---
+    let advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id }) ||
+      await Wallet.create({ user: campaign.advertiser._id, balance: 0, escrowLocked: 0 });
+
+    let clipperWallet = await Wallet.findOne({ user: submission.clipper._id }) ||
+      await Wallet.create({ user: submission.clipper._id, balance: 0, escrowLocked: 0 });
+
+    let platformUser = await User.findOne({ role: 'platform' }) ||
+      await User.create({
+        role: 'platform',
+        email: 'platform@clippapay.com',
+        passwordHash: 'PLATFORM_USER_DOES_NOT_LOGIN',
+        isSuperAdmin: false,
+        company: 'ClippaPay Platform'
+      });
+
+    let platformWallet = await Wallet.findOne({ user: platformUser._id }) ||
+      await Wallet.create({ user: platformUser._id, balance: 0, escrowLocked: 0 });
+
+    // --- Reverse the previous approval ---
     const incorrectViews = incorrectProof.verifiedViews || 0;
+
+    // NOTE: rewardAmount on the proof is the clipper payout previously paid
     const incorrectClipperAmount = incorrectProof.rewardAmount || 0;
+    // Recompute platform share using PLATFORM_CPM (kind-aware)
     const incorrectPlatformAmount = (incorrectViews * PLATFORM_CPM) / 1000;
     const totalToReverse = incorrectClipperAmount + incorrectPlatformAmount;
 
     if (clipperWallet.balance < incorrectClipperAmount) {
-      return res.status(400).json({ 
-        error: `Clipper wallet has insufficient balance (${clipperWallet.balance} available, need ${incorrectClipperAmount})` 
+      return res.status(400).json({
+        error: `Clipper wallet has insufficient balance (${clipperWallet.balance} available, need ${incorrectClipperAmount})`
       });
     }
-
     if (platformWallet.balance < incorrectPlatformAmount) {
-      return res.status(400).json({ 
-        error: `Platform wallet has insufficient balance (${platformWallet.balance} available, need ${incorrectPlatformAmount})` 
+      return res.status(400).json({
+        error: `Platform wallet has insufficient balance (${platformWallet.balance} available, need ${incorrectPlatformAmount})`
       });
     }
 
-    // ✅ Step 1: Reverse previous payment
+    // 1) Reverse previous payment
     clipperWallet.balance -= incorrectClipperAmount;
     platformWallet.balance -= incorrectPlatformAmount;
     advertiserWallet.escrowLocked += totalToReverse;
 
-    // ✅ Step 2: Add views and budget back to campaign
-    await campaign.restoreViewsAndBudget(incorrectViews); // You must define this function
+    // 2) Add views and budget back to campaign
+    await campaign.restoreViewsAndBudget(incorrectViews);
     await Promise.all([
       clipperWallet.save(),
       platformWallet.save(),
       advertiserWallet.save()
     ]);
 
-    // ✅ Step 3: Update the old proof
+    // 3) Update the old proof to rejected (keeps an audit trail)
     incorrectProof.status = 'rejected';
     incorrectProof.adminNote = `Corrected - originally approved in error for ${incorrectViews} views`;
     incorrectProof.rewardAmount = 0;
 
     let newProof = null;
-    if (correctViews && correctViews > 0) {
-      const CPM = campaign.clipper_cpm || 200;
-      const correctClipperAmount = (correctViews * CPM) / 1000;
+
+    // --- If we have a correct view count, re-approve with correct CPMs ---
+    if (Number.isFinite(correctViews) && correctViews > 0) {
+      const correctClipperAmount = (correctViews * CLIPPER_CPM) / 1000;
       const correctPlatformAmount = (correctViews * PLATFORM_CPM) / 1000;
       const correctTotal = correctClipperAmount + correctPlatformAmount;
 
       if (advertiserWallet.escrowLocked < correctTotal) {
-        return res.status(400).json({ 
-          error: `Advertiser has insufficient escrow (${advertiserWallet.escrowLocked} available, need ${correctTotal})` 
+        return res.status(400).json({
+          error: `Advertiser has insufficient escrow (${advertiserWallet.escrowLocked} available, need ${correctTotal})`
         });
       }
 
@@ -385,7 +480,7 @@ router.post('/correct-approval', requireAdminAuth, async (req, res) => {
         proofImage: incorrectProof.proofImage,
         status: 'approved',
         verifiedViews: correctViews,
-        rewardAmount: correctClipperAmount,
+        rewardAmount: correctClipperAmount, // clipper's share
         adminNote: 'Corrected approval',
         lastVerified: new Date()
       };
@@ -409,6 +504,8 @@ router.post('/correct-approval', requireAdminAuth, async (req, res) => {
 
     res.json({
       message: 'Correction completed successfully',
+      campaignKind,
+      cpmsUsed: { clipperCPM: CLIPPER_CPM, platformCPM: PLATFORM_CPM },
       correctionsMade: {
         reversedClipperAmount: incorrectClipperAmount,
         reversedPlatformAmount: incorrectPlatformAmount,
@@ -427,5 +524,6 @@ router.post('/correct-approval', requireAdminAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to correct approval', details: err.message });
   }
 });
+
 
 export default router;

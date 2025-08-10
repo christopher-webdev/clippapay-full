@@ -3,17 +3,98 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Briefcase, Film, User, Loader2 } from 'lucide-react'; // Example icons
 
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
+const normalizeUrl = (url?: string) => {
+  if (!url) return url;
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith('/')) return `${API_BASE}${url}`;
+  return url;
+};
+
+function CampaignKindBadge({ kind }: { kind?: 'normal' | 'ugc' }) {
+  if (kind === 'ugc') {
+    return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200">UGC</span>;
+  }
+  return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600 border border-gray-200">Normal</span>;
+}
+
+function AssetsGrid({ assets }: { assets?: string[] }) {
+  if (!assets || assets.length === 0) {
+    return <div className="text-sm text-gray-500">No assets uploaded.</div>;
+  }
+
+  const kindOf = (u: string) => {
+    const x = u.toLowerCase();
+    if (/\.(png|jpe?g|webp|gif|svg)$/.test(x)) return 'image';
+    if (/\.(mp4|mov|webm|avi|mkv)$/.test(x)) return 'video';
+    if (/\.(mp3|wav|m4a|aac|ogg)$/.test(x)) return 'audio';
+    if (x.endsWith('.pdf')) return 'pdf';
+    return 'file';
+  };
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {assets.map((raw, i) => {
+        const url = normalizeUrl(raw)!;
+        const k = kindOf(url);
+
+        if (k === 'image') {
+          return (
+            <a key={i} href={url} target="_blank" rel="noreferrer" className="block border rounded overflow-hidden bg-gray-50">
+              <img src={url} alt={`asset-${i}`} className="w-full h-40 object-cover" />
+              <div className="px-3 py-2 text-xs text-gray-600 truncate">{raw}</div>
+            </a>
+          );
+        }
+        if (k === 'video') {
+          return (
+            <div key={i} className="border rounded overflow-hidden bg-gray-50">
+              <video controls src={url} className="w-full h-40 object-cover" />
+              <div className="px-3 py-2 text-xs text-gray-600 truncate">{raw}</div>
+            </div>
+          );
+        }
+        if (k === 'audio') {
+          return (
+            <div key={i} className="border rounded p-3 bg-gray-50">
+              <audio controls src={url} className="w-full" />
+              <div className="mt-2 text-xs text-gray-600 truncate">{raw}</div>
+            </div>
+          );
+        }
+        if (k === 'pdf') {
+          return (
+            <a key={i} href={url} target="_blank" rel="noreferrer"
+              className="border rounded p-3 bg-gray-50 hover:bg-gray-100 transition text-sm text-blue-700 underline">
+              Open PDF: {raw.split('/').pop()}
+            </a>
+          );
+        }
+        return (
+          <a key={i} href={url} target="_blank" rel="noreferrer"
+            className="border rounded p-3 bg-gray-50 hover:bg-gray-100 transition text-sm text-blue-700 underline truncate">
+            Open file: {raw}
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+
 interface CampaignSummary {
   _id: string;
   title: string;
-  advertiser: { contactName: string };
+  advertiser: { contactName?: string; firstName?: string; lastName?: string; company?: string; email?: string };
   adWorkerStatus: 'pending' | 'processing' | 'ready' | 'rejected';
+  kind?: 'normal' | 'ugc';
 }
 
 interface CampaignDetails {
   campaign: {
     _id: string;
-    title: string;
+    kind?: 'normal' | 'ugc';
     advertiser: {
       contactName?: string;
       firstName?: string;
@@ -23,7 +104,9 @@ interface CampaignDetails {
       creatorTypes?: string[];
       otherCreatorType?: string;
     };
-    video_url: string;
+    title: string;
+    video_url?: string;
+    thumb_url?: string;
     platforms: string[];
     countries: string[];
     hashtags: string[];
@@ -34,6 +117,15 @@ interface CampaignDetails {
     createdAt: string;
     adWorkerStatus: 'pending' | 'processing' | 'ready' | 'rejected';
     status: string;
+
+    // UGC meta (present when kind === 'ugc')
+    ugc?: {
+      assets?: string[];          // URLs returned by backend
+      brief?: string;
+      deliverables?: string[];
+      captionTemplate?: string;
+      usageRights?: string;
+    };
   };
   clips: {
     _id: string;
@@ -90,7 +182,7 @@ export default function AdWorkerDashboard() {
             <div className="flex items-center gap-3 mb-4">
               <Briefcase className="w-7 h-7 text-cp-blue/70" />
               <div>
-                <div className="font-semibold text-lg text-gray-900">{c.title}</div>
+                <div className="font-semibold text-lg text-gray-900">{c.title} <CampaignKindBadge kind={c.kind} /></div>
                 <div className="text-gray-500 text-sm flex items-center gap-2">
                   <User className="w-4 h-4 inline" />
                   {
@@ -262,8 +354,9 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
 
   // Modal UI
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-2">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-auto relative animate-fadeIn">
+    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
+      <div className="bg-white rounded-lg shadow-lg max-h-[80vh] overflow-y-auto p-4 relative">
+
         <button
           className="absolute top-4 right-4 text-3xl text-gray-400 hover:text-gray-900"
           onClick={onClose}
@@ -271,6 +364,8 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
         >
           &times;
         </button>
+     
+       
 
         {loading ? (
           <div className="p-12 text-center flex items-center justify-center">
@@ -406,6 +501,43 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
                 value={new Date(details.campaign.createdAt).toLocaleString()}
               />
             </div>
+            {/* UGC (assets & brief/deliverables) */}
+            {details.campaign.kind === 'ugc' && (
+              <div className="mt-6">
+                <h3 className="font-semibold text-gray-900 mb-3">UGC Brief & Assets</h3>
+
+                {details.campaign.ugc?.brief && (
+                  <div className="mb-3">
+                    <div className="text-gray-500 text-sm">Brief</div>
+                    <div className="text-sm whitespace-pre-wrap">{details.campaign.ugc.brief}</div>
+                  </div>
+                )}
+
+                {details.campaign.ugc?.deliverables?.length ? (
+                  <div className="mb-3">
+                    <div className="text-gray-500 text-sm">Deliverables</div>
+                    <div className="text-sm">{details.campaign.ugc.deliverables.join(', ')}</div>
+                  </div>
+                ) : null}
+
+                {details.campaign.ugc?.captionTemplate && (
+                  <div className="mb-3">
+                    <div className="text-gray-500 text-sm">Caption Template</div>
+                    <div className="text-sm whitespace-pre-wrap">{details.campaign.ugc.captionTemplate}</div>
+                  </div>
+                )}
+
+                {details.campaign.ugc?.usageRights && (
+                  <div className="mb-3">
+                    <div className="text-gray-500 text-sm">Usage Rights</div>
+                    <div className="text-sm">{details.campaign.ugc.usageRights}</div>
+                  </div>
+                )}
+
+                {/* Assets grid */}
+                <AssetsGrid assets={details.campaign.ugc?.assets} />
+              </div>
+            )}
 
             {/* Status Actions */}
             {['pending', 'processing'].includes(details.campaign.adWorkerStatus) && (
@@ -421,7 +553,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
 
             {/* Upload Clip Form */}
             {(details.campaign.adWorkerStatus === 'processing' || details.campaign.adWorkerStatus === 'ready') &&
-               (
+              (
                 <form
                   onSubmit={uploadClip}
                   className="mt-6 flex flex-col sm:flex-row items-center gap-3"
@@ -467,7 +599,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
                       <video
                         src={clip.url}
                         controls
-                        className="w-full h-36 rounded mb-2"
+                        className="w-36 h-36 rounded mb-2"
                       />
                       <div className="text-xs text-gray-500">
                         Uploaded: {new Date(clip.createdAt).toLocaleString()}
