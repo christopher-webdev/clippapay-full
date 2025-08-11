@@ -208,7 +208,6 @@ router.get('/my-submissions', requireAuth, async (req, res) => {
  */
 router.get('/available', requireAuth, async (req, res) => {
   try {
-    // No more _id: { $nin: joined }
     const now = new Date();
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
@@ -217,19 +216,23 @@ router.get('/available', requireAuth, async (req, res) => {
       adWorkerStatus: 'ready',
       views_left: { $gt: 0 },
       $or: [
-        { $expr: { $gt: ['$views_left', { $multiply: ['$views_purchased', 0.5] } ] } },
+        // > 50% remaining
+        { $expr: { $gt: ['$views_left', { $multiply: ['$views_purchased', 0.5] }] } },
+        // <= 50% remaining but updated within last 24h
         {
           $and: [
-            { $expr: { $lte: ['$views_left', { $multiply: ['$views_purchased', 0.5] } ] } },
+            { $expr: { $lte: ['$views_left', { $multiply: ['$views_purchased', 0.5] }] } },
             { updatedAt: { $gte: twentyFourHoursAgo } }
           ]
         }
       ]
     })
-    .sort({ updatedAt: -1 })
-    .select(
-      '_id title thumb_url rate_per_1000 clipper_cpm budget_total budget_remaining views_purchased views_left categories hashtags status adWorkerStatus createdAt updatedAt'
-    );
+      // Put UGC first, then newest
+      .sort({ kind: -1, updatedAt: -1 })
+      .select(
+        '_id title thumb_url rate_per_1000 clipper_cpm budget_total budget_remaining views_purchased views_left categories hashtags status adWorkerStatus kind createdAt updatedAt'
+      ) // ▲ added `kind`
+      .lean();
 
     res.json(campaigns);
   } catch (err) {
@@ -237,6 +240,7 @@ router.get('/available', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Could not fetch available campaigns.' });
   }
 });
+
 
 
 

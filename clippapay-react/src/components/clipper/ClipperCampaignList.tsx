@@ -17,6 +17,7 @@ interface Campaign {
   hashtags: string[];
   status: 'active' | 'paused' | 'completed';
   adWorkerStatus: 'pending' | 'processing' | 'ready' | 'rejected';
+  kind?: 'normal' | 'ugc'; // ← added
   createdAt: string;
   updatedAt: string;
 }
@@ -46,9 +47,11 @@ export default function ClipperCampaignList() {
         setCampaigns(res.data);
 
         const mySubsRes = await axios.get('/clippers/my-submissions', {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
         });
-        const joinedIds = mySubsRes.data.map((sub: any) => sub.campaign?._id).filter(Boolean);
+        const joinedIds = mySubsRes.data
+          .map((sub: any) => sub.campaign?._id)
+          .filter(Boolean);
         setJoinedCampaignIds(Array.from(new Set(joinedIds)));
       } catch (err: any) {
         setError(err.response?.data?.error || err.message || 'Could not load campaigns');
@@ -62,16 +65,21 @@ export default function ClipperCampaignList() {
     return () => clearInterval(intervalId);
   }, []);
 
-  const navigate = (url: string) => window.location.href = url;
+  const navigate = (url: string) => (window.location.href = url);
 
-  const filtered = campaigns.filter(c =>
+  const filtered = campaigns.filter((c) =>
     c.title.toLowerCase().includes(search.toLowerCase())
   );
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  useEffect(() => { setPage(1); }, [search, campaigns.length]);
+  useEffect(() => {
+    setPage(1);
+  }, [search, campaigns.length]);
+
+  const formatNaira = (n?: number) =>
+    typeof n === 'number' ? n.toLocaleString() : '0';
 
   return (
     <div className="max-w-7xl mx-auto px-2 sm:px-6 py-10">
@@ -81,7 +89,7 @@ export default function ClipperCampaignList() {
           type="text"
           placeholder="Search by campaign name…"
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={(e) => setSearch(e.target.value)}
           className="w-full sm:w-72 px-4 py-2 border rounded-xl shadow-sm focus:ring-cp-blue focus:border-cp-blue bg-white"
         />
       </div>
@@ -95,8 +103,7 @@ export default function ClipperCampaignList() {
       ) : (
         <>
           <div className="flex flex-wrap justify-center sm:justify-start gap-4">
-
-            {paged.map(c => {
+            {paged.map((c) => {
               const percentCompleted = 1 - c.views_left / c.views_purchased;
               const is80Done = percentCompleted >= 0.8;
               const fullyCompleted = c.views_left === 0;
@@ -113,14 +120,21 @@ export default function ClipperCampaignList() {
                     }
                   }}
                 >
-                  {/* CPM Badge */}
+                  {/* CPM Badge (formatted like ₦2,000 / 1k) */}
                   <div className="absolute top-2 left-2 bg-cp-blue text-white text-xs font-semibold px-3 py-1 rounded-full z-10">
-                    ₦{c.clipper_cpm || c.rate_per_1000} / 1k
+                    ₦{formatNaira(c.clipper_cpm || c.rate_per_1000)} / 1k
                   </div>
 
-                  {/* LIVE Badge */}
-                  <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse z-10">
-                    LIVE
+                  {/* LIVE + HOT (UGC) Badges */}
+                  <div className="absolute top-2 right-2 flex items-center gap-2 z-10">
+                    <div className="bg-green-500 text-white text-[10px] font-extrabold px-3 py-1 rounded-full animate-pulse">
+                      LIVE
+                    </div>
+                    {c.kind === 'ugc' && (
+                      <div className="bg-red-600 text-white text-[10px] font-extrabold px-3 py-1 rounded-full shadow-sm">
+                        HOT
+                      </div>
+                    )}
                   </div>
 
                   {/* Thumbnail */}
@@ -154,18 +168,17 @@ export default function ClipperCampaignList() {
                     </div>
                   </div>
 
-                  {/* View Button */}
+                  {/* View / Join Button */}
                   <div className="absolute bottom-3 left-1/2 transform -translate-x-1/2 z-10">
                     <button
-                      className="bg-cp-blue text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition"
+                      className={`${
+                        alreadyJoined ? 'bg-gray-500 hover:bg-gray-600' : 'bg-cp-blue hover:bg-blue-700'
+                      } text-white font-semibold px-4 py-2 rounded-lg text-sm transition`}
                     >
-                      Join
+                      {alreadyJoined ? 'Joined' : 'Join'}
                     </button>
                   </div>
                 </div>
-
-
-
               );
             })}
 
@@ -183,14 +196,14 @@ export default function ClipperCampaignList() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1}
                 className="px-4 py-2 bg-gray-100 rounded-lg font-semibold text-gray-700 hover:bg-gray-200 transition disabled:opacity-50"
               >
                 Previous
               </button>
               <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page === totalPages}
                 className="px-4 py-2 bg-gray-100 rounded-lg font-semibold text-gray-700 hover:bg-gray-200 transition disabled:opacity-50"
               >
@@ -199,9 +212,7 @@ export default function ClipperCampaignList() {
             </div>
           </div>
         </>
-      )
-      }
-    </div >
+      )}
+    </div>
   );
-
 }
