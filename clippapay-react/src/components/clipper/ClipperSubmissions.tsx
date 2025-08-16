@@ -23,16 +23,11 @@ const PLATFORM_LABELS = {
   facebook: 'Facebook',
   x: 'X',
 };
+const HTTP_ONLY_REGEX = /^http:\/\/.+/i;
 
 // ======= CONFIG =======
-// Show at most this many campaign cards per page
 const PAGE_SIZE = 7;
-
-// If true, COMPLETED campaigns will not render at all
 const HIDE_COMPLETED_CARDS = false;
-
-// If not hiding, and this is true, show a “Campaign Completed” badge
-// in place of the Update button
 const SHOW_COMPLETED_BADGE = true;
 // ======================
 
@@ -43,40 +38,61 @@ export default function ClipperSubmissions() {
   const campaignId = params.get('campaign');
 
   const [page, setPage] = useState(1);
-  const [campaign, setCampaign] = useState(null);
-  const [submissions, setSubmissions] = useState([]);
+  const [campaign, setCampaign] = useState<any>(null);
+  const [submissions, setSubmissions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [formVisible, setFormVisible] = useState(false);
-  const [formMode, setFormMode] = useState('new');
-  const [formSubmissionId, setFormSubmissionId] = useState(null);
-  const [formProofId, setFormProofId] = useState(null);
-  const [platformBlocks, setPlatformBlocks] = useState([
+  const [formMode, setFormMode] = useState<'new' | 'edit'>('new');
+  const [formSubmissionId, setFormSubmissionId] = useState<string | null>(null);
+  const [formProofId, setFormProofId] = useState<string | null>(null);
+  const [platformBlocks, setPlatformBlocks] = useState<any[]>([
     { platform: '', submissionUrl: '', views: '', proofVideo: null, proofImage: null }
   ]);
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
 
-  // ——— Helpers: robust campaign completion check ———
-  const isCampaignCompleted = (submission) => {
-    const camp =
-      (typeof submission.campaign === 'object' && submission.campaign) ? submission.campaign : null;
+  // ——— Helpers: robust campaign completion & stats ———
+  const getCampaignObj = (submission: any) =>
+    (typeof submission.campaign === 'object' && submission.campaign) ? submission.campaign : null;
 
-    const status =
-      camp?.status ??
-      submission.campaignStatus ??               // sometimes sent separately
-      submission.status;                         // (last resort; avoid if clashes with proof status)
+  const getCampaignStatus = (submission: any) => {
+    const camp = getCampaignObj(submission);
+    return camp?.status ?? submission.campaignStatus ?? submission.status;
+  };
 
-    const viewsLeft =
-      camp?.views_left ??
-      camp?.viewsLeft ??
-      submission.campaignViewsLeft;
+  const getViewsLeft = (submission: any): number | undefined => {
+    const camp = getCampaignObj(submission);
+    return (typeof camp?.views_left === 'number')
+      ? camp.views_left
+      : (typeof submission.campaignViewsLeft === 'number' ? submission.campaignViewsLeft : undefined);
+  };
 
-    // Completed if explicit status or no views left (0 or below)
+  const getViewsPurchased = (submission: any): number | undefined => {
+    const camp = getCampaignObj(submission);
+    return (typeof camp?.views_purchased === 'number')
+      ? camp.views_purchased
+      : (typeof submission.campaignViewsPurchased === 'number' ? submission.campaignViewsPurchased : undefined);
+  };
+
+  const isCampaignCompleted = (submission: any) => {
+    const status = getCampaignStatus(submission);
+    const viewsLeft = getViewsLeft(submission);
     if (status === 'completed') return true;
     if (typeof viewsLeft === 'number' && viewsLeft <= 0) return true;
     return false;
   };
+
+  const getCompletionRatio = (submission: any): number | undefined => {
+    const total = getViewsPurchased(submission);
+    const left = getViewsLeft(submission);
+    if (typeof total === 'number' && typeof left === 'number' && total > 0) {
+      return (total - left) / total;
+    }
+    return undefined;
+  };
+
+  const fmt = (n?: number) => (typeof n === 'number' ? n.toLocaleString() : '—');
 
   // Fetch campaign info if needed
   useEffect(() => {
@@ -113,7 +129,7 @@ export default function ClipperSubmissions() {
     const existing = submissions.find(s => s.campaign?._id === campaignId || s.campaign === campaignId);
     if (!existing) {
       setPlatformBlocks(
-        (campaign.platforms || []).map(p => ({
+        (campaign.platforms || []).map((p: string) => ({
           platform: p,
           submissionUrl: '',
           views: '',
@@ -159,9 +175,9 @@ export default function ClipperSubmissions() {
     setPage(1);
   }, [submissions.length, HIDE_COMPLETED_CARDS]); // eslint-disable-line
 
-  const platformOptions = (excludeIdx) =>
+  const platformOptions = (excludeIdx: number) =>
     (campaign?.platforms || ALL_PLATFORMS).filter(
-      p => !platformBlocks.map((b, i) => (i !== excludeIdx ? b.platform : null)).includes(p)
+      (p: string) => !platformBlocks.map((b, i) => (i !== excludeIdx ? b.platform : null)).includes(p)
     );
 
   const addPlatformBlock = () =>
@@ -170,19 +186,19 @@ export default function ClipperSubmissions() {
       { platform: '', submissionUrl: '', views: '', proofVideo: null, proofImage: null }
     ]);
 
-  const removePlatformBlock = (idx) =>
+  const removePlatformBlock = (idx: number) =>
     setPlatformBlocks(blocks =>
       blocks.length === 1 ? blocks : blocks.filter((_, i) => i !== idx)
     );
 
-  const handleBlockChange = (idx, field, value) => {
+  const handleBlockChange = (idx: number, field: string, value: any) => {
     setPlatformBlocks(blocks =>
       blocks.map((b, i) => (i === idx ? { ...b, [field]: value } : b))
     );
   };
 
   // Update form
-  async function openProofFormEdit(sub, proof) {
+  async function openProofFormEdit(sub: any, proof: any) {
     let camp = sub.campaign;
     if (!camp || typeof camp === 'string') {
       try {
@@ -209,21 +225,31 @@ export default function ClipperSubmissions() {
     setFormVisible(true);
   }
 
-  const handleFormSubmit = async (e) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
     setFormLoading(true);
     try {
       const token = localStorage.getItem('token');
-      for (let b of platformBlocks) {
+
+      // Validate each block BEFORE sending
+      for (let i = 0; i < platformBlocks.length; i++) {
+        const b = platformBlocks[i];
         if (!b.platform || !b.submissionUrl) {
           setFormError('Platform and Submission Link are required.');
           setFormLoading(false);
           return;
         }
+        const url = String(b.submissionUrl).trim();
+        if (!HTTP_ONLY_REGEX.test(url)) {
+          setFormError(`Invalid link in block ${i + 1}. Use full link starting with "http://".`);
+          setFormLoading(false);
+          return;
+        }
+
         const fd = new FormData();
         fd.append('platform', b.platform);
-        fd.append('submissionUrl', b.submissionUrl);
+        fd.append('submissionUrl', url);
         fd.append('views', b.views || '0');
         if (b.proofVideo) fd.append('proofVideo', b.proofVideo);
         if (b.proofImage) fd.append('proofImage', b.proofImage);
@@ -238,12 +264,13 @@ export default function ClipperSubmissions() {
           });
         }
       }
+
       setFormVisible(false);
       setFormError('');
       setPlatformBlocks([{ platform: '', submissionUrl: '', views: '', proofVideo: null, proofImage: null }]);
       await loadSubmissions();
       if (campaignId) navigate('/dashboard/clipper/submissions', { replace: true });
-    } catch (err) {
+    } catch (err: any) {
       setFormError(err.response?.data?.error || 'Could not submit.');
     } finally {
       setFormLoading(false);
@@ -257,12 +284,28 @@ export default function ClipperSubmissions() {
     if (campaignId) navigate('/dashboard/clipper/submissions', { replace: true });
   };
 
+  // —— UI helpers ——
+  const ProgressBar = ({ ratio }: { ratio: number }) => (
+    <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+      <div
+        className="h-2 bg-indigo-600 rounded-full transition-all duration-500"
+        style={{ width: `${Math.max(0, Math.min(100, Math.round(ratio * 100)))}%` }}
+      />
+    </div>
+  );
+
+  const StatPill = ({ label, value }: { label: string, value: React.ReactNode }) => (
+    <div className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-full text-xs text-gray-700">
+      <span className="font-semibold">{value}</span> <span className="text-gray-500">· {label}</span>
+    </div>
+  );
+
   return (
     <div className="max-w-4xl mx-auto px-2 py-7">
       <h2 className="text-2xl font-bold mb-4">My Submissions</h2>
 
       {formVisible && (
-        <section className="mb-7 bg-white shadow rounded-xl p-5">
+        <section className="mb-7 bg-white shadow rounded-xl p-5 border border-gray-200">
           <form onSubmit={handleFormSubmit}>
             {campaign && campaign.title && (
               <h1 className="text-2xl font-bold mb-3">{campaign.title}</h1>
@@ -278,7 +321,7 @@ export default function ClipperSubmissions() {
                     className="border p-2 rounded flex-1"
                   >
                     <option value="">Select Platform</option>
-                    {platformOptions(idx).map(p => (
+                    {platformOptions(idx).map((p: string) => (
                       <option key={p} value={p}>{PLATFORM_LABELS[p] || p}</option>
                     ))}
                   </select>
@@ -295,7 +338,8 @@ export default function ClipperSubmissions() {
                 <input
                   value={block.submissionUrl}
                   onChange={e => handleBlockChange(idx, 'submissionUrl', e.target.value)}
-                  placeholder="Submission Link"
+                  onBlur={e => handleBlockChange(idx, 'submissionUrl', e.target.value.trim())}
+                  placeholder='Submission Link (must start with "http://")'
                   className="border p-2 rounded mb-2 block w-full"
                   required
                 />
@@ -354,65 +398,116 @@ export default function ClipperSubmissions() {
             <div className="text-center text-gray-500 py-12">No submissions yet.</div>
           ) : (
             pagedSubmissions.map(sub => {
-              const campaignObj = (typeof sub.campaign === 'object' && sub.campaign !== null) ? sub.campaign : null;
+              const campaignObj = getCampaignObj(sub);
               const campTitle = campaignObj?.title ?? 'Untitled campaign';
               const completed = isCampaignCompleted(sub);
 
+              const totalViews = getViewsPurchased(sub);
+              const viewsLeft = getViewsLeft(sub);
+              const ratio = getCompletionRatio(sub); // 0..1 or undefined
+              const pct = typeof ratio === 'number' ? Math.round(ratio * 100) : undefined;
+
               return (
-                <div key={sub._id} className="bg-white p-5 rounded-xl shadow mb-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="font-semibold text-base">{campTitle}</div>
-                    {completed && !HIDE_COMPLETED_CARDS && (
-                      <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
-                        Campaign Completed
-                      </span>
-                    )}
+                <div
+                  key={sub._id}
+                  className="bg-white p-5 rounded-2xl shadow border border-gray-200 mb-5 overflow-hidden"
+                >
+                  {/* Card header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="text-base sm:text-lg font-semibold text-gray-900">{campTitle}</div>
+                      {completed && !HIDE_COMPLETED_CARDS && (
+                        <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200 text-[11px] font-medium">
+                          Campaign Completed
+                        </span>
+                      )}
+                    </div>
+
+                    {/* top-right stats */}
+                    <div className="flex flex-wrap gap-2">
+                      <StatPill label="Total" value={fmt(totalViews)} />
+                      <StatPill label="Views left" value={fmt(viewsLeft)} />
+                      {typeof pct === 'number' && <StatPill label="Done" value={`${pct}%`} />}
+                    </div>
                   </div>
 
+                  {/* Progress bar */}
+                  {typeof ratio === 'number' && (
+                    <div className="mb-4">
+                      <ProgressBar ratio={ratio} />
+                      <div className="mt-1 text-[11px] text-gray-500">
+                        {fmt(totalViews && viewsLeft ? totalViews - viewsLeft : undefined)} / {fmt(totalViews)} verified
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Proofs grid */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {(sub.proofs || []).map((proof, i) => (
-                      <div key={i} className="border rounded-lg p-3 bg-gray-50 mb-2">
-                        <div className="flex items-center gap-2 mb-1">
-                          {proof.status === 'approved' && <HiCheckCircle className="text-green-500 w-5 h-5" />}
-                          {proof.status === 'pending' && <HiExclamationCircle className="text-yellow-400 w-5 h-5" />}
-                          {proof.status === 'rejected' && <HiExclamationCircle className="text-red-400 w-5 h-5" />}
-                          <span className="font-bold">{proof.status?.toUpperCase?.()}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs mb-1">
-                          {proof.proofVideo && <span className="flex items-center gap-1 text-blue-700"><HiVideoCamera className="w-4 h-4" /> Video</span>}
-                          {proof.proofImage && <span className="flex items-center gap-1 text-blue-700"><HiPhotograph className="w-4 h-4" /> Image</span>}
-                          {proof.submissionUrl && (
-                            <a href={proof.submissionUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-700 underline">
-                              <HiExternalLink className="w-4 h-4" /> Link
-                            </a>
+                    {(sub.proofs || []).map((proof: any, i: number) => {
+                      const status = proof.status;
+                      const statusIcon =
+                        status === 'approved' ? <HiCheckCircle className="text-green-500 w-5 h-5" /> :
+                        status === 'pending'  ? <HiExclamationCircle className="text-yellow-400 w-5 h-5" /> :
+                        <HiExclamationCircle className="text-red-400 w-5 h-5" />;
+
+                      return (
+                        <div key={i} className="border rounded-xl p-3 bg-gray-50">
+                          <div className="flex items-center gap-2 mb-1">
+                            {statusIcon}
+                            <span className="font-bold text-sm">{status?.toUpperCase?.()}</span>
+                          </div>
+
+                          <div className="flex items-center gap-2 text-xs mb-1">
+                            {proof.proofVideo && <span className="flex items-center gap-1 text-blue-700"><HiVideoCamera className="w-4 h-4" /> Video</span>}
+                            {proof.proofImage && <span className="flex items-center gap-1 text-blue-700"><HiPhotograph className="w-4 h-4" /> Image</span>}
+                            {proof.submissionUrl && (
+                              <a href={proof.submissionUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-700 underline">
+                                <HiExternalLink className="w-4 h-4" /> Link
+                              </a>
+                            )}
+                          </div>
+
+                          <div className="text-xs text-gray-700 mb-1">
+                            Reported Views: <b>{proof.views?.toLocaleString?.() ?? 0}</b>
+                          </div>
+                          {proof.verifiedViews && (
+                            <div className="text-xs text-green-700">
+                              Verified: <b>{proof.verifiedViews.toLocaleString()}</b>
+                            </div>
+                          )}
+                          {proof.rewardAmount && (
+                            <div className="text-xs text-green-700">
+                              Reward: ₦{proof.rewardAmount.toLocaleString()}
+                            </div>
+                          )}
+                          {proof.adminNote && (
+                            <div className={`mt-2 p-2 rounded text-xs ${status === 'rejected' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
+                              <b>Admin note:</b> {proof.adminNote}
+                            </div>
+                          )}
+
+                          {/* Update button or Completed badge */}
+                          {!completed ? (
+                            <button
+                              onClick={() => openProofFormEdit(sub, proof)}
+                              className="flex items-center mt-3 px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold shadow-sm"
+                            >
+                              <HiPencilAlt className="w-4 h-4 mr-1" /> Update
+                            </button>
+                          ) : (
+                            !HIDE_COMPLETED_CARDS && SHOW_COMPLETED_BADGE && (
+                              <div
+                                className="mt-3 inline-flex items-center px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 text-xs font-semibold select-none cursor-not-allowed"
+                                title="Campaign Completed"
+                                aria-disabled="true"
+                              >
+                                Campaign Completed
+                              </div>
+                            )
                           )}
                         </div>
-                        <div className="text-xs text-gray-700 mb-1">Reported Views: <b>{proof.views?.toLocaleString?.() ?? 0}</b></div>
-                        {proof.verifiedViews && <div className="text-xs text-green-700">Verified: <b>{proof.verifiedViews.toLocaleString()}</b></div>}
-                        {proof.rewardAmount && <div className="text-xs text-green-700">Reward: ₦{proof.rewardAmount.toLocaleString()}</div>}
-                        {proof.adminNote && (
-                          <div className={`mt-2 p-2 rounded text-xs ${proof.status === 'rejected' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
-                            <b>Admin note:</b> {proof.adminNote}
-                          </div>
-                        )}
-
-                        {/* Update button or Completed badge */}
-                        {!completed ? (
-                          <button
-                            onClick={() => openProofFormEdit(sub, proof)}
-                            className="flex items-center mt-2 px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-800 text-xs font-semibold"
-                          >
-                            <HiPencilAlt className="w-4 h-4 mr-1" /> Update
-                          </button>
-                        ) : (
-                          !HIDE_COMPLETED_CARDS && SHOW_COMPLETED_BADGE && (
-                            <div className="mt-2 inline-flex items-center px-3 py-1 rounded bg-gray-200 text-gray-700 text-xs font-semibold">
-                              Campaign Completed
-                            </div>
-                          )
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               );

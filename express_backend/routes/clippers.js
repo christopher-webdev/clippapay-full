@@ -190,13 +190,44 @@ router.get('/overview', requireAuth, async (req, res) => {
  * GET /api/clippers/my-submissions
  * List all submissions for this user
  */
+// GET /api/clippers/my-submissions
 router.get('/my-submissions', requireAuth, async (req, res) => {
   try {
+    // populate the bare minimum we need for the UI progress + status
     const subs = await ClipSubmission.find({ clipper: req.user._id })
-    .populate('campaign', 'title')
-    .sort({ createdAt: -1 });
-    res.json(subs);
+      .populate('campaign', 'title status views_left views_purchased updatedAt') // ▲ add fields
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Flatten essential campaign fields so the UI can render even if campaign is missing
+    const formatted = subs.map(s => {
+      const camp = s.campaign && typeof s.campaign === 'object' ? s.campaign : null;
+
+      // If the campaign was deleted or not populated, treat as completed/closed
+      const fallbackStatus = 'completed';
+      const fallbackLeft   = 0;
+      const fallbackTotal  = (typeof s?.campaignViewsPurchased === 'number') ? s.campaignViewsPurchased : undefined;
+
+      return {
+        ...s,
+        // keep original populated campaign (may be null)
+        campaign: camp ? { _id: camp._id, title: camp.title } : s.campaign,
+
+        // explicit fallbacks the UI already supports
+        campaignStatus: camp?.status ?? fallbackStatus,
+        campaignViewsLeft: (typeof camp?.views_left === 'number') ? camp.views_left : fallbackLeft,
+        campaignViewsPurchased: (typeof camp?.views_purchased === 'number')
+          ? camp.views_purchased
+          : (typeof fallbackTotal === 'number' ? fallbackTotal : undefined),
+
+        // Optionally expose updatedAt so you can show “updated …”
+        campaignUpdatedAt: camp?.updatedAt
+      };
+    });
+
+    res.json(formatted);
   } catch (err) {
+    console.error('my-submissions error:', err);
     res.status(500).json({ error: 'Could not fetch submissions.' });
   }
 });
