@@ -264,34 +264,42 @@ router.get('/:id', requireAuth, async (req, res) => {
       .lean();
 
     // Shape the response your UI expects, plus UGC when present
+    // routes/clippers.js (inside router.get('/:id', ...))
     res.json({
       id: campaign._id.toString(),
       title: campaign.title,
       advertiser: campaign.advertiser?.contactName || 'Advertiser',
       description: campaign.description || '',
       thumbUrl: campaign.thumb_url,
-      payPerView: campaign.clipper_cpm ?? 500, // still "per 1000" in your label
+      payPerView: campaign.clipper_cpm ?? 500,
       totalViews: campaign.views_purchased,
       views_left: campaign.views_left,
       clippersCount: campaign.clippersCount,
       platforms: campaign.platforms,
-      instructions: campaign.directions,
+      directions: campaign.directions,   // keep exposing top-level if you use it elsewhere
       hashtags: campaign.hashtags,
       status: campaign.status,
-      // NEW:
-      kind: campaign.kind,                // 'ugc' | 'normal'
+
+      kind: campaign.kind,
       ugc: campaign.kind === 'ugc' ? {
         assets: campaign.ugc?.assets || [],
         brief: campaign.ugc?.brief || '',
+        // 👇 fallback to top-level directions when UGC directions are absent
+        directions: (campaign.ugc?.directions && campaign.ugc.directions.length > 0)
+          ? campaign.ugc.directions
+          : (campaign.directions || []),
         deliverables: campaign.ugc?.deliverables || [],
         captionTemplate: campaign.ugc?.captionTemplate || '',
         usageRights: campaign.ugc?.usageRights || '',
       } : undefined,
+
       clips: clips.map(c => ({
         id: c._id.toString(),
         url: c.url,
         index: c.index,
       })),
+
+
     });
   } catch (err) {
     console.error(err);

@@ -37,6 +37,7 @@ interface CampaignDetail {
   ugc?: {
     assets: string[];
     brief: string;
+    directions?: string[] | string;
     deliverables: string[];
     captionTemplate: string;
     usageRights: string;
@@ -231,6 +232,7 @@ export default function CampaignDetail() {
 
 
       {/* UGC Creative Pack */}
+      {/* UGC Creative Pack */}
       {campaign.kind === 'ugc' && (
         <section className="mt-6">
           <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
@@ -252,6 +254,17 @@ export default function CampaignDetail() {
                   <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap">
                     {campaign.ugc.brief}
                   </p>
+                </div>
+              )}
+
+              {!!campaign.ugc?.directions?.length && (
+                <div className="pt-5 border-t border-dashed border-gray-200">
+                  <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
+                    Directions
+                  </div>
+                  <ul className="list-disc list-inside text-sm text-gray-800 space-y-1">
+                    {campaign.ugc.directions.map((d, i) => <li key={i}>{d}</li>)}
+                  </ul>
                 </div>
               )}
 
