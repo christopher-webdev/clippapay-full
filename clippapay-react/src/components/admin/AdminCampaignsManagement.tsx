@@ -4,7 +4,7 @@ import axios from "axios";
 import { HiSearch, HiTrash, HiPencil, HiEye, HiX } from "react-icons/hi";
 import Modal from "react-modal";
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 1000000;
 
 Modal.setAppElement('#root');
 
