@@ -23,7 +23,8 @@ const PLATFORM_LABELS = {
   facebook: 'Facebook',
   x: 'X',
 };
-const HTTP_ONLY_REGEX = /^http:\/\/.+/i;
+
+const HTTPS_ONLY_REGEX = /^https:\/\/.+/i;
 
 // ======= CONFIG =======
 const PAGE_SIZE = 7;
@@ -241,8 +242,8 @@ export default function ClipperSubmissions() {
           return;
         }
         const url = String(b.submissionUrl).trim();
-        if (!HTTP_ONLY_REGEX.test(url)) {
-          setFormError(`Invalid link in block ${i + 1}. Use full link starting with "http://".`);
+        if (!HTTPS_ONLY_REGEX.test(url)) {
+          setFormError(`Invalid link in block ${i + 1}. Use full link starting with "https://".`);
           setFormLoading(false);
           return;
         }
@@ -339,7 +340,7 @@ export default function ClipperSubmissions() {
                   value={block.submissionUrl}
                   onChange={e => handleBlockChange(idx, 'submissionUrl', e.target.value)}
                   onBlur={e => handleBlockChange(idx, 'submissionUrl', e.target.value.trim())}
-                  placeholder='Submission Link (must start with "http://")'
+                  placeholder='Submission Link (must start with "https://")'
                   className="border p-2 rounded mb-2 block w-full"
                   required
                 />
@@ -447,8 +448,8 @@ export default function ClipperSubmissions() {
                       const status = proof.status;
                       const statusIcon =
                         status === 'approved' ? <HiCheckCircle className="text-green-500 w-5 h-5" /> :
-                        status === 'pending'  ? <HiExclamationCircle className="text-yellow-400 w-5 h-5" /> :
-                        <HiExclamationCircle className="text-red-400 w-5 h-5" />;
+                          status === 'pending' ? <HiExclamationCircle className="text-yellow-400 w-5 h-5" /> :
+                            <HiExclamationCircle className="text-red-400 w-5 h-5" />;
 
                       return (
                         <div key={i} className="border rounded-xl p-3 bg-gray-50">
