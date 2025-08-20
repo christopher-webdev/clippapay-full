@@ -35,7 +35,7 @@ const roleLabels: Record<string, string> = {
   platform: "Platform",
 };
 
-const PAGE_SIZE = 1000;
+const PAGE_SIZE = 100;
 
 export default function UsersManagement() {
   const [users, setUsers] = useState<UserRow[]>([]);

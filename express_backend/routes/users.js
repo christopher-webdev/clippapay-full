@@ -95,7 +95,7 @@ router.delete('/me', requireAuth, async (req, res) => {
 // ---------------------------
 router.get('/all', requireAdminAuth, async (req, res) => {
   try {
-    const users = await User.find().select('-passwordHash').limit(1000);
+    const users = await User.find().select('-passwordHash').limit(100000000000);
     res.json(users);
   } catch (err) {
     console.error('Error fetching all users:', err);
