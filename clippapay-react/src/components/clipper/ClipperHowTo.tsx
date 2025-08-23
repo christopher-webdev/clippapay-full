@@ -108,6 +108,47 @@ export default function ClipperHowTo() {
             </div>
           </motion.div>
         </section>
+        <section className="text-center space-y-8">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="relative"
+          >
+            <div className="absolute inset-0 rounded-3xl bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 opacity-20 blur-2xl -z-10" />
+            <div className="relative bg-white/90 backdrop-blur-sm rounded-3xl p-1 shadow-xl ring-1 ring-black/5 overflow-hidden">
+              <div className="relative aspect-video rounded-2xl overflow-hidden">
+                <iframe
+                  className="w-full h-full"
+                  src="https://www.youtube.com/embed/SgpZitRx3ms?autoplay=0&rel=0"
+                  title="ClippaPay Tutorial for Clippers"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                ></iframe>
+              </div>
+              <div className="p-6 space-y-4">
+                <h2 className="text-3xl font-bold text-gray-800">
+                  <span className="inline-flex items-center gap-2">
+                    <HiPlayCircle className="text-purple-600" />
+                    Watch Our Tutorial Video
+                  </span>
+                </h2>
+                <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+                  Learn how to Clip & Post contents effectively in just 3 minutes.
+                </p>
+                <div className="flex items-center justify-center gap-4 pt-2">
+                  <a
+                    href="#steps"
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-full font-medium shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"
+                  >
+                    <HiArrowDownCircle />
+                    Or read the step-by-step guide below
+                  </a>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </section>
 
         {/* Page header */}
         <header id="steps" className="text-center space-y-6">

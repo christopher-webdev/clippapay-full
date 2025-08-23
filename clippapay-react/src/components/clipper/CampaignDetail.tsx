@@ -10,6 +10,8 @@ import {
 } from 'react-icons/hi';
 import axios from 'axios';
 
+import ugcBanner from "@/assets/ugc-banner.png";
+
 interface Clip {
   id: string;
   url: string;
@@ -52,6 +54,7 @@ export default function CampaignDetail() {
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [alreadyJoined, setAlreadyJoined] = useState(false);
+  const [showUgcModal, setShowUgcModal] = useState(false);
 
   // Fetch campaign details
   useEffect(() => {
@@ -73,7 +76,14 @@ export default function CampaignDetail() {
     if (id) fetchCampaign();
   }, [id]);
 
-  // Fetch joined state (safe, does not break hooks order)
+  // Show UGC modal if campaign is UGC
+  useEffect(() => {
+    if (campaign && campaign.kind === 'ugc') {
+      setShowUgcModal(true);
+    }
+  }, [campaign]);
+
+  // Fetch joined state
   useEffect(() => {
     const checkJoined = async () => {
       try {
@@ -101,7 +111,6 @@ export default function CampaignDetail() {
     return <p className="text-center py-10 text-red-500">Campaign not found.</p>;
   }
 
-  // ---- DISABLE BUTTON LOGIC (fixed) ----
   const completedRatio = campaign.totalViews > 0
     ? (campaign.totalViews - campaign.views_left) / campaign.totalViews
     : 0;
@@ -118,231 +127,262 @@ export default function CampaignDetail() {
   };
 
   return (
-    <div className="space-y-6 max-w-3xl mx-auto">
-      <button
-        onClick={() => navigate(-1)}
-        className="text-sm text-indigo-600 hover:underline"
-      >
-        ← Back to campaigns
-      </button>
-
-      {/* Title & Tag */}
-      <div className="flex items-center gap-2 mb-4">
-        <h2 className="text-3xl font-bold text-gray-900 tracking-tight">{campaign.title}</h2>
-        {campaign.kind === 'ugc' && (
-          <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200 shadow-sm">
-            UGC
-          </span>
-        )}
-      </div>
-
-      {/* Download Approved Clips */}
-      <div className="mt-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-          <HiOutlineFilm className="w-5 h-5 text-indigo-500" />
-          Download Approved Clips
-        </h3>
-        {campaign.clips && campaign.clips.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {campaign.clips.map((clip) => (
-              <div
-                key={clip.id}
-                className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden"
-              >
-                <video
-                  src={clip.url}
-                  controls
-                  className="w-full h-48 object-contain bg-black"
-                />
-                <div className="p-3">
-                  <a
-                    href={clip.url}
-                    download
-                    className="inline-flex items-center justify-center w-full px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 transition"
-                  >
-                    <HiDownload className="mr-2 w-4 h-4" />
-                    Download Clip {clip.index}
-                  </a>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-gray-500 italic">No clips available for download yet.</div>
-        )}
-      </div>
-
-      {/* Top Stats */}
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-6">
-        <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
-          <HiOutlineLightningBolt className="w-6 h-6 text-indigo-500" />
-          <div>
-            <div className="font-medium text-gray-800">
-              ₦{campaign.payPerView.toLocaleString()} per 1,000 views
-            </div>
-            <div className="text-xs text-gray-500">
-              (₦{(campaign.payPerView / 1000).toFixed(2)} per view)
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
-          <HiOutlineClipboardList className="w-6 h-6 text-indigo-500" />
-          <div className="font-medium text-gray-800">
-            {campaign.totalViews.toLocaleString()} total views
-          </div>
-        </div>
-        <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
-          <HiOutlineUserGroup className="w-6 h-6 text-indigo-500" />
-          <div className="font-medium text-gray-800">
-            {campaign.clippersCount} clippers joined
-          </div>
-        </div>
-      </div>
-
-      {/* Suggested Platforms */}
-      <div className="mt-6">
-        <h3 className="text-lg font-semibold text-gray-900">Suggested Platforms</h3>
-        <ul className="mt-3 flex flex-wrap gap-2">
-          {campaign.platforms.map(p => (
-            <li
-              key={p}
-              className="px-3 py-1 bg-gray-100 border border-gray-200 rounded-full text-sm text-gray-700"
+    <>
+      {/* UGC Modal */}
+      {showUgcModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-lg w-[340px] relative p-4">
+            {/* Close Button */}
+            <button
+              onClick={() => setShowUgcModal(false)}
+              className="absolute top-2 right-2 text-gray-500 hover:text-gray-700 text-xl font-bold"
             >
-              {p}
-            </li>
-          ))}
-        </ul>
-      </div>
+              ×
+            </button>
 
-      {/* Required Hashtags */}
-      <div className="mt-6">
-        <h3 className="text-lg font-semibold text-gray-900">Required Hashtags</h3>
-        <ul className="mt-3 flex flex-wrap gap-2">
-          {campaign.hashtags.map(tag => (
-            <li
-              key={tag}
-              className="inline-flex items-center space-x-1 px-3 py-1 bg-gray-100 border border-gray-200 rounded-full text-sm text-gray-700"
+            {/* Banner Image */}
+            <img
+              src={ugcBanner}
+              alt="UGC Banner"
+              className="w-full h-auto rounded-lg mb-4"
+            />
+
+            {/* Continue Button */}
+            <button
+              onClick={() => setShowUgcModal(false)}
+              className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg"
             >
-              <HiHashtag className="w-4 h-4 text-gray-500" />
-              <span>{tag}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-
-      {/* UGC Creative Pack */}
-      {/* UGC Creative Pack */}
-      {campaign.kind === 'ugc' && (
-        <section className="mt-6">
-          <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
-            {/* header */}
-            <div className="px-5 sm:px-6 py-4 border-b border-gray-100 flex items-center gap-2">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
-                UGC
-              </span>
-              <h3 className="text-base sm:text-lg font-semibold text-gray-900">UGC Creative Pack</h3>
-            </div>
-
-            {/* body */}
-            <div className="px-5 sm:px-6 py-5 space-y-5">
-              {campaign.ugc?.brief && (
-                <div>
-                  <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
-                    Brief
-                  </div>
-                  <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap">
-                    {campaign.ugc.brief}
-                  </p>
-                </div>
-              )}
-
-              {!!campaign.ugc?.directions?.length && (
-                <div className="pt-5 border-t border-dashed border-gray-200">
-                  <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
-                    Directions
-                  </div>
-                  <ul className="list-disc list-inside text-sm text-gray-800 space-y-1">
-                    {campaign.ugc.directions.map((d, i) => <li key={i}>{d}</li>)}
-                  </ul>
-                </div>
-              )}
-
-              {!!campaign.ugc?.deliverables?.length && (
-                <div className="pt-5 border-t border-dashed border-gray-200">
-                  <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
-                    Deliverables
-                  </div>
-                  <ul className="list-disc list-inside text-sm text-gray-800 space-y-1">
-                    {campaign.ugc.deliverables.map((d, i) => <li key={i}>{d}</li>)}
-                  </ul>
-                </div>
-              )}
-
-              {campaign.ugc?.captionTemplate && (
-                <div className="pt-5 border-t border-dashed border-gray-200">
-                  <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
-                    Caption Template
-                  </div>
-                  <pre className="bg-gray-50 border border-gray-200 rounded-xl p-3 font-mono text-[13px] leading-6 text-gray-800 whitespace-pre-wrap">
-                    {campaign.ugc.captionTemplate}
-                  </pre>
-                </div>
-              )}
-
-              {campaign.ugc?.usageRights && (
-                <div className="pt-5 border-t border-dashed border-gray-200">
-                  <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
-                    Usage Rights
-                  </div>
-                  <p className="text-sm text-gray-800">
-                    {campaign.ugc.usageRights}
-                  </p>
-                </div>
-              )}
-
-              <div className="pt-5 border-t border-dashed border-gray-200">
-                <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-2">
-                  Assets
-                </div>
-                <AssetsGrid assets={campaign.ugc?.assets || []} />
-              </div>
-            </div>
+              Continue
+            </button>
           </div>
-        </section>
+        </div>
       )}
 
-      {/* CTA */}
-      <div className="mt-6">
-        {alreadyJoined ? (
-          <button
-            type="button"
-            className="w-full px-6 py-3 text-white rounded-md text-lg font-medium bg-blue-600 hover:bg-blue-700"
-            onClick={handleSubmitProof}
-          >
-            Submit Proof / View Submission
-          </button>
-        ) : (
-          <form onSubmit={handleStart}>
-            <button
-              type="submit"
-              disabled={campaign.status !== 'active' || is80Done}
-              className={`w-full px-6 py-3 text-white rounded-md text-lg font-medium ${campaign.status === 'active' && !is80Done
-                ? 'bg-green-600 hover:bg-green-700'
-                : 'bg-gray-300 cursor-not-allowed'
-                }`}
-            >
-              {joining ? 'Starting…' : 'Start Promoting'}
-            </button>
-            {is80Done && (
-              <div className="text-xs text-red-500 mt-2 text-center font-medium">
-                This campaign is now locked for new submissions
+      {/* Main Content */}
+      <div className={`${showUgcModal ? 'pointer-events-none blur-sm' : ''} space-y-6 max-w-3xl mx-auto`}>
+        <button
+          onClick={() => navigate(-1)}
+          className="text-sm text-indigo-600 hover:underline"
+        >
+          ← Back to campaigns
+        </button>
+
+        {/* Title & Tag */}
+        <div className="flex items-center gap-2 mb-4">
+          <h2 className="text-3xl font-bold text-gray-900 tracking-tight">{campaign.title}</h2>
+          {campaign.kind === 'ugc' && (
+            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200 shadow-sm">
+              UGC
+            </span>
+          )}
+        </div>
+
+        {/* Download Approved Clips */}
+        <div className="mt-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+            <HiOutlineFilm className="w-5 h-5 text-indigo-500" />
+            Download Approved Clips
+          </h3>
+          {campaign.clips && campaign.clips.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              {campaign.clips.map((clip) => (
+                <div
+                  key={clip.id}
+                  className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden"
+                >
+                  <video
+                    src={clip.url}
+                    controls
+                    className="w-full h-48 object-contain bg-black"
+                  />
+                  <div className="p-3">
+                    <a
+                      href={clip.url}
+                      download
+                      className="inline-flex items-center justify-center w-full px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 transition"
+                    >
+                      <HiDownload className="mr-2 w-4 h-4" />
+                      Download Clip {clip.index}
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-gray-500 italic">No clips available for download yet.</div>
+          )}
+        </div>
+
+        {/* Top Stats */}
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+            <HiOutlineLightningBolt className="w-6 h-6 text-indigo-500" />
+            <div>
+              <div className="font-medium text-gray-800">
+                ₦{campaign.payPerView.toLocaleString()} per 1,000 views
               </div>
-            )}
-          </form>
+              <div className="text-xs text-gray-500">
+                (₦{(campaign.payPerView / 1000).toFixed(2)} per view)
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+            <HiOutlineClipboardList className="w-6 h-6 text-indigo-500" />
+            <div className="font-medium text-gray-800">
+              {campaign.totalViews.toLocaleString()} total views
+            </div>
+          </div>
+          <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+            <HiOutlineUserGroup className="w-6 h-6 text-indigo-500" />
+            <div className="font-medium text-gray-800">
+              {campaign.clippersCount} clippers joined
+            </div>
+          </div>
+        </div>
+
+        {/* Suggested Platforms */}
+        <div className="mt-6">
+          <h3 className="text-lg font-semibold text-gray-900">Suggested Platforms</h3>
+          <ul className="mt-3 flex flex-wrap gap-2">
+            {campaign.platforms.map(p => (
+              <li
+                key={p}
+                className="px-3 py-1 bg-gray-100 border border-gray-200 rounded-full text-sm text-gray-700"
+              >
+                {p}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Required Hashtags */}
+        <div className="mt-6">
+          <h3 className="text-lg font-semibold text-gray-900">Required Hashtags</h3>
+          <ul className="mt-3 flex flex-wrap gap-2">
+            {campaign.hashtags.map(tag => (
+              <li
+                key={tag}
+                className="inline-flex items-center space-x-1 px-3 py-1 bg-gray-100 border border-gray-200 rounded-full text-sm text-gray-700"
+              >
+                <HiHashtag className="w-4 h-4 text-gray-500" />
+                <span>{tag}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* UGC Creative Pack */}
+        {campaign.kind === 'ugc' && (
+          <section className="mt-6">
+            <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
+              {/* header */}
+              <div className="px-5 sm:px-6 py-4 border-b border-gray-100 flex items-center gap-2">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                  UGC
+                </span>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">UGC Creative Pack</h3>
+              </div>
+
+              {/* body */}
+              <div className="px-5 sm:px-6 py-5 space-y-5">
+                {campaign.ugc?.brief && (
+                  <div>
+                    <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
+                      Brief
+                    </div>
+                    <p className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap">
+                      {campaign.ugc.brief}
+                    </p>
+                  </div>
+                )}
+
+                {!!campaign.ugc?.directions?.length && (
+                  <div className="pt-5 border-t border-dashed border-gray-200">
+                    <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
+                      Directions
+                    </div>
+                    <ul className="list-disc list-inside text-sm text-gray-800 space-y-1">
+                      {campaign.ugc.directions.map((d, i) => <li key={i}>{d}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {!!campaign.ugc?.deliverables?.length && (
+                  <div className="pt-5 border-t border-dashed border-gray-200">
+                    <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
+                      Deliverables
+                    </div>
+                    <ul className="list-disc list-inside text-sm text-gray-800 space-y-1">
+                      {campaign.ugc.deliverables.map((d, i) => <li key={i}>{d}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {campaign.ugc?.captionTemplate && (
+                  <div className="pt-5 border-t border-dashed border-gray-200">
+                    <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
+                      Caption Template
+                    </div>
+                    <pre className="bg-gray-50 border border-gray-200 rounded-xl p-3 font-mono text-[13px] leading-6 text-gray-800 whitespace-pre-wrap">
+                      {campaign.ugc.captionTemplate}
+                    </pre>
+                  </div>
+                )}
+
+                {campaign.ugc?.usageRights && (
+                  <div className="pt-5 border-t border-dashed border-gray-200">
+                    <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
+                      Usage Rights
+                    </div>
+                    <p className="text-sm text-gray-800">
+                      {campaign.ugc.usageRights}
+                    </p>
+                  </div>
+                )}
+
+                <div className="pt-5 border-t border-dashed border-gray-200">
+                  <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-2">
+                    Assets
+                  </div>
+                  <AssetsGrid assets={campaign.ugc?.assets || []} />
+                </div>
+              </div>
+            </div>
+          </section>
         )}
+
+        {/* CTA */}
+        <div className="mt-6">
+          {alreadyJoined ? (
+            <button
+              type="button"
+              className="w-full px-6 py-3 text-white rounded-md text-lg font-medium bg-blue-600 hover:bg-blue-700"
+              onClick={handleSubmitProof}
+            >
+              Submit Proof / View Submission
+            </button>
+          ) : (
+            <form onSubmit={handleStart}>
+              <button
+                type="submit"
+                disabled={campaign.status !== 'active' || is80Done}
+                className={`w-full px-6 py-3 text-white rounded-md text-lg font-medium ${campaign.status === 'active' && !is80Done
+                  ? 'bg-green-600 hover:bg-green-700'
+                  : 'bg-gray-300 cursor-not-allowed'
+                  }`}
+              >
+                {joining ? 'Starting…' : 'Start Promoting'}
+              </button>
+              {is80Done && (
+                <div className="text-xs text-red-500 mt-2 text-center font-medium">
+                  This campaign is now locked for new submissions
+                </div>
+              )}
+            </form>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -375,14 +415,12 @@ function AssetsGrid({ assets }: { assets: string[] }) {
       {assets.map((url, i) => {
         const k = kind(url);
 
-        // common card wrapper
         const Card: React.FC<{ children: React.ReactNode }> = ({ children }) => (
           <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
             {children}
           </div>
         );
 
-        // 16:9 box with object-contain so media never looks zoomed
         const MediaBox: React.FC<{ children: React.ReactNode }> = ({ children }) => (
           <div className="relative w-full bg-gray-50">
             <div className="relative w-full pb-[56.25%]">
