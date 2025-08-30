@@ -1,4 +1,3 @@
-//component adworker
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Briefcase, Film, User, Loader2 } from 'lucide-react'; // Example icons
@@ -12,9 +11,12 @@ const normalizeUrl = (url?: string) => {
   return url;
 };
 
-function CampaignKindBadge({ kind }: { kind?: 'normal' | 'ugc' }) {
+function CampaignKindBadge({ kind }: { kind?: 'normal' | 'ugc' | 'pgc' }) {
   if (kind === 'ugc') {
     return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200">UGC</span>;
+  }
+  if (kind === 'pgc') {
+    return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-200 text-purple-700 border border-purple-200">PGC</span>;
   }
   return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600 border border-gray-200">Normal</span>;
 }
@@ -82,19 +84,18 @@ function AssetsGrid({ assets }: { assets?: string[] }) {
   );
 }
 
-
 interface CampaignSummary {
   _id: string;
   title: string;
   advertiser: { contactName?: string; firstName?: string; lastName?: string; company?: string; email?: string };
   adWorkerStatus: 'pending' | 'processing' | 'ready' | 'rejected';
-  kind?: 'normal' | 'ugc';
+  kind?: 'normal' | 'ugc' | 'pgc';
 }
 
 interface CampaignDetails {
   campaign: {
     _id: string;
-    kind?: 'normal' | 'ugc';
+    kind?: 'normal' | 'ugc' | 'pgc';
     advertiser: {
       contactName?: string;
       firstName?: string;
@@ -117,14 +118,16 @@ interface CampaignDetails {
     createdAt: string;
     adWorkerStatus: 'pending' | 'processing' | 'ready' | 'rejected';
     status: string;
-
-    // UGC meta (present when kind === 'ugc')
     ugc?: {
-      assets?: string[];          // URLs returned by backend
+      assets?: string[];
       brief?: string;
       deliverables?: string[];
       captionTemplate?: string;
       usageRights?: string;
+      draftRequired?: boolean;
+      creativeDeadline?: string;
+      postDeadline?: string;
+      approvalCriteria?: string;
     };
   };
   clips: {
@@ -145,7 +148,6 @@ export default function AdWorkerDashboard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
 
   const fetchCampaigns = async () => {
     setLoading(true);
@@ -195,11 +197,9 @@ export default function AdWorkerDashboard() {
                 <div className="text-gray-500 text-sm flex items-center gap-2">
                   <div className="w-4 h-4 inline" />
                   {
-                    c.advertiser?.creatorTypes.join(', ')
-                  },
-                  {
-                    c.advertiser?.otherCreatorType
+                    c.advertiser?.creatorTypes?.join(', ') || ''
                   }
+                  {c.advertiser?.otherCreatorType ? `, ${c.advertiser.otherCreatorType}` : ''}
                 </div>
               </div>
             </div>
@@ -274,6 +274,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
       setError('Could not update status.');
     }
   };
+
   const uploadThumbnail = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setUploading(true);
@@ -296,7 +297,6 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
       });
 
       setSuccess('Thumbnail uploaded successfully!');
-      // Refresh the details to show the new thumbnail
       const detailsRes = await axios.get(`/campaigns/${campaignId}/details`);
       setDetails(detailsRes.data);
     } catch (err) {
@@ -306,10 +306,11 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
     }
   };
 
-  // Allow uploading up to 6 at once, or as many as needed to reach 6 total
   const uploadClip = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setUploading(true); setError(null); setSuccess(null);
+    setUploading(true);
+    setError(null);
+    setSuccess(null);
     const input = (e.currentTarget.elements.namedItem('clips') as HTMLInputElement);
     if (!input.files || input.files.length === 0) {
       setError('Select one or more video files.');
@@ -328,7 +329,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setSuccess('Clip(s) uploaded!');
-      setTimeout(() => window.location.reload(), 1200); // Or refetch details
+      setTimeout(() => window.location.reload(), 1200);
     } catch {
       setError('Failed to upload clip(s).');
     } finally {
@@ -347,16 +348,13 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
     }
   };
 
-  // Show only clips uploaded within last 30 days
   const clips = details?.clips.filter(
     clip => (new Date().getTime() - new Date(clip.createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000
   );
 
-  // Modal UI
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-white rounded-lg shadow-lg max-h-[80vh] overflow-y-auto p-4 relative">
-
         <button
           className="absolute top-4 right-4 text-3xl text-gray-400 hover:text-gray-900"
           onClick={onClose}
@@ -364,8 +362,6 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
         >
           &times;
         </button>
-     
-       
 
         {loading ? (
           <div className="p-12 text-center flex items-center justify-center">
@@ -381,15 +377,12 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
             {/* Header Section */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
               <div>
-                <h2 className="text-2xl font-bold mb-1">{details.campaign.title}</h2>
+                <h2 className="text-2xl font-bold mb-1">{details.campaign.title} <CampaignKindBadge kind={details.campaign.kind} /></h2>
                 <div className="text-gray-500 text-sm flex items-center gap-2">
                   <User className="w-4 h-4" />
                   {details.campaign.advertiser.contactName} &middot; {details.campaign.advertiser.email}
                 </div>
-
-
               </div>
-
               <span
                 className={`
                 px-4 py-2 rounded-full text-sm font-semibold tracking-wide border
@@ -426,6 +419,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
                 </button>
               </div>
             )}
+
             {/* Thumbnail Upload Section */}
             <div className="mb-4">
               <h3 className="font-medium mb-2">Campaign Thumbnail</h3>
@@ -473,6 +467,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
                 </form>
               )}
             </div>
+
             {/* Campaign Info Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-gray-700 mb-6">
               <Info label="Platforms" value={details.campaign.platforms.join(', ')} />
@@ -501,10 +496,11 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
                 value={new Date(details.campaign.createdAt).toLocaleString()}
               />
             </div>
-            {/* UGC (assets & brief/deliverables) */}
-            {details.campaign.kind === 'ugc' && (
+
+            {/* UGC or PGC Brief & Assets */}
+            {(details.campaign.kind === 'ugc' || details.campaign.kind === 'pgc') && (
               <div className="mt-6">
-                <h3 className="font-semibold text-gray-900 mb-3">UGC Brief & Assets</h3>
+                <h3 className="font-semibold text-gray-900 mb-3">{details.campaign.kind.toUpperCase()} Brief & Assets</h3>
 
                 {details.campaign.ugc?.brief && (
                   <div className="mb-3">
@@ -534,7 +530,34 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
                   </div>
                 )}
 
-                {/* Assets grid */}
+                {details.campaign.kind === 'pgc' && details.campaign.ugc?.approvalCriteria && (
+                  <div className="mb-3">
+                    <div className="text-gray-500 text-sm">Approval Criteria</div>
+                    <div className="text-sm whitespace-pre-wrap">{details.campaign.ugc.approvalCriteria}</div>
+                  </div>
+                )}
+
+                {details.campaign.kind === 'pgc' && details.campaign.ugc?.draftRequired !== undefined && (
+                  <div className="mb-3">
+                    <div className="text-gray-500 text-sm">Draft Required</div>
+                    <div className="text-sm">{details.campaign.ugc.draftRequired ? 'Yes' : 'No'}</div>
+                  </div>
+                )}
+
+                {details.campaign.kind === 'pgc' && details.campaign.ugc?.creativeDeadline && (
+                  <div className="mb-3">
+                    <div className="text-gray-500 text-sm">Creative Deadline</div>
+                    <div className="text-sm">{new Date(details.campaign.ugc.creativeDeadline).toLocaleString()}</div>
+                  </div>
+                )}
+
+                {details.campaign.kind === 'pgc' && details.campaign.ugc?.postDeadline && (
+                  <div className="mb-3">
+                    <div className="text-gray-500 text-sm">Post Deadline</div>
+                    <div className="text-sm">{new Date(details.campaign.ugc.postDeadline).toLocaleString()}</div>
+                  </div>
+                )}
+
                 <AssetsGrid assets={details.campaign.ugc?.assets} />
               </div>
             )}
@@ -581,7 +604,6 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
                   )}
                 </form>
               )}
-
 
             {/* Uploaded Clips */}
             <div className="mt-7">
@@ -631,6 +653,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
     </div>
   );
 }
+
 // Reusable info row
 function Info({ label, value }: { label: string; value: React.ReactNode }) {
   return (

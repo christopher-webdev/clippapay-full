@@ -19,9 +19,10 @@ import CampaignAnalytics from './components/advertiser/CampaignAnalytics';
 import WalletSection from './components/advertiser/WalletSection';
 import NotificationsPanel from './components/advertiser/NotificationsPanel';
 import SettingsPanel from './components/advertiser/SettingsPanel';
-import AdvertiserHowTo from './components/advertiser/AdvertiserHowTo';  
+import AdvertiserHowTo from './components/advertiser/AdvertiserHowTo';
 import CreateUGCCampaignForm from './components/advertiser/Create-Ugc.tsx';
-
+import CreateAssetCreationCampaign from './components/advertiser/CreateAssetCreationCampaign.tsx';
+import PGCApprovedVideos from './components/advertiser/PGCApprovedVideos.tsx';
 
 // Clipper
 import ClipperDashboardLayout from './components/clipper/ClipperDashboardLayout.tsx';
@@ -31,7 +32,8 @@ import CampaignDetail from './components/clipper/CampaignDetail.tsx';
 import Submissions from './components/clipper/ClipperSubmissions.tsx';
 import ClipperWallet from './components/clipper/ClipperWallet.tsx';
 import ClipperSettings from './components/clipper/ClipperSettings.tsx';
-import ClipperHowTo from './components/clipper/ClipperHowTo'; 
+import ClipperHowTo from './components/clipper/ClipperHowTo';
+import ClipperPGCSubmissions from './components/clipper/ClipperPGCSubmissions.tsx';
 
 // Admin
 import AdminLayout from './components/admin/AdminLayout.tsx';
@@ -59,7 +61,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage.tsx';
 import Terms from './pages/Terms.tsx'
 import Privacy from './pages/Privacy.tsx'
 import { usePageView } from '@/utils/usePageView';
-import Contact  from './pages/Contact.tsx';
+import Contact from './pages/Contact.tsx';
 export default function App() {
   usePageView();
   return (
@@ -86,13 +88,16 @@ export default function App() {
       <Route path="dashboard/advertiser" element={<AdvertiserDashboardLayout />}>
         <Route index element={<AdvertiserDashboardOverview />} />
         <Route path="campaigns" element={<AdvertiserCampaignList />} />
-        <Route path="create-campaign" element={<CreateCampaignForm onClose={() => {}} />} />
+        <Route path="create-campaign" element={<CreateCampaignForm onClose={() => { }} />} />
         <Route path="analytics" element={<CampaignAnalytics />} />
         <Route path="wallet" element={<WalletSection />} />
         <Route path="notifications" element={<NotificationsPanel />} />
         <Route path="settings" element={<SettingsPanel />} />
         <Route path="how-to" element={<AdvertiserHowTo />} />
         <Route path="create-ugc" element={<CreateUGCCampaignForm />} />
+        <Route path="create-asset-creation" element={<CreateAssetCreationCampaign />} />
+        <Route path="pgc-videos" element={<PGCApprovedVideos />} />
+
       </Route>
 
       {/* Clipper */}
@@ -104,12 +109,13 @@ export default function App() {
         <Route path="wallet" element={<ClipperWallet />} />
         <Route path="settings" element={<ClipperSettings />} />
         <Route path="how-to" element={<ClipperHowTo />} />
+        <Route path="pgc-submissions" element={<ClipperPGCSubmissions />} />
       </Route>
 
-       {/* ad-worker */}
+      {/* ad-worker */}
       <Route path="dashboard/ad-worker" element={<WorkerLayout />}>
         <Route index element={<AdWorkerDashboard />} />
-         <Route path="campaigns" element={<AdWorkerCampaign />} />
+        <Route path="campaigns" element={<AdWorkerCampaign />} />
         {/* <Route path="campaigns/:id" element={<CampaignDetail />} />
         <Route path="submissions" element={<Submissions />} />
         <Route path="wallet" element={<ClipperWallet />} />

@@ -1,5 +1,3 @@
-// File: src/components/admin/AdminOverview.tsx
-
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import {
@@ -14,6 +12,7 @@ import {
   HiOutlineUserGroup,
   HiLockClosed,
   HiEye,
+  HiOutlineVideoCamera
 } from 'react-icons/hi';
 
 interface AdminStats {
@@ -33,11 +32,12 @@ interface AdminStats {
   platformWalletBalance: number;
   totalEscrowLocked: number;
   totalViewsSold: number;
+  totalApprovedPgcVideos: number; // Added for PGC
 }
 
 const ICON_MAP: Record<keyof AdminStats, React.ComponentType<{ className?: string }>> = {
   totalClippers: HiOutlineUsers,
-  totalAdvertisers: HiOutlineUserGroup || HiOutlineUsers,
+  totalAdvertisers: HiOutlineUserGroup,
   totalAdminWorkers: HiOutlinePuzzle,
   totalSuperAdmins: HiOutlineBadgeCheck,
   totalCampaigns: HiOutlineClipboardList,
@@ -52,6 +52,7 @@ const ICON_MAP: Record<keyof AdminStats, React.ComponentType<{ className?: strin
   platformWalletBalance: HiOutlineCash,
   totalEscrowLocked: HiLockClosed,
   totalViewsSold: HiEye,
+  totalApprovedPgcVideos: HiOutlineVideoCamera // Added for PGC
 };
 
 const VARIANTS: Record<keyof AdminStats, string> = {
@@ -71,6 +72,7 @@ const VARIANTS: Record<keyof AdminStats, string> = {
   totalEscrowLocked: 'emerald',
   totalSubscriptions: 'cyan',
   totalViewsSold: 'cyan',
+  totalApprovedPgcVideos: 'blue' // Added for PGC
 };
 
 export default function AdminOverview() {
@@ -118,11 +120,12 @@ export default function AdminOverview() {
       { key: 'activeCampaigns', label: 'Active Campaigns', value: stats.activeCampaigns },
       { key: 'pendingWithdrawals', label: 'Withdrawals Pending', value: stats.pendingWithdrawals },
       { key: 'pendingDeposits', label: 'Deposits Pending', value: stats.pendingDeposits },
-      { key: 'activeClipperPendingApproval', label: 'Total Clippper Pending Approval', value: stats.activeClipperPendingApproval },
+      { key: 'activeClipperPendingApproval', label: 'Total Clipper Pending Approval', value: stats.activeClipperPendingApproval },
       { key: 'totalRevenue', label: 'Total Wallets Balance (₦)', value: `₦${stats.totalRevenue.toLocaleString()}` },
       { key: 'platformWalletBalance', label: 'Platform Wallet (₦)', value: `₦${stats.platformWalletBalance.toLocaleString()}` },
       { key: 'totalEscrowLocked', label: 'Total Escrowed Funds Locked (₦)', value: `₦${stats.totalEscrowLocked.toLocaleString()}` },
       { key: 'totalViewsSold', label: 'Verified Views Delivered', value: stats.totalViewsSold.toLocaleString() },
+      { key: 'totalApprovedPgcVideos', label: 'Approved PGC Videos', value: stats.totalApprovedPgcVideos.toLocaleString() } // Added for PGC
     ];
 
   return (

@@ -1,7 +1,5 @@
-
-
-
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { HiOutlineFilm } from 'react-icons/hi';
 import { Loader2, Info } from 'lucide-react';
 import axios from 'axios';
@@ -10,17 +8,20 @@ interface Campaign {
   _id: string;
   title: string;
   thumb_url?: string;
-  rate_per_1000: number;
-  clipper_cpm: number;
+  rate_per_1000?: number;
+  clipper_cpm?: number;
+  payPerView?: number;
   budget_total: number;
   budget_remaining: number;
-  views_purchased: number;
-  views_left: number;
+  views_purchased?: number;
+  views_left?: number;
+  desiredVideos?: number;
+  approvedVideosCount?: number;
   categories: string[];
   hashtags: string[];
   status: 'active' | 'paused' | 'completed';
   adWorkerStatus: 'pending' | 'processing' | 'ready' | 'rejected';
-  kind?: 'normal' | 'ugc';
+  kind?: 'normal' | 'ugc' | 'pgc';
   createdAt: string;
   updatedAt: string;
 }
@@ -28,13 +29,14 @@ interface Campaign {
 const PAGE_SIZE = 50;
 
 export default function ClipperCampaignList() {
+  const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [joinedCampaignIds, setJoinedCampaignIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [showUgcTooltip, setShowUgcTooltip] = useState<string | null>(null);
+  const [showTooltip, setShowTooltip] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -45,13 +47,11 @@ export default function ClipperCampaignList() {
         const token = localStorage.getItem('token');
         if (!token) throw new Error('You are not logged in!');
 
-        // Fetch available campaigns
         const res = await axios.get('/clippers/available', {
           headers: { Authorization: `Bearer ${token}` },
         });
         setCampaigns(res.data);
 
-        // Fetch user's joined campaigns - CORRECTED ENDPOINT
         const mySubsRes = await axios.get('/clippers/my-submissions', {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -71,8 +71,6 @@ export default function ClipperCampaignList() {
     const intervalId = setInterval(fetchAll, 15000);
     return () => clearInterval(intervalId);
   }, []);
-
-  const navigate = (url: string) => (window.location.href = url);
 
   const filtered = campaigns.filter((c) =>
     c.title.toLowerCase().includes(search.toLowerCase())
@@ -111,9 +109,12 @@ export default function ClipperCampaignList() {
         <>
           <div className="flex flex-wrap justify-center sm:justify-start gap-4">
             {paged.map((c) => {
-              const percentCompleted = 1 - c.views_left / c.views_purchased;
-              const is80Done = percentCompleted >= 0.8;
-              const fullyCompleted = c.views_left === 0;
+              const isPgc = c.kind === 'pgc';
+              const progress = isPgc
+                ? c.desiredVideos ? Math.round((c.approvedVideosCount || 0) / c.desiredVideos * 100) : 0
+                : c.views_purchased && c.views_purchased > 0
+                  ? Math.min(((c.views_purchased - c.views_left) / c.views_purchased) * 100, 100)
+                  : 0;
               const alreadyJoined = joinedCampaignIds.includes(c._id);
 
               return (
@@ -121,49 +122,46 @@ export default function ClipperCampaignList() {
                   key={c._id}
                   className="relative rounded-xl overflow-hidden shadow-md hover:shadow-xl transition group cursor-pointer"
                   style={{ width: '260px', height: '330px', backgroundColor: '#1a1f2b' }}
-                  onClick={() => {
-                    if (!is80Done && !fullyCompleted) {
-                      navigate(`/dashboard/clipper/campaigns/${c._id}`);
-                    }
-                  }}
+                  onClick={() => navigate(`/dashboard/clipper/campaigns/${c._id}`)}
                 >
-                  {/* CPM Badge */}
                   <div className="absolute top-2 left-2 bg-cp-blue text-white text-xs font-semibold px-3 py-1 rounded-full z-10">
-                    ₦{formatNaira(c.clipper_cpm || c.rate_per_1000)} / 1k
+                    ₦{formatNaira(c.payPerView ?? c.clipper_cpm ?? c.rate_per_1000 ?? 0)} / {isPgc ? 'video' : '1k views'}
                   </div>
 
-                  {/* LIVE + HOT (UGC) Badges */}
                   <div className="absolute top-2 right-2 flex items-center gap-2 z-10">
                     <div className="bg-green-500 text-white text-[10px] font-extrabold px-3 py-1 rounded-full animate-pulse">
                       LIVE
                     </div>
-                    {c.kind === 'ugc' && (
+                    {(c.kind === 'ugc' || c.kind === 'pgc') && (
                       <div className="flex items-center gap-1">
                         <div className="bg-red-600 text-white text-[10px] font-extrabold px-3 py-1 rounded-full shadow-sm">
-                          HOT
+                          {c.kind === 'ugc' ? 'HOT' : 'PGC'}
                         </div>
-                        {/* UGC Info Icon */}
                         <div
                           className="relative"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setShowUgcTooltip(showUgcTooltip === c._id ? null : c._id);
+                            setShowTooltip(showTooltip === c._id ? null : c._id);
                           }}
                         >
                           <Info
                             size={25}
                             className="text-gray-300 cursor-pointer hover:text-white"
-                            onMouseEnter={() => setShowUgcTooltip(c._id)}
-                            onMouseLeave={() => setShowUgcTooltip(null)}
+                            onMouseEnter={() => setShowTooltip(c._id)}
+                            onMouseLeave={() => setShowTooltip(null)}
                           />
-
-                          {/* UGC Tooltip */}
-                          {showUgcTooltip === c._id && (
-                            <div className="absolute top-6 right-0 w-48 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg z-20"
-                              onMouseEnter={() => setShowUgcTooltip(c._id)}
-                              onMouseLeave={() => setShowUgcTooltip(null)}>
-                              <div className="font-bold mb-1">UGC Campaign</div>
-                              <p>User-Generated Content: Create and post your own video showcasing this product for higher earnings!</p>
+                          {showTooltip === c._id && (
+                            <div
+                              className="absolute top-6 right-0 w-48 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg z-20"
+                              onMouseEnter={() => setShowTooltip(c._id)}
+                              onMouseLeave={() => setShowTooltip(null)}
+                            >
+                              <div className="font-bold mb-1">{c.kind === 'ugc' ? 'UGC Campaign' : 'PGC Campaign'}</div>
+                              <p>
+                                {c.kind === 'ugc'
+                                  ? 'User-Generated Content: Create and post your own video showcasing this product for higher earnings!'
+                                  : 'Professional-Generated Content: Submit high-quality videos for approval to earn a fixed payout per video!'}
+                              </p>
                             </div>
                           )}
                         </div>
@@ -171,7 +169,6 @@ export default function ClipperCampaignList() {
                     )}
                   </div>
 
-                  {/* Thumbnail */}
                   <div className="flex mt-8 items-center justify-center h-48 px-4 pt-8">
                     {c.thumb_url ? (
                       <img
@@ -184,27 +181,35 @@ export default function ClipperCampaignList() {
                     )}
                   </div>
 
-                  {/* Title */}
                   <div className="text-white text-xl font-medium text-center px-3 mt-0 truncate">
                     {c.title}
                   </div>
 
-                  {/* Progress */}
                   <div className="absolute bottom-12 left-0 right-0 px-4 z-10">
-                    <div className="w-full bg-gray-700 h-1 rounded-full mb-1">
+                    <div className="w-full bg-gray-700 h-1 rounded-full mb-1 overflow-hidden">
                       <div
-                        className="h-1 bg-cp-blue rounded-full"
-                        style={{ width: `${Math.round(percentCompleted * 100)}%` }}
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${progress}%`,
+                          background: progress >= 100
+                            ? "#A3A3A3"
+                            : progress >= 80
+                              ? "#16a34a"
+                              : "#4f46e5"
+                        }}
                       />
                     </div>
                     <div className="text-gray-300 text-xs text-center">
-                      {Math.round(percentCompleted * 100)}% completed
+                      {progress}% completed
                     </div>
                   </div>
 
-                  {/* View / Join Button */}
                   <div className="absolute bottom-3 left-1/2 transform -translate-x-1/2 z-10">
                     <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/dashboard/clipper/campaigns/${c._id}`);
+                      }}
                       className={`${alreadyJoined ? 'bg-gray-500 hover:bg-gray-600' : 'bg-cp-blue hover:bg-blue-700'
                         } text-white font-semibold px-4 py-2 rounded-lg text-sm transition`}
                     >
@@ -222,7 +227,6 @@ export default function ClipperCampaignList() {
             )}
           </div>
 
-          {/* Pagination Controls */}
           <div className="flex flex-col sm:flex-row justify-between items-center mt-8 gap-3">
             <div className="text-sm text-gray-500">
               Page {page} of {totalPages}

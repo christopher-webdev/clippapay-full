@@ -28,6 +28,7 @@ const navItems: NavItem[] = [
   // { name: 'Subscription Plans', to: 'subscription-plan', icon: <HiOutlineBadgeCheck className="w-5 h-5" /> },
   { name: 'Campaigns', to: 'campaigns', icon: <HiClipboardList className="w-5 h-5" /> },
   { name: 'Analytics', to: 'analytics', icon: <HiEye className="w-5 h-5" /> },
+  { name: 'PGC Videos', to: 'pgc-videos', icon: <HiEye className="w-5 h-5" /> },
   { name: 'Wallet', to: 'wallet', icon: <HiCurrencyDollar className="w-5 h-5" /> },
   // { name: 'Notifications', to: 'notifications', icon: <HiOutlineBell className="w-5 h-5" /> },
   { name: 'Settings', to: 'settings', icon: <HiCog className="w-5 h-5" /> },

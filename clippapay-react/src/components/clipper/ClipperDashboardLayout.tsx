@@ -18,6 +18,7 @@ const navItems = [
   { name: 'Overview', to: '', icon: <HiHome className="w-5 h-5" /> },
   { name: 'Campaigns', to: 'campaigns', icon: <HiCollection className="w-5 h-5" /> },
   { name: 'Submissions', to: 'submissions', icon: <HiUpload className="w-5 h-5" /> },
+  { name: 'PGC Submissions', to: 'pgc-submissions', icon: <HiUpload className="w-5 h-5" /> },
   { name: 'Earnings', to: 'wallet', icon: <HiCurrencyDollar className="w-5 h-5" /> },
   { name: 'Settings', to: 'settings', icon: <HiCog className="w-5 h-5" /> },
   { name: 'How to Use', to: 'how-to', icon: <HiOutlineInformationCircle className="w-5 h-5" /> },

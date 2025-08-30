@@ -55,6 +55,54 @@ const thumbnailUpload = multer({
     }
   }
 });
+
+
+////////////////////////////////////////////////////ugc
+// --- UGC assets upload (images/videos/docs for briefs) ---
+const ugcAssetsDir = path.join(process.cwd(), 'uploads/ugc-assets');
+fs.mkdirSync(ugcAssetsDir, { recursive: true });
+
+const ugcAssetStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, ugcAssetsDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const unique = `${Date.now()}-${Math.round(Math.random()*1e9)}`;
+    cb(null, unique + ext);
+  }
+});
+const ugcAssetUpload = multer({
+  storage: ugcAssetStorage,
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB per file
+});
+
+// Utility: safe JSON parse for array fields
+const parseArr = (val, fallback = []) => {
+  try {
+    if (val == null || val === '') return fallback;
+    const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch { return fallback; }
+};
+
+////////////////////////////////////////////////////pgc
+// --- PGC assets upload (images/videos/docs for briefs) ---
+const pgcAssetsDir = path.join(process.cwd(), 'uploads/pgc-assets');
+fs.mkdirSync(pgcAssetsDir, { recursive: true });
+
+const pgcAssetStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, pgcAssetsDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const unique = `${Date.now()}-${Math.round(Math.random()*1e9)}`;
+    cb(null, unique + ext);
+  }
+});
+const pgcAssetUpload = multer({
+  storage: pgcAssetStorage,
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB per file
+});
+
+
 /**
  * POST /api/campaigns
  * Create a new campaign (advertiser only), with video upload
@@ -345,6 +393,195 @@ router.post(
   }
 );
 
+/**
+ * POST /api/campaigns/pgc
+ * Create a PGC campaign (advertiser only)
+ * - Locks FULL escrow = budget (uses PGC rate_per_video = 7500)
+ * - Sets clipper_cpm = 5000 (payout per approved video)
+ * - Platform takes 2500 per video
+ */
+router.post(
+  '/pgc',
+  requireAuth,
+  requireAdvertiser,
+  pgcAssetUpload.array('assets', 12), // optional files from form field `assets`
+  async (req, res) => {
+    try {
+      const advertiserId = req.user._id;
+
+      // BODY: title, budget, desiredVideos, platforms[], countries[], hashtags[], directions[], categories[]
+      // PGC meta: brief, deliverables[], captionTemplate, usageRights, approvalCriteria, cta_url
+      const {
+        title,
+        budget,
+        desiredVideos,
+        platforms, countries, hashtags, directions, categories,
+        brief,
+        deliverables,
+        captionTemplate,
+        usageRights,
+        approvalCriteria,
+        cta_url,
+      } = req.body;
+
+      // Required fields
+      if (!title) return res.status(400).json({ error: 'title is required' });
+      if (!brief) return res.status(400).json({ error: 'brief is required' });
+      if (!approvalCriteria) return res.status(400).json({ error: 'approvalCriteria is required' });
+
+      const budgetVal = Number(budget);
+      const desiredVideosVal = Number(desiredVideos);
+      
+      if (!Number.isFinite(budgetVal) || budgetVal <= 0) {
+        return res.status(400).json({ error: 'Invalid budget' });
+      }
+      if (!Number.isFinite(desiredVideosVal) || desiredVideosVal < 1 || desiredVideosVal > 50) {
+        return res.status(400).json({ error: 'Invalid desired videos count (1-50)' });
+      }
+
+      const platformsArr = parseArr(platforms);
+      const countriesArr = parseArr(countries);
+      const hashtagsArr = parseArr(hashtags);
+      const directionsArr = parseArr(directions);
+      const categoriesArr = parseArr(categories);
+      const deliverablesArr = parseArr(deliverables);
+
+      if (categoriesArr.length === 0) return res.status(400).json({ error: 'At least one category is required' });
+
+      // PGC fixed economics
+      const PGC_VIDEO_COST = 7500; // advertiser pays per video
+      const PGC_CLIPPER_PAYOUT = 5000; // clipper earns per approved video
+      const PLATFORM_FEE = 2500; // platform takes per video
+
+      // Calculate minimum required budget
+      const minBudget = desiredVideosVal * PGC_VIDEO_COST;
+      if (budgetVal < minBudget) {
+        return res.status(400).json({ 
+          error: `Budget must be at least ₦${minBudget} for ${desiredVideosVal} videos (₦${PGC_VIDEO_COST} each)` 
+        });
+      }
+
+      // Calculate maximum videos possible with budget
+      const maxVideos = Math.floor(budgetVal / PGC_VIDEO_COST);
+      const actualVideos = Math.min(desiredVideosVal, maxVideos);
+
+      // Wallet + escrow check
+      const advertiserWallet = await Wallet.findOne({ user: advertiserId });
+      if (!advertiserWallet) return res.status(400).json({ error: 'Wallet not found' });
+      if (advertiserWallet.balance < budgetVal) {
+        return res.status(400).json({
+          error: 'Insufficient wallet balance',
+          currentBalance: advertiserWallet.balance,
+          required: budgetVal
+        });
+      }
+
+      // Build assets list (relative paths)
+      const assetPaths = (req.files || []).map(f => `/uploads/pgc-assets/${path.basename(f.path)}`);
+
+      // Create campaign document
+      const campaign = new Campaign({
+        kind: 'pgc',
+        advertiser: advertiserId,
+        title,
+
+        // Financials
+        rate_per_1000: PGC_VIDEO_COST, // Represents cost per video
+        clipper_cpm: PGC_CLIPPER_PAYOUT, // Represents payout per video
+
+        // Budget/Videos
+        budget_total: budgetVal,
+        budget_remaining: budgetVal,
+        desiredVideos: actualVideos,
+        approvedVideosCount: 0,
+
+        // Targeting/Meta
+        platforms: platformsArr,
+        countries: countriesArr,
+        hashtags: hashtagsArr,
+        directions: directionsArr,
+        cta_url: cta_url || undefined,
+        categories: categoriesArr,
+
+        // PGC meta (reusing ugc subdocument structure)
+        ugc: {
+          brief: brief || '',
+          deliverables: deliverablesArr,
+          assets: assetPaths,
+          draftRequired: false, // Always false for PGC
+          captionTemplate: captionTemplate || '',
+          usageRights: usageRights || 'Brand may use and repost creator content on brand social channels and marketing materials.',
+          approvalCriteria: approvalCriteria || '',
+          hashtags: hashtagsArr,
+        },
+
+        status: 'pending',
+      });
+
+      // Assign ad worker (optional – reuse your helper)
+      const worker = await getNextAdWorker();
+      if (worker) campaign.assignedWorker = worker._id;
+
+      // Lock FULL advertiser cost in escrow
+      await advertiserWallet.lockEscrow(budgetVal);
+
+      await campaign.save();
+      return res.status(201).json(campaign);
+    } catch (err) {
+      console.error('PGC create error:', err);
+      // cleanup uploaded files on error
+      for (const f of (req.files || [])) {
+        try { await fs.promises.unlink(f.path); } catch {}
+      }
+      return res.status(500).json({ error: 'Server error creating PGC campaign' });
+    }
+  }
+);
+router.get(
+  '/pgc',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      const rows = await Campaign.find({ advertiser: req.user._id, kind: 'pgc' })
+        .sort({ createdAt: -1 });
+      return res.json(rows);
+    } catch (err) {
+      console.error('PGC list error:', err);
+      return res.status(500).json({ error: 'Failed to fetch PGC campaigns' });
+    }
+  }
+);
+// Update existing GET /:id/details to support PGC
+router.get(
+  '/:id/pgc/details',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      const campaign = await Campaign.findById(req.params.id);
+      if (!campaign || !campaign.advertiser.equals(req.user._id)) {
+        return res.status(404).json({ error: 'Campaign not found' });
+      }
+
+      const clips = await Clip.find({ campaign: campaign._id })
+        .sort({ createdAt: -1 })
+        .limit(50)  // Last 30 days approximation; add date filter if needed
+        .populate('adWorker', 'contactName email');
+
+      res.json({
+        campaign: {
+          ...campaign.toObject(),
+          // PGC-specific overrides if needed
+        },
+        clips
+      });
+    } catch (err) {
+      console.error('Campaign details error:', err);
+      res.status(500).json({ error: 'Failed to fetch details' });
+    }
+  }
+);
 /**
  * GET /api/campaigns
  * Get all campaigns belonging to the logged-in advertiser
@@ -644,36 +881,6 @@ router.delete(
 
 
 
-
-
-////////////////////////////////////////////////////ugc
-// --- UGC assets upload (images/videos/docs for briefs) ---
-const ugcAssetsDir = path.join(process.cwd(), 'uploads/ugc-assets');
-fs.mkdirSync(ugcAssetsDir, { recursive: true });
-
-const ugcAssetStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, ugcAssetsDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const unique = `${Date.now()}-${Math.round(Math.random()*1e9)}`;
-    cb(null, unique + ext);
-  }
-});
-const ugcAssetUpload = multer({
-  storage: ugcAssetStorage,
-  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB per file
-});
-
-// Utility: safe JSON parse for array fields
-const parseArr = (val, fallback = []) => {
-  try {
-    if (val == null || val === '') return fallback;
-    const parsed = typeof val === 'string' ? JSON.parse(val) : val;
-    return Array.isArray(parsed) ? parsed : fallback;
-  } catch { return fallback; }
-};
-
-
 /**
  * POST /api/campaigns/ugc
  * Create a UGC campaign (advertiser only)
@@ -901,6 +1108,35 @@ router.post(
     }
   }
 );
+
+router.post(
+  '/:id/pgc/assets',
+  requireAuth,
+  requireAdvertiser,
+  ugcAssetUpload.array('assets', 12),
+  async (req, res) => {
+    try {
+      const camp = await Campaign.findById(req.params.id);
+      if (!camp) return res.status(404).json({ error: 'Campaign not found' });
+      if (!camp.advertiser.equals(req.user._id)) return res.status(403).json({ error: 'Access denied' });
+      if (camp.kind !== 'pgc') return res.status(400).json({ error: 'Not a UGC campaign' });
+
+      const newAssets = (req.files || []).map(f => `/uploads/pgc-assets/${path.basename(f.path)}`);
+      camp.pgc = camp.pgc || {};
+      camp.pgc.assets = [...(camp.pgc.assets || []), ...newAssets];
+
+      await camp.save();
+      return res.json({ assets: camp.pgc.assets });
+    } catch (err) {
+      console.error('PGC assets upload error:', err);
+      // cleanup uploaded files on error
+      for (const f of (req.files || [])) {
+        try { await fs.promises.unlink(f.path); } catch {}
+      }
+      return res.status(500).json({ error: 'Failed to upload assets' });
+    }
+  }
+);
 /**
  * DELETE /api/campaigns/:id/ugc/assets/:index
  * Remove an asset from UGC campaign (and delete file)
@@ -1011,6 +1247,64 @@ router.post(
     } catch (err) {
       console.error('UGC fund error:', err);
       return res.status(500).json({ error: 'Failed to fund campaign' });
+    }
+  }
+);
+
+
+/**
+ * GET /api/campaigns/pgc/approved-videos
+ * Fetch all approved PGC videos for the logged-in advertiser
+ */
+router.get(
+  '/pgc/approved-videos',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      // Find all PGC campaigns belonging to this advertiser
+      const pgcCampaigns = await Campaign.find({
+        advertiser: req.user._id,
+        kind: 'pgc'
+      }).select('_id title');
+
+      const campaignIds = pgcCampaigns.map(c => c._id);
+
+      // Find all approved proofs from PGC campaigns
+      const submissions = await ClipSubmission.find({
+        campaign: { $in: campaignIds }
+      })
+        .populate('clipper', 'firstName lastName email')
+        .populate('campaign', 'title');
+
+      // Extract approved videos
+      const approvedVideos = [];
+      
+      submissions.forEach(submission => {
+        submission.proofs.forEach(proof => {
+          if (proof.status === 'approved' && proof.proofVideo) {
+            approvedVideos.push({
+              _id: proof._id,
+              url: proof.proofVideo,
+              createdAt: proof.createdAt || submission.createdAt,
+              status: proof.status,
+              campaign: {
+                _id: submission.campaign._id,
+                title: submission.campaign.title
+              },
+              clipper: submission.clipper
+            });
+          }
+        });
+      });
+
+      // Sort by creation date (newest first)
+      approvedVideos.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      res.json(approvedVideos);
+    } catch (err) {
+      console.error('Error fetching approved PGC videos:', err);
+      res.status(500).json({ error: 'Failed to fetch approved videos' });
     }
   }
 );

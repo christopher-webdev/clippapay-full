@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Film, Loader2 } from 'lucide-react';
+import { Film, Loader2, Download } from 'lucide-react';
 import CampaignKindBadge from './CampaignKindBadge';
 
 interface Campaign {
@@ -17,16 +17,17 @@ interface Campaign {
   views_purchased: number;
   views_left: number;
   numClipsSuggested: number;
-  kind?: 'normal' | 'ugc';            // <-- added
-  clippersCount?: number;             // <-- used in UI
+  kind?: 'normal' | 'ugc' | 'pgc'; // Updated to include pgc
+  clippersCount?: number;
+  desiredVideos?: number; // PGC-specific: target number of videos
+  approvedVideosCount?: number; // PGC-specific: approved videos
 }
-
 
 interface CampaignDetails {
   campaign: {
     _id: string;
     title: string;
-    video_url: string;
+    video_url?: string;
     platforms: string[];
     countries: string[];
     hashtags: string[];
@@ -45,13 +46,16 @@ interface CampaignDetails {
     adWorkerPercentage: number;
     clippersCount: number;
     lowFundsThreshold: number;
-    kind?: 'normal' | 'ugc';          // <-- added
-    ugc?: {                           // <-- added
+    kind?: 'normal' | 'ugc' | 'pgc'; // Updated to include pgc
+    desiredVideos?: number; // PGC-specific
+    approvedVideosCount?: number; // PGC-specific
+    ugc?: {
       assets?: string[];
       brief?: string;
       deliverables?: string[];
       captionTemplate?: string;
       usageRights?: string;
+      approvalCriteria?: string; // PGC-specific
     };
   };
   clips: {
@@ -60,13 +64,16 @@ interface CampaignDetails {
     createdAt: string;
     index: number;
     adWorker: { contactName: string, email: string };
+    status?: 'pending' | 'approved' | 'rejected'; // PGC-specific: clip approval status
   }[];
 }
+
 const PER_PAGE = 10;
 
 export default function AdvertiserCampaignList() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [details, setDetails] = useState<CampaignDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -81,19 +88,27 @@ export default function AdvertiserCampaignList() {
       .catch(() => setError('Failed to load campaigns.'))
       .finally(() => setLoading(false));
   }, []);
-
+  useEffect(() => {
+    if (!selectedId) {
+      setDetails(null);
+      return;
+    }
+    axios.get<CampaignDetails>(`/campaigns/${selectedId}/details`)
+      .then((res) => setDetails(res.data))
+      .catch(() => setError('Failed to load campaign details.'));
+  }, [selectedId]);
   // Split active and recently completed (last 30 days)
   const now = Date.now();
   const completedCutoff = now - 30 * 24 * 60 * 60 * 1000;
   const activeCampaigns = campaigns.filter(
-    c => c.views_left > 0 || c.adWorkerStatus !== 'ready'
+    c => c.views_left > 0 || c.adWorkerStatus !== 'ready' || c.kind === 'pgc' // PGC active until all desired videos approved
   );
   const completedCampaigns = campaigns.filter(
     c =>
-      c.views_left <= 0 &&
-      c.adWorkerStatus === 'ready' &&
-      new Date(c.createdAt).getTime() >= completedCutoff
+      (c.views_left <= 0 && c.adWorkerStatus === 'ready' && c.kind !== 'pgc') ||
+      (c.kind === 'pgc' && c.approvedVideosCount >= c.desiredVideos)
   );
+
 
   // Pagination logic
   const paginated = (list: Campaign[], page: number) =>
@@ -129,6 +144,12 @@ export default function AdvertiserCampaignList() {
             className="px-5 py-3 bg-green-600 text-white rounded-lg font-semibold shadow hover:bg-green-700 transition"
           >
             + Create UGC Campaign
+          </button>
+          <button
+            onClick={() => navigate('/dashboard/advertiser/create-asset-creation')}
+            className="px-5 py-3 bg-purple-600 text-white rounded-lg font-semibold shadow hover:bg-purple-700 transition"
+          >
+            + Create Private UGC Campaign
           </button>
         </div>
       </div>
@@ -208,22 +229,27 @@ function InfoChip({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function CampaignCard({ c, setSelectedId }: { c: Campaign; setSelectedId: (id: string) => void }) {
-  // Progress bar calculation
-  const deliveredViews = Math.max((c.views_purchased ?? 0) - (c.views_left ?? 0), 0);
-  const progress =
-    c.views_purchased && c.views_purchased > 0
-      ? Math.min((deliveredViews / c.views_purchased) * 100, 100)
+  // Progress bar calculation - different for PGC
+  const isPGC = c.kind === 'pgc';
+  const progress = isPGC
+    ? c.desiredVideos ? Math.round((c.approvedVideosCount || 0) / c.desiredVideos * 100) : 0
+    : c.views_purchased && c.views_purchased > 0
+      ? Math.min(((c.views_purchased - c.views_left) / c.views_purchased) * 100, 100)
       : 0;
 
   // Status handling
   let statusColor = "bg-yellow-50 text-yellow-800 border-yellow-200";
   let statusLabel = "Pending Approval";
-  if (c.views_left <= 0) {
+
+  if (isPGC && c.approvedVideosCount >= c.desiredVideos) {
+    statusColor = "bg-gray-100 text-gray-500 border-gray-200";
+    statusLabel = "Completed";
+  } else if (c.views_left <= 0 && !isPGC) {
     statusColor = "bg-gray-100 text-gray-500 border-gray-200";
     statusLabel = "Completed";
   } else if (c.adWorkerStatus === 'ready') {
     statusColor = "bg-green-50 text-green-800 border-green-200";
-    statusLabel = "Live";
+    statusLabel = isPGC ? "Active" : "Live";
   } else if (c.adWorkerStatus === 'processing') {
     statusColor = "bg-blue-50 text-blue-800 border-blue-200";
     statusLabel = "In Progress";
@@ -263,8 +289,17 @@ function CampaignCard({ c, setSelectedId }: { c: Campaign; setSelectedId: (id: s
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-700 mb-3">
         <InfoChip label="Budget" value={`₦${c.budget_total?.toLocaleString()}`} />
         <InfoChip label="Budget Rem." value={`₦${c.budget_remaining?.toLocaleString()}`} />
-        <InfoChip label="Views Purchased" value={c.views_purchased?.toLocaleString()} />
-        <InfoChip label="Views Left" value={c.views_left?.toLocaleString()} />
+        {isPGC ? (
+          <>
+            <InfoChip label="Videos Desired" value={c.desiredVideos?.toLocaleString()} />
+            <InfoChip label="Videos Approved" value={c.approvedVideosCount?.toLocaleString()} />
+          </>
+        ) : (
+          <>
+            <InfoChip label="Views Purchased" value={c.views_purchased?.toLocaleString()} />
+            <InfoChip label="Views Left" value={c.views_left?.toLocaleString()} />
+          </>
+        )}
         <InfoChip label="Created" value={new Date(c.createdAt).toLocaleDateString()} />
         <InfoChip label="Clippers Engaged" value={c.clippersCount?.toLocaleString()} />
       </div>
@@ -291,12 +326,12 @@ function CampaignCard({ c, setSelectedId }: { c: Campaign; setSelectedId: (id: s
 
       <div className="flex-1" />
       <div className="flex gap-3 mt-2">
-        {c.adWorkerStatus === 'ready' && c.views_left > 0 && (
+        {c.adWorkerStatus === 'ready' && (c.views_left > 0 || isPGC) && (
           <button
             onClick={e => { e.stopPropagation(); setSelectedId(c._id); }}
             className="px-4 py-2 text-green-700 bg-green-100 hover:bg-green-200 rounded font-semibold transition"
           >
-            View Clips
+            {isPGC ? "View Detail" : "View Clips"}
           </button>
         )}
       </div>
@@ -336,7 +371,7 @@ function Pagination({
     </div>
   );
 }
-// 3) Replace your current CampaignDetailsModal with this version
+
 function CampaignDetailsModal({ campaignId, onClose }: {
   campaignId: string;
   onClose: () => void;
@@ -365,12 +400,17 @@ function CampaignDetailsModal({ campaignId, onClose }: {
     clip => (new Date().getTime() - new Date(clip.createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000
   );
 
-  const progress = details?.campaign?.views_purchased
-    ? Math.min(
-      ((details.campaign.views_purchased - details.campaign.views_left) / details.campaign.views_purchased) * 100,
-      100
-    )
-    : 0;
+  const isPGC = details?.campaign?.kind === 'pgc';
+  const progress = isPGC
+    ? details.campaign.desiredVideos
+      ? Math.round((details.campaign.approvedVideosCount || 0) / details.campaign.desiredVideos * 100)
+      : 0
+    : details?.campaign?.views_purchased
+      ? Math.min(
+        ((details.campaign.views_purchased - details.campaign.views_left) / details.campaign.views_purchased) * 100,
+        100
+      )
+      : 0;
 
   // UGC assets
   const assets = details?.campaign?.ugc?.assets || [];
@@ -436,11 +476,11 @@ function CampaignDetailsModal({ campaignId, onClose }: {
                     ? 'bg-blue-50 text-blue-800 border-blue-200'
                     : details.campaign.adWorkerStatus === 'ready'
                       ? 'bg-green-50 text-green-800 border-green-200'
-                      : details.campaign.views_left <= 0
+                      : (details.campaign.views_left <= 0 && !isPGC) || (isPGC && details.campaign.approvedVideosCount >= details.campaign.desiredVideos)
                         ? 'bg-gray-100 text-gray-500 border-gray-200'
                         : 'bg-red-50 text-red-800 border-red-200'
                 }`}>
-                {details.campaign.views_left <= 0
+                {(details.campaign.views_left <= 0 && !isPGC) || (isPGC && details.campaign.approvedVideosCount >= details.campaign.desiredVideos)
                   ? "COMPLETED"
                   : details.campaign.adWorkerStatus.toUpperCase()}
               </span>
@@ -471,8 +511,21 @@ function CampaignDetailsModal({ campaignId, onClose }: {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-gray-700 mb-6">
               <InfoRow label="Total Budget (₦)" value={details.campaign.budget_total.toLocaleString()} />
               <InfoRow label="Budget Remaining (₦)" value={details.campaign.budget_remaining.toLocaleString()} />
-              <InfoRow label="Views Purchased" value={details.campaign.views_purchased?.toLocaleString()} />
-              <InfoRow label="Views Left" value={details.campaign.views_left?.toLocaleString()} />
+
+              {isPGC ? (
+                <>
+                  <InfoRow label="Videos Desired" value={details.campaign.desiredVideos?.toLocaleString()} />
+                  <InfoRow label="Videos Approved" value={details.campaign.approvedVideosCount?.toLocaleString()} />
+                  <InfoRow label="Cost per Video" value="₦7,500" />
+                </>
+              ) : (
+                <>
+                  <InfoRow label="Views Purchased" value={details.campaign.views_purchased?.toLocaleString()} />
+                  <InfoRow label="Views Left" value={details.campaign.views_left?.toLocaleString()} />
+                  <InfoRow label="Rate per View" value={`₦${details.campaign.rate_per_view}`} />
+                </>
+              )}
+
               <InfoRow label="Clippers Engaged" value={details.campaign.clippersCount} />
               <InfoRow label="Platforms" value={details.campaign.platforms.join(', ')} />
               <InfoRow label="Countries" value={details.campaign.countries.length ? details.campaign.countries.join(', ') : "Worldwide"} />
@@ -480,10 +533,23 @@ function CampaignDetailsModal({ campaignId, onClose }: {
               <InfoRow label="Categories" value={details.campaign.categories.join(', ')} />
               <InfoRow label="Directions" value={details.campaign.directions.join(' | ')} />
               <InfoRow label="Suggested Clips" value={details.campaign.numClipsSuggested} />
-              <InfoRow label="brief" value={details?.campaign?.ugc?.brief} />
-              <InfoRow label="deliverables" value={details?.campaign?.ugc?.deliverables} />
-              <InfoRow label="caption template" value={details?.campaign?.ugc?.captionTemplate} />
-            
+
+              {details.campaign.ugc?.brief && (
+                <InfoRow label="Brief" value={details.campaign.ugc.brief} />
+              )}
+              {details.campaign.ugc?.deliverables && (
+                <InfoRow label="Deliverables" value={details.campaign.ugc.deliverables.join(', ')} />
+              )}
+              {details.campaign.ugc?.captionTemplate && (
+                <InfoRow label="Caption Template" value={details.campaign.ugc.captionTemplate} />
+              )}
+              {details.campaign.ugc?.usageRights && (
+                <InfoRow label="Usage Rights" value={details.campaign.ugc.usageRights} />
+              )}
+              {details.campaign.ugc?.approvalCriteria && (
+                <InfoRow label="Approval Criteria" value={details.campaign.ugc.approvalCriteria} />
+              )}
+
               {details.campaign.cta_url && (
                 <InfoRow label="CTA URL" value={
                   <a href={details.campaign.cta_url} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">
@@ -495,7 +561,7 @@ function CampaignDetailsModal({ campaignId, onClose }: {
             </div>
 
             {/* UGC Assets */}
-            {details.campaign.kind === 'ugc' && assets.length > 0 && (
+            {(details.campaign.kind === 'ugc' || details.campaign.kind === 'pgc') && assets.length > 0 && (
               <div className="mt-6">
                 <h3 className="font-semibold mb-2">Campaign Assets</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -548,7 +614,7 @@ function CampaignDetailsModal({ campaignId, onClose }: {
             <div className="mt-7">
               <h3 className="font-semibold mb-2 flex items-center gap-2">
                 <Film className="w-5 h-5" />
-                Processed Clips (last 30 days)
+                {isPGC ? 'Submitted Videos' : 'Processed Clips'} (last 30 days)
               </h3>
               {clips && clips.length > 0 ? (
                 <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
@@ -559,13 +625,31 @@ function CampaignDetailsModal({ campaignId, onClose }: {
                         Uploaded: {new Date(clip.createdAt).toLocaleString()}
                       </div>
                       <div className="text-xs text-gray-600">
-                        Clip {clip.index}
+                        {isPGC ? (
+                          <>
+                            Status: {clip.status || 'Pending'}
+                            {clip.status === 'approved' && (
+                              <a
+                                href={clip.url}
+                                download
+                                className="ml-2 text-blue-600 underline flex items-center gap-1"
+                              >
+                                <Download className="w-4 h-4" />
+                                Download
+                              </a>
+                            )}
+                          </>
+                        ) : (
+                          `Clip ${clip.index}`
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-gray-500 text-sm">No clips uploaded yet (last 30 days).</div>
+                <div className="text-gray-500 text-sm">
+                  {isPGC ? 'No videos submitted yet.' : 'No clips uploaded yet (last 30 days).'}
+                </div>
               )}
             </div>
           </div>
@@ -574,6 +658,7 @@ function CampaignDetailsModal({ campaignId, onClose }: {
     </Backdrop>
   );
 }
+
 // Info grid row for modal
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (

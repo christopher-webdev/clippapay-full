@@ -17,7 +17,7 @@ server: {
       secure: false,
     },
     '/uploads': {
-      target: 'http://clippapay.com', //'http://localhost:5000',
+      target: 'http://clippapay.com', //'http://localhost:5000',/
       changeOrigin: true,
       secure: false,
     },

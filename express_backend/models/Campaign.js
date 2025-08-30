@@ -1,5 +1,4 @@
-// // model campaign.js
-
+// File: express_backend/models/Campaign.js
 import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
@@ -8,9 +7,9 @@ const campaignSchema = new Schema({
   title: { type: String, required: true },
   thumb_url: String,
   video_url: String,
-  kind: { type: String, enum: ['normal', 'ugc'], default: 'normal', index: true },
+  kind: { type: String, enum: ['normal', 'ugc', 'pgc'], default: 'normal', index: true }, // Added 'pgc'
   
-  ugc: {
+  ugc: {  // Reused for PGC too (rename to 'generatedContent' if preferred)
     brief:        { type: String },
     deliverables: { type: [String], default: [] },
     assets:       { type: [String], default: [] },
@@ -20,18 +19,20 @@ const campaignSchema = new Schema({
     captionTemplate:  String,
     hashtags:         { type: [String], default: [] },
     usageRights:      { type: String },
+    approvalCriteria: { type: String }, // New for PGC
   },
 
-
-  // FINANCIALS & VIEWS
-  rate_per_1000: { type: Number, default: 1200, required: true }, // advertiser pays per 1000 views
-  clipper_cpm: { type: Number, default: 500 }, // amount clippers get per 1000 views
+  // FINANCIALS & VIEWS (adapted for PGC: flat fee, no views)
+  rate_per_1000: { type: Number, default: 1200, required: true }, // Ignored for PGC
+  clipper_cpm: { type: Number, default: 500 }, // Ignored for PGC
   budget_total: { type: Number, required: true },
   budget_remaining: { type: Number, required: true },
-  views_purchased: { type: Number, required: true }, // NEW
-  views_left: { type: Number, required: true }, // updated as clippers' views are verified
+  views_purchased: { type: Number }, // Optional for PGC
+  views_left: { type: Number }, // Optional for PGC
+  desiredVideos: { type: Number, min: 1, max: 10 }, // PGC-specific
+  approvedVideosCount: { type: Number, default: 0 }, // PGC-specific
 
-  platforms: { type: [String], enum: ['tiktok','instagram','youtube','facebook', 'X'], required: true },
+  platforms: { type: [String], enum: ['tiktok','instagram','youtube','facebook', 'X'] }, // Optional for PGC
   countries: [String],
   hashtags:  [String],
   directions:[String],
@@ -39,7 +40,7 @@ const campaignSchema = new Schema({
   categories:[String],
 
   numClipsSuggested: { type: Number, min: 1, max: 6 },
-  adWorkerPercentage: { type: Number, default: 20, min: 0, max: 100 },
+  adWorkerPercentage: { type: Number, default: 0, min: 0, max: 0 },
   adWorkerStatus: {
     type: String,
     enum: ['pending','processing','ready','rejected'],
@@ -59,6 +60,16 @@ campaignSchema.pre('validate', function(next){
   if (this.kind === 'ugc') {
     if (!this.isModified('rate_per_1000')) this.rate_per_1000 = 5000; // advertiser cost
     if (!this.isModified('clipper_cpm'))   this.clipper_cpm   = 2000; // clipper payout
+  } else if (this.kind === 'pgc') {
+    // Fixed flat fee; no CPM/views
+    this.rate_per_1000 = 7500; // Per video (advertiser cost)
+    this.clipper_cpm = 5000;   // Per video (clipper payout)
+    if (!this.desiredVideos) this.desiredVideos = 1;
+    if (this.budget_total < 7500 * this.desiredVideos) {
+      next(new Error(`Budget must be at least ₦${7500 * this.desiredVideos} for ${this.desiredVideos} videos.`));
+    }
+    this.views_purchased = this.budget_total / 7500; // Treat as max videos
+    this.views_left = this.views_purchased; // For consistency
   }
   next();
 });
@@ -76,6 +87,7 @@ campaignSchema.methods.incrementClippers = function() {
  */
 campaignSchema.methods.deductViewsAndBudget = async function(views) {
   // Reduce views_left and budget_remaining
+  if (this.kind === 'pgc') throw new Error('Use approveVideo for PGC campaigns');
   this.views_left = Math.max(0, this.views_left - views);
   this.budget_remaining = Math.max(0, this.budget_remaining - (views * this.rate_per_1000 / 1000));
 
@@ -85,7 +97,26 @@ campaignSchema.methods.deductViewsAndBudget = async function(views) {
   }
   await this.save();
 };
-// In models/Campaign.js
+
+
+/**
+ * For PGC: Approve a video, deduct flat fee from budget_remaining.
+ * @param {number} videoCount - Usually 1, but can batch
+ */
+campaignSchema.methods.approveVideo = async function(videoCount = 1) {
+  if (this.kind !== 'pgc') throw new Error('approveVideo is for PGC only');
+  const cost = videoCount * 7500;
+  if (this.budget_remaining < cost) throw new Error('Insufficient remaining budget');
+
+  this.approvedVideosCount += videoCount;
+  this.budget_remaining -= cost;
+
+  // Auto-complete if all desired videos approved
+  if (this.approvedVideosCount >= this.desiredVideos) {
+    this.status = 'completed';
+  }
+  await this.save();
+};
 
 campaignSchema.methods.restoreViewsAndBudget = async function(views) {
   const CPM = this.clipper_cpm || 500;
@@ -101,6 +132,9 @@ campaignSchema.methods.restoreViewsAndBudget = async function(views) {
  * Prevent joining if campaign is >= 80% completed
  */
 campaignSchema.methods.canClipperJoin = function() {
+  if (this.kind === 'pgc') {
+    return this.approvedVideosCount < this.desiredVideos;
+  }
   const completed = 1 - (this.views_left / this.views_purchased);
   return completed < 0.8;
 };

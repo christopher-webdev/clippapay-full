@@ -128,16 +128,26 @@ export default function WalletSection() {
   }, []);
 
   // submit deposit request
+  // submit deposit request
   const submitDeposit = async (e: FormEvent) => {
     e.preventDefault();
+
+    // Add minimum deposit validation
+    if (depAmt < 5000) {
+      setMsg('Minimum deposit amount is ₦5,000.');
+      return;
+    }
+
     if (depAmt <= 0 || !depFile) {
       setMsg('Please enter an amount and upload your receipt.');
       return;
     }
+
     const form = new FormData();
     form.append('amount', depAmt.toString());
     form.append('receipt', depFile);
     form.append('paymentMethod', depMethod);
+
     try {
       await axios.post('/wallet/deposits', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -368,7 +378,7 @@ export default function WalletSection() {
                 <div className="flex items-center gap-3">
                   <InformationCircleIcon className="w-5 h-5 text-blue-600 flex-shrink-0" />
                   <p className="text-sm text-blue-800">
-                    Please transfer to the bank account details below
+                    Please transfer to the bank account details below (Minimum Deposit: 5000)
                   </p>
                 </div>
 
@@ -444,12 +454,16 @@ export default function WalletSection() {
               <label className="block text-sm">Amount (₦)</label>
               <input
                 type="number"
-                min="1"
+                min="5000"
                 value={depAmt}
                 onChange={e => setDepAmt(parseFloat(e.target.value))}
                 required
                 className="mt-1 block w-full rounded-md border-gray-300"
               />
+              {/* Add this message */}
+              <p className="mt-1 text-xs text-gray-500">
+                Minimum deposit: ₦5,000
+              </p>
             </div>
             <div>
               <label className="block text-sm">Upload Receipt</label>

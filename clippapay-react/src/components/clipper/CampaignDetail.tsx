@@ -24,7 +24,8 @@ interface CampaignDetail {
   advertiser: string;
   directions: string;
   thumbUrl: string;
-  payPerView: number; // label displays per 1,000 views
+  clipperPayoutRate?: number;
+  payPerView?: number;
   totalViews: number;
   views_left: number;
   clippersCount: number;
@@ -33,9 +34,9 @@ interface CampaignDetail {
   hashtags: string[];
   status: 'active' | 'paused' | 'completed';
   clips: Clip[];
-
-  // NEW for UGC
-  kind?: 'normal' | 'ugc';
+  kind?: 'normal' | 'ugc' | 'pgc';
+  desiredVideos?: number;
+  approvedVideosCount?: number;
   ugc?: {
     assets: string[];
     brief: string;
@@ -43,6 +44,10 @@ interface CampaignDetail {
     deliverables: string[];
     captionTemplate: string;
     usageRights: string;
+    approvalCriteria?: string;
+    draftRequired?: boolean;
+    creativeDeadline?: string;
+    postDeadline?: string;
   };
 }
 
@@ -66,6 +71,7 @@ export default function CampaignDetail() {
         const res = await axios.get(`/clippers/${id}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         });
+        console.log('Campaign data:', res.data); // Debug log
         setCampaign(res.data);
       } catch (err: any) {
         setError(err.response?.data?.error || err.message || 'Could not load campaign');
@@ -76,9 +82,9 @@ export default function CampaignDetail() {
     if (id) fetchCampaign();
   }, [id]);
 
-  // Show UGC modal if campaign is UGC
+  // Show UGC/PGC modal if campaign is UGC or PGC
   useEffect(() => {
-    if (campaign && campaign.kind === 'ugc') {
+    if (campaign && (campaign.kind === 'ugc' || campaign.kind === 'pgc')) {
       setShowUgcModal(true);
     }
   }, [campaign]);
@@ -110,25 +116,34 @@ export default function CampaignDetail() {
   if (!campaign) {
     return <p className="text-center py-10 text-red-500">Campaign not found.</p>;
   }
+  const isPgc = campaign.kind === 'pgc';
+  const isUgc = campaign.kind === 'ugc';
+  const payoutRate = campaign.clipperPayoutRate ?? campaign.payPerView ?? 0;
+  const payoutLabel = isPgc ? 'per video' : 'per 1,000 views';
+  const totalLabel = isPgc ? 'videos requested' : 'total views';
+  const buttonText = isPgc ? (alreadyJoined ? 'View Submission' : 'Submit Your Video') :
+    (alreadyJoined ? 'Submit Proof / View Submission' : 'Start Promoting');
 
-  const completedRatio = campaign.totalViews > 0
+  const completedRatio = isPgc ? (campaign.approvedVideosCount ?? 0) / (campaign.desiredVideos ?? 1) : campaign.totalViews > 0
     ? (campaign.totalViews - campaign.views_left) / campaign.totalViews
     : 0;
   const is80Done = completedRatio >= 0.8;
 
+  const submissionsPath = isPgc ? `/dashboard/clipper/pgc-submissions` : `/dashboard/clipper/submissions`;
+
   const handleStart = async (e: FormEvent) => {
     e.preventDefault();
     setJoining(true);
-    navigate(`/dashboard/clipper/submissions?campaign=${campaign.id}`);
+    navigate(`${submissionsPath}?campaign=${campaign.id}`);
   };
 
   const handleSubmitProof = () => {
-    navigate(`/dashboard/clipper/submissions?campaign=${campaign.id}`);
+    navigate(`${submissionsPath}?campaign=${campaign.id}`);
   };
 
   return (
     <>
-      {/* UGC Modal */}
+      {/* UGC/PGC Modal */}
       {showUgcModal && (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-lg w-[340px] relative p-4">
@@ -143,7 +158,7 @@ export default function CampaignDetail() {
             {/* Banner Image */}
             <img
               src={ugcBanner}
-              alt="UGC Banner"
+              alt={`${campaign.kind?.toUpperCase()} Banner`}
               className="w-full h-auto rounded-lg mb-4"
             />
 
@@ -170,9 +185,14 @@ export default function CampaignDetail() {
         {/* Title & Tag */}
         <div className="flex items-center gap-2 mb-4">
           <h2 className="text-3xl font-bold text-gray-900 tracking-tight">{campaign.title}</h2>
-          {campaign.kind === 'ugc' && (
+          {isUgc && (
             <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200 shadow-sm">
               UGC
+            </span>
+          )}
+          {isPgc && (
+            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 shadow-sm">
+              PGC
             </span>
           )}
         </div>
@@ -219,17 +239,19 @@ export default function CampaignDetail() {
             <HiOutlineLightningBolt className="w-6 h-6 text-indigo-500" />
             <div>
               <div className="font-medium text-gray-800">
-                ₦{campaign.payPerView.toLocaleString()} per 1,000 views
+                ₦{payoutRate.toLocaleString()} {payoutLabel}
               </div>
-              <div className="text-xs text-gray-500">
-                (₦{(campaign.payPerView / 1000).toFixed(2)} per view)
-              </div>
+              {!isPgc && (
+                <div className="text-xs text-gray-500">
+                  (₦{(payoutRate / 1000).toFixed(2)} per view)
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
             <HiOutlineClipboardList className="w-6 h-6 text-indigo-500" />
             <div className="font-medium text-gray-800">
-              {campaign.totalViews.toLocaleString()} total views
+              {(isPgc ? campaign.desiredVideos : campaign.totalViews)?.toLocaleString() ?? '0'} {totalLabel}
             </div>
           </div>
           <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
@@ -271,16 +293,16 @@ export default function CampaignDetail() {
           </ul>
         </div>
 
-        {/* UGC Creative Pack */}
-        {campaign.kind === 'ugc' && (
+        {/* Generated Content Creative Pack */}
+        {(isUgc || isPgc) && (
           <section className="mt-6">
             <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
               {/* header */}
               <div className="px-5 sm:px-6 py-4 border-b border-gray-100 flex items-center gap-2">
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
-                  UGC
+                  {campaign.kind?.toUpperCase()}
                 </span>
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900">UGC Creative Pack</h3>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">{campaign.kind?.toUpperCase()} Creative Pack</h3>
               </div>
 
               {/* body */}
@@ -302,7 +324,10 @@ export default function CampaignDetail() {
                       Directions
                     </div>
                     <ul className="list-disc list-inside text-sm text-gray-800 space-y-1">
-                      {campaign.ugc.directions.map((d, i) => <li key={i}>{d}</li>)}
+                      {Array.isArray(campaign.ugc.directions) ?
+                        campaign.ugc.directions.map((d, i) => <li key={i}>{d}</li>) :
+                        <li>{campaign.ugc.directions}</li>
+                      }
                     </ul>
                   </div>
                 )}
@@ -340,6 +365,50 @@ export default function CampaignDetail() {
                   </div>
                 )}
 
+                {isPgc && campaign.ugc?.approvalCriteria && (
+                  <div className="pt-5 border-t border-dashed border-gray-200">
+                    <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
+                      Approval Criteria
+                    </div>
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">
+                      {campaign.ugc.approvalCriteria}
+                    </p>
+                  </div>
+                )}
+
+                {isPgc && campaign.ugc?.draftRequired !== undefined && (
+                  <div className="pt-5 border-t border-dashed border-gray-200">
+                    <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
+                      Draft Required
+                    </div>
+                    <p className="text-sm text-gray-800">
+                      {campaign.ugc.draftRequired ? 'Yes' : 'No'}
+                    </p>
+                  </div>
+                )}
+
+                {isPgc && campaign.ugc?.creativeDeadline && (
+                  <div className="pt-5 border-t border-dashed border-gray-200">
+                    <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
+                      Creative Deadline
+                    </div>
+                    <p className="text-sm text-gray-800">
+                      {new Date(campaign.ugc.creativeDeadline).toLocaleString()}
+                    </p>
+                  </div>
+                )}
+
+                {isPgc && campaign.ugc?.postDeadline && (
+                  <div className="pt-5 border-t border-dashed border-gray-200">
+                    <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-1.5">
+                      Post Deadline
+                    </div>
+                    <p className="text-sm text-gray-800">
+                      {new Date(campaign.ugc.postDeadline).toLocaleString()}
+                    </p>
+                  </div>
+                )}
+
                 <div className="pt-5 border-t border-dashed border-gray-200">
                   <div className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase mb-2">
                     Assets
@@ -356,22 +425,26 @@ export default function CampaignDetail() {
           {alreadyJoined ? (
             <button
               type="button"
-              className="w-full px-6 py-3 text-white rounded-md text-lg font-medium bg-blue-600 hover:bg-blue-700"
+              className={`w-full px-6 py-3 text-white rounded-md text-lg font-medium ${
+                isPgc ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+              }`}
               onClick={handleSubmitProof}
+              disabled={isPgc}
             >
-              Submit Proof / View Submission
+              {buttonText}
             </button>
           ) : (
             <form onSubmit={handleStart}>
               <button
                 type="submit"
                 disabled={campaign.status !== 'active' || is80Done}
-                className={`w-full px-6 py-3 text-white rounded-md text-lg font-medium ${campaign.status === 'active' && !is80Done
-                  ? 'bg-green-600 hover:bg-green-700'
-                  : 'bg-gray-300 cursor-not-allowed'
-                  }`}
+                className={`w-full px-6 py-3 text-white rounded-md text-lg font-medium ${
+                  campaign.status === 'active' && !is80Done
+                    ? 'bg-green-600 hover:bg-green-700'
+                    : 'bg-gray-300 cursor-not-allowed'
+                }`}
               >
-                {joining ? 'Starting…' : 'Start Promoting'}
+                {joining ? 'Starting…' : buttonText}
               </button>
               {is80Done && (
                 <div className="text-xs text-red-500 mt-2 text-center font-medium">

@@ -8,23 +8,24 @@ import User from '../models/User.js';
 import { requireAuth } from '../middleware/auth.js'
 import { requireAdminAuth } from '../middleware/adminAuth.js'
 const router = express.Router();
+
+
 // somewhere near the top of the file
 const DEFAULTS = {
   normal: { CLIPPER_CPM: 500, PLATFORM_CPM: 700 },
-  ugc:    { CLIPPER_CPM: 2000, PLATFORM_CPM: 3000 }
+  ugc:    { CLIPPER_CPM: 2000, PLATFORM_CPM: 3000 },
+  pgc:    { CLIPPER_CPM: 5000, PLATFORM_CPM: 2500 }
 };
 
 function getCPMsForCampaign(campaign) {
-  const kind = campaign.kind === 'ugc' ? 'ugc' : 'normal';
+  const kind = campaign.kind === 'ugc' ? 'ugc' : campaign.kind === 'pgc' ? 'pgc' : 'normal';
   // Prefer campaign’s stored CPMs when present
   const clipper = Number(campaign.clipper_cpm) || DEFAULTS[kind].CLIPPER_CPM;
-  const platform = DEFAULTS[kind].PLATFORM_CPM; // or read from DB/config if you store it
+  const platform = Number(campaign.platform_cpm) || DEFAULTS[kind].PLATFORM_CPM;
   return { kind, clipper, platform };
 }
 
-// GET all proofs across all submissions (admin table)
-// add this import if it's in a utils file you already use in the verify route
-// import { getCPMsForCampaign } from '../utils/getCPMsForCampaign.js';
+
 
 router.get('/', requireAdminAuth, async (req, res) => {
   try {
@@ -96,7 +97,100 @@ router.get('/', requireAdminAuth, async (req, res) => {
   }
 });
 
+// Approve a specific proof by proof _id for PGC campaigns only
+router.post('/:submissionId/proof/:proofId/approve', requireAdminAuth, async (req, res) => {
+  try {
+    const { note } = req.body;
+    const { submissionId, proofId } = req.params;
 
+    const sub = await ClipSubmission.findById(submissionId).populate('campaign clipper');
+    if (!sub) return res.status(404).json({ error: 'Submission not found' });
+
+    const proof = sub.proofs.id(proofId);
+    if (!proof) return res.status(404).json({ error: 'Proof not found' });
+
+    const campaign = await Campaign.findById(sub.campaign._id).populate('advertiser');
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    // Ensure campaign is PGC
+    const { kind: campaignKind, clipper: CLIPPER_CPM, platform: PLATFORM_CPM } = getCPMsForCampaign(campaign);
+    if (campaignKind !== 'pgc') {
+      return res.status(400).json({ error: 'This endpoint is for PGC campaigns only' });
+    }
+
+    // PGC uses flat fees, no views-based calculations
+    if (req.body.verifiedViews !== undefined) {
+      return res.status(400).json({ error: 'Views not applicable for PGC campaigns' });
+    }
+
+    // Calculate payouts using flat fees
+    const payoutClipper = CLIPPER_CPM; // ₦5000
+    const payoutPlatform = PLATFORM_CPM; // ₦2500
+    const totalDeduct = payoutClipper + payoutPlatform;
+
+    let advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id }) ||
+      await Wallet.create({ user: campaign.advertiser._id, balance: 0, escrowLocked: 0 });
+
+    let clipperWallet = await Wallet.findOne({ user: sub.clipper._id }) ||
+      await Wallet.create({ user: sub.clipper._id, balance: 0, escrowLocked: 0 });
+
+    let platformUser = await User.findOne({ role: 'platform' }) ||
+      await User.create({ role: 'platform', email: 'platform@clippapay.com', passwordHash: 'PLATFORM_USER_DOES_NOT_LOGIN', isSuperAdmin: false, company: 'ClippaPay Platform' });
+
+    let platformWallet = await Wallet.findOne({ user: platformUser._id }) ||
+      await Wallet.create({ user: platformUser._id, balance: 0, escrowLocked: 0 });
+
+    if (advertiserWallet.escrowLocked < totalDeduct) {
+      return res.status(400).json({ error: 'Insufficient escrow balance' });
+    }
+
+    // Update proof
+    proof.status = 'approved';
+    proof.rewardAmount = (proof.rewardAmount || 0) + payoutClipper;
+    proof.adminNote = note || "";
+    proof.lastVerified = new Date();
+    await sub.save();
+
+    // Update campaign for PGC: deduct flat fee and increment approvedVideosCount
+    await campaign.approveVideo(1);
+
+    // Wallet moves
+    advertiserWallet.escrowLocked -= totalDeduct;
+    await advertiserWallet.save();
+
+    clipperWallet.balance += payoutClipper;
+    await clipperWallet.save();
+
+    platformWallet.balance += payoutPlatform;
+    await platformWallet.save();
+
+    // Calculate videos left for response
+    const campaignVideosLeft = campaign.desiredVideos - campaign.approvedVideosCount;
+
+    // Response includes kind + CPMs for UI
+    res.json({
+      submissionId: sub._id,
+      proofId: proof._id,
+      clipperName: sub.clipper.name || sub.clipper.email,
+      campaignTitle: campaign.title,
+      platform: proof.platform,
+      proofUrl: proof.proofVideo || proof.proofImage || proof.submissionUrl,
+      reportedViews: proof.views,
+      verifiedViews: proof.verifiedViews,
+      status: proof.status,
+      rewardAmount: proof.rewardAmount,
+      adminNote: proof.adminNote,
+      campaignStatus: campaign.status,
+      campaignVideosLeft, // Use videos left for PGC
+      campaignKind,
+      clipperCPM: CLIPPER_CPM,
+      platformCPM: PLATFORM_CPM
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Approval failed' });
+  }
+});
 
 // Approve a specific proof by proof _id
 router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req, res) => {

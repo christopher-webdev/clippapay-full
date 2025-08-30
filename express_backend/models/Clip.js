@@ -1,3 +1,4 @@
+// File: express_backend/models/Clip.js
 import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
@@ -7,7 +8,7 @@ const clipSchema = new Schema({
     ref: 'Campaign',
     required: true
   },
-  adWorker: {
+  adWorker: {  // Clipper for PGC
     type: Schema.Types.ObjectId,
     ref: 'User',
     required: true
@@ -15,6 +16,11 @@ const clipSchema = new Schema({
   url: {
     type: String,
     required: true
+  },
+  status: {  // New: for PGC approvals
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
   },
   // optional index so an ad-worker can order clips
   index: {

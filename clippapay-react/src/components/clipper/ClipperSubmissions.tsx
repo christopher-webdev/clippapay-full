@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -114,7 +115,7 @@ export default function ClipperSubmissions() {
   async function loadSubmissions() {
     setLoading(true);
     try {
-      const res = await axios.get('/clippers/my-submissions', {
+      const res = await axios.get('/clippers/my-ugc-submissions', {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       setSubmissions(res.data || []);
