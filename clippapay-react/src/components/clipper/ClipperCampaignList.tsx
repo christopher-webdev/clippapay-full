@@ -113,7 +113,7 @@ export default function ClipperCampaignList() {
               const progress = isPgc
                 ? c.desiredVideos ? Math.round((c.approvedVideosCount || 0) / c.desiredVideos * 100) : 0
                 : c.views_purchased && c.views_purchased > 0
-                  ? Math.min(((c.views_purchased - c.views_left) / c.views_purchased) * 100, 100)
+                  ? Math.min(Math.round(((c.views_purchased - c.views_left) / c.views_purchased) * 100), 100)
                   : 0;
               const alreadyJoined = joinedCampaignIds.includes(c._id);
 
