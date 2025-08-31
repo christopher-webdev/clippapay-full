@@ -40,7 +40,7 @@ const campaignSchema = new Schema({
   categories:[String],
 
   numClipsSuggested: { type: Number, min: 1, max: 6 },
-  adWorkerPercentage: { type: Number, default: 0, min: 0, max: 0 },
+  adWorkerPercentage: { type: Number, default: 20, min: 0, max: 100 },
   adWorkerStatus: {
     type: String,
     enum: ['pending','processing','ready','rejected'],

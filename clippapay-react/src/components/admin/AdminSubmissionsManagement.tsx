@@ -810,6 +810,48 @@ export default function SubmissionsManagement() {
       setSaving(false);
     }
   };
+  // Approve or verify a proof
+  // const handleApprove = async (e: FormEvent) => {
+  //   e.preventDefault();
+  //   if (!reviewing) return;
+
+  //   setSaving(true);
+  //   setErr(null);
+
+  //   try {
+  //     const isPgc = getKind(reviewing) === "pgc";
+  //     const { submissionId, proofId } = reviewing;
+
+  //     // Decide endpoint
+  //     const endpoint = isPgc
+  //       ? `${API_BASE}/admin/submissions/${submissionId}/proof/${proofId}/approve`
+  //       : `${API_BASE}/admin/submissions/${submissionId}/proof/${proofId}/verify`;
+
+  //     // Decide payload
+  //     let payload: Record<string, any>;
+  //     if (isPgc) {
+  //       payload = { note: adminNote };
+  //     } else {
+  //       payload = { verifiedViews: adjustedViews, note: adminNote };
+  //     }
+
+  //     // Make request
+  //     const res = await axios.post(endpoint, payload, { withCredentials: true });
+  //     const updated: ProofRow = res.data;
+
+  //     // Update local state
+  //     setProofs(prev =>
+  //       prev.map(p => (p.submissionId === updated.submissionId && p.proofId === updated.proofId ? updated : p))
+  //     );
+
+  //     // Close reviewing modal
+  //     setReviewing(null);
+  //   } catch (error: any) {
+  //     setErr(error?.response?.data?.error || "Error verifying proof.");
+  //   } finally {
+  //     setSaving(false);
+  //   }
+  // };
 
   // Reject proof
   const handleReject = async (e: FormEvent) => {
@@ -930,13 +972,12 @@ export default function SubmissionsManagement() {
                     <div className="flex items-center flex-wrap gap-1">
                       <b className="text-gray-700">{row.campaignTitle}</b>
                       <span
-                        className={`ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                          kind === "ugc"
-                            ? "bg-purple-50 text-purple-700 border-purple-200"
-                            : kind === "pgc"
+                        className={`ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${kind === "ugc"
+                          ? "bg-purple-50 text-purple-700 border-purple-200"
+                          : kind === "pgc"
                             ? "bg-blue-50 text-blue-700 border-blue-200"
                             : "bg-gray-100 text-gray-700 border-gray-200"
-                        }`}
+                          }`}
                       >
                         {kind.toUpperCase()}
                       </span>
@@ -1082,13 +1123,12 @@ export default function SubmissionsManagement() {
               <p className="mb-2">
                 <b>{reviewing.clipperName}</b> — <em>{reviewing.campaignTitle}</em>
                 <span
-                  className={`ml-2 px-2 py-0.5 rounded text-xs border font-semibold ${
-                    kind === "ugc"
-                      ? "bg-purple-50 text-purple-700 border-purple-200"
-                      : kind === "pgc"
+                  className={`ml-2 px-2 py-0.5 rounded text-xs border font-semibold ${kind === "ugc"
+                    ? "bg-purple-50 text-purple-700 border-purple-200"
+                    : kind === "pgc"
                       ? "bg-blue-50 text-blue-700 border-blue-200"
                       : "bg-gray-100 text-gray-700 border-gray-200"
-                  }`}
+                    }`}
                 >
                   {kind.toUpperCase()}
                 </span>
