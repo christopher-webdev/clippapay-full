@@ -175,9 +175,42 @@ router.patch('/:id/update-proof-pgc/:proofId', requireAuth, uploadProof.any(), a
 });
 
 // PATCH /clippers/:id/update-proof/:proofId
+// router.patch('/:id/update-proof/:proofId', requireAuth, uploadProof.any(), async (req, res) => {
+//   try {
+//     const { views } = req.body;
+//     const { id, proofId } = req.params;
+//     const proofVideo = getRelPath(req.files?.find(f => f.fieldname === 'proofVideo'));
+//     const proofImage = getRelPath(req.files?.find(f => f.fieldname === 'proofImage'));
+
+//     const submission = await ClipSubmission.findById(id);
+//     if (!submission) return res.status(404).json({ error: 'Submission not found.' });
+
+//     const proof = submission.proofs.id(proofId);
+//     if (!proof) return res.status(404).json({ error: 'Proof not found.' });
+
+//     if (!views) return res.status(400).json({ error: 'Views required.' });
+
+//     // For platforms that require proof, at least one file is required
+//     if ((proof.platform === 'TikTok' || proof.platform === 'Facebook') && !proofVideo && !proofImage) {
+//       return res.status(400).json({ error: 'Video or image proof required.' });
+//     }
+
+//     proof.views = Number(views) || proof.views;
+//     if (proofVideo) proof.proofVideo = proofVideo;
+//     if (proofImage) proof.proofImage = proofImage;
+//     proof.status = 'pending'; // re-verification on update
+
+//     await submission.save();
+//     res.json(submission);
+//   } catch (err) {
+//     console.error('Error in /update-proof:', err);
+//     res.status(500).json({ error: 'Could not update proof.' });
+//   }
+// });
+
 router.patch('/:id/update-proof/:proofId', requireAuth, uploadProof.any(), async (req, res) => {
   try {
-    const { views } = req.body;
+    const { views, submissionUrl } = req.body; // Added submissionUrl to destructured body
     const { id, proofId } = req.params;
     const proofVideo = getRelPath(req.files?.find(f => f.fieldname === 'proofVideo'));
     const proofImage = getRelPath(req.files?.find(f => f.fieldname === 'proofImage'));
@@ -195,6 +228,15 @@ router.patch('/:id/update-proof/:proofId', requireAuth, uploadProof.any(), async
       return res.status(400).json({ error: 'Video or image proof required.' });
     }
 
+    // Validate and update submissionUrl if provided
+    if (submissionUrl) {
+      const HTTPS_ONLY_REGEX = /^https:\/\/.+/i;
+      if (!HTTPS_ONLY_REGEX.test(submissionUrl)) {
+        return res.status(400).json({ error: 'Submission URL must start with "https://".' });
+      }
+      proof.submissionUrl = submissionUrl; // Update submissionUrl
+    }
+
     proof.views = Number(views) || proof.views;
     if (proofVideo) proof.proofVideo = proofVideo;
     if (proofImage) proof.proofImage = proofImage;
@@ -207,6 +249,7 @@ router.patch('/:id/update-proof/:proofId', requireAuth, uploadProof.any(), async
     res.status(500).json({ error: 'Could not update proof.' });
   }
 });
+
 /**
  * GET /api/clippers/my-submissions
  * List all submissions for this user
