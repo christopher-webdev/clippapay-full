@@ -33,15 +33,16 @@
 
   <!-- Vite entrypoint -->
   <script type="module" src="/src/main.tsx"></script>
+
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-0HGFW8728G"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
     function gtag() { dataLayer.push(arguments); }
     gtag('js', new Date());
-
     gtag('config', 'G-0HGFW8728G');
   </script>
+
   <!-- Meta Pixel Code -->
   <script>
     !function (f, b, e, v, n, t, s) {
@@ -58,15 +59,56 @@
     fbq('init', '1808721030074397');
     fbq('track', 'PageView');
   </script>
-
   <!-- End Meta Pixel Code -->
+
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2340899754527885"
     crossorigin="anonymous"></script>
-</head>
 
+  <style>
+    /* WhatsApp Floating Button */
+    .whatsapp_float {
+      position: fixed;
+      width: 50px;
+      height: 50px;
+      bottom: 90px;
+      /* Pushed above Tawk.to widget */
+      right: 20px;
+      background-color: #25d366;
+      color: #fff;
+      border-radius: 50px;
+      text-align: center;
+      font-size: 26px;
+      box-shadow: 2px 2px 3px #999;
+      z-index: 10000;
+      /* Higher than Tawk.to */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease-in-out;
+    }
+
+    .whatsapp_float:hover {
+      transform: scale(1.1);
+      background-color: #20b358;
+    }
+
+    .whatsapp_icon {
+      width: 30px;
+      height: 30px;
+    }
+  </style>
+</head>
 
 <body>
   <div id="root"></div>
+
+  <!-- WhatsApp Floating Button -->
+  <a href="https://wa.me/2347082613530?text=Hello%20ClippaPay%20Team%2C%20I%20want%20to%20know%20more."
+    class="whatsapp_float" target="_blank" aria-label="Chat on WhatsApp">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" class="whatsapp_icon"
+      alt="WhatsApp Chat" />
+  </a>
+
   <!--Start of Tawk.to Script-->
   <script type="text/javascript">
     var Tawk_API = Tawk_API || {}, Tawk_LoadStart = new Date();
@@ -80,6 +122,7 @@
     })();
   </script>
   <!--End of Tawk.to Script-->
+
   <noscript><img height="1" width="1" style="display:none"
       src="https://www.facebook.com/tr?id=1808721030074397&ev=PageView&noscript=1" /></noscript>
 </body>
