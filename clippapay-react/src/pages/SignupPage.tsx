@@ -1,5 +1,3 @@
-// signup
-
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -13,6 +11,9 @@ import {
   HiShieldCheck,
   HiBadgeCheck,
 } from "react-icons/hi";
+
+// Import for SHA-256 hashing (you may need to install a library like js-sha256)
+import { sha256 } from 'js-sha256';
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -98,7 +99,6 @@ function RoleInfo({ role }: { role: "clipper" | "advertiser" }) {
       <div className="flex items-start gap-3">
         <div className="shrink-0 rounded-xl bg-sky-600/10 p-2">
           <HiSpeakerphone className="h-6 w-6 text-sky-600" />
-
         </div>
         <div>
           <h4 className="font-semibold text-gray-800">Sign up as an Advertiser</h4>
@@ -139,8 +139,8 @@ export default function SignupPage() {
     lastName: "",
     contactName: "",
     company: "",
-    creatorTypes: [] as string[], // New field for selected creator types
-    otherCreatorType: "" // Field for "Other" specification
+    creatorTypes: [] as string[],
+    otherCreatorType: ""
   });
   const [otp, setOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -204,8 +204,34 @@ export default function SignupPage() {
       const data = await request("/auth/signup", {
         ...formData,
         creatorTypes: finalCreatorTypes,
-        otherCreatorType: formData.otherCreatorType // ensure this is passed explicitly
+        otherCreatorType: formData.otherCreatorType
       });
+
+      // TikTok Pixel: Track CompleteRegistration event
+      if (window.ttq) {
+        // Hash email and phone for TikTok Pixel
+        const hashedEmail = formData.email ? sha256(formData.email.toLowerCase().trim()) : undefined;
+        const hashedPhone = formData.phone ? sha256(formData.phone.replace(/\D/g, '')) : undefined;
+
+        // Identify the user
+        window.ttq.identify({
+          email: hashedEmail,
+          phone_number: hashedPhone,
+        });
+
+        // Track the CompleteRegistration event
+        window.ttq.track('CompleteRegistration', {
+          value: 0, // Adjust value if needed (e.g., based on signup value)
+          currency: "USD",
+          contents: [
+            {
+              content_id: "signup",
+              content_type: "product",
+              content_name: "User Signup"
+            }
+          ]
+        });
+      }
 
       setMessage(data.message);
       setStep("otp");
