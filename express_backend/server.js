@@ -5,6 +5,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 
 // Import routes
 import authRouter from './routes/auth.js';
@@ -60,6 +61,36 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const secretKey = process.env.PAYSTACK_SECRET;
+  const hash = crypto.createHmac('sha512', secretKey).update(JSON.stringify(req.body)).digest('hex');
+
+  if (hash !== req.headers['x-paystack-signature']) {
+    return res.status(400).send('Invalid signature');
+  }
+
+  const event = req.body;
+  if (event.event === 'charge.success') {
+    const data = event.data;
+    const reference = data.reference;
+    const amount = data.amount / 100;
+
+    // Similar logic as verify: check if processed, create deposit, credit wallet, etc.
+    // To identify user, add metadata in PaystackButton: metadata={{ userId: user._id }} (fetch _id from /api/user)
+    // For now, log or skip if not critical.
+    console.log('Webhook success:', data);
+
+    // Example: Find by reference and approve if pending
+    const deposit = await DepositRequest.findOne({ reference });
+    if (deposit && deposit.status === 'pending') {
+      deposit.status = 'approved';
+      await deposit.save();
+      // Credit wallet, etc. (same as above)
+    }
+  }
+
+  res.sendStatus(200);
+});
 // 3. Static file serving (must come before routes)
 app.use('/uploads', express.static(uploadsRoot, {
   index: false,  // disable directory listing

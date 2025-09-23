@@ -7,6 +7,9 @@ import { requireAuth } from '../middleware/auth.js';
 import PlatformSetting from '../models/PlatformSetting.js';
 import { requireAdminAuth } from '../middleware/adminAuth.js'
 
+import axios from 'axios'; // Add this import
+import Transaction from '../models/Transaction.js'; // Add this import
+
 const router = express.Router();
 
 // Multer for deposit receipts
@@ -121,5 +124,66 @@ router.get('/bank-details', requireAuth, async (req, res) => {
   }
 });
 
+// New route for Paystack verification
+router.post('/verify-paystack', requireAuth, async (req, res) => {
+  const { reference } = req.body;
+  const secretKey = process.env.PAYSTACK_SECRET;
+
+  try {
+    const verifyRes = await axios.get(
+      `https://api.paystack.co/transaction/verify/${reference}`,
+      {
+        headers: {
+          Authorization: `Bearer ${secretKey}`,
+        },
+      }
+    );
+
+    const data = verifyRes.data.data;
+    if (data.status !== 'success') {
+      return res.status(400).json({ error: 'Payment not successful.' });
+    }
+
+    const amount = data.amount / 100;  // Convert kobo to Naira
+
+    // Check if already processed (to avoid duplicates)
+    const existingDeposit = await DepositRequest.findOne({ reference });
+    if (existingDeposit) {
+      return res.status(400).json({ error: 'Payment already processed.' });
+    }
+
+    // Create approved deposit
+    const deposit = new DepositRequest({
+      user: req.user._id,
+      amount,
+      receiptUrl: '',  // No receipt for Paystack
+      status: 'approved',
+      paymentMethod: 'paystack',
+      reference,  // Store reference (add this field to DepositRequest schema if needed)
+    });
+    await deposit.save();
+
+    // Credit wallet
+    let wallet = await Wallet.findOne({ user: req.user._id });
+    if (!wallet) {
+      wallet = new Wallet({ user: req.user._id, balance: 0, escrowLocked: 0 });
+    }
+    await wallet.credit(amount);
+    await wallet.save();
+
+    // Record transaction
+    await Transaction.create({
+      user: req.user._id,
+      type: 'deposit',
+      amount,
+      note: 'Paystack deposit approved',
+    });
+
+    res.json({ message: 'Deposit successful.' });
+  } catch (err) {
+    console.error('Paystack verification error:', err);
+    res.status(500).json({ error: 'Verification failed.' });
+  }
+});
 
 export default router;
