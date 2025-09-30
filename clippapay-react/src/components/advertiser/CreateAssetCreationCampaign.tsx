@@ -1,4 +1,3 @@
-// File: src/pages/CreateAssetCreationCampaign.tsx
 import React, { useEffect, useMemo, useState, ChangeEvent, FormEvent } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
@@ -7,8 +6,7 @@ import { Upload, Loader2, Paperclip, X, Info, AlertCircle, Check } from 'lucide-
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const ASSET_CREATION_COST_PER_VIDEO = 7500; // ₦ per approved video
-const MIN_VIDEOS = 1;
-const MAX_VIDEOS = 50;
+const MIN_BUDGET = ASSET_CREATION_COST_PER_VIDEO;
 
 const categoryOptions = [
     'Fashion', 'Science & Tech', 'Gaming', 'Food', 'Travel', 'TV/Movies & Entertainment',
@@ -20,7 +18,6 @@ const categoryOptions = [
 type AssetCreationForm = {
     title: string;
     budget: number;
-    desiredVideos: number;
     hashtags: string;
     directions: string;
     categories: string[];
@@ -36,7 +33,6 @@ type AssetCreationForm = {
 const initialForm: AssetCreationForm = {
     title: '',
     budget: 0,
-    desiredVideos: 1,
     hashtags: '',
     directions: '',
     categories: [],
@@ -64,9 +60,15 @@ export default function CreateAssetCreationCampaign() {
             .catch(() => { });
     }, []);
 
+    // Compute desiredVideos based on budget
+    const desiredVideos = useMemo(
+        () => Math.floor(form.budget / ASSET_CREATION_COST_PER_VIDEO),
+        [form.budget]
+    );
+
     const estimatedCost = useMemo(
-        () => form.desiredVideos * ASSET_CREATION_COST_PER_VIDEO,
-        [form.desiredVideos]
+        () => desiredVideos * ASSET_CREATION_COST_PER_VIDEO,
+        [desiredVideos]
     );
 
     function onChange(e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
@@ -103,10 +105,8 @@ export default function CreateAssetCreationCampaign() {
         setError(null); setMessage(null);
 
         if (!form.title) return setError('Please provide a campaign title.');
-        if (form.desiredVideos < MIN_VIDEOS || form.desiredVideos > MAX_VIDEOS) {
-            return setError(`Desired videos must be between ${MIN_VIDEOS} and ${MAX_VIDEOS}.`);
-        }
-        if (form.budget < estimatedCost) return setError(`Budget must be at least ₦${estimatedCost} for ${form.desiredVideos} videos.`);
+        if (form.budget < MIN_BUDGET) return setError(`Budget must be at least ₦${MIN_BUDGET}.`);
+        if (desiredVideos < 1) return setError('Budget must fund at least 1 video (₦7,500 minimum).');
         if (form.budget > walletBalance) return setError('Budget exceeds wallet balance.');
         if (!form.brief) return setError('Please provide a creative brief.');
 
@@ -118,7 +118,7 @@ export default function CreateAssetCreationCampaign() {
             fd.append('title', form.title);
             fd.append('budget', String(form.budget));
             fd.append('kind', 'asset_creation');
-            fd.append('desiredVideos', String(form.desiredVideos));
+            fd.append('desiredVideos', String(desiredVideos));  // Auto-calculated
 
             // Guidelines
             fd.append('hashtags', JSON.stringify(form.hashtags.split(',').map(s => s.trim()).filter(Boolean)));
@@ -160,10 +160,9 @@ export default function CreateAssetCreationCampaign() {
 
     return (
         <div className="min-h-screen bg-gray-50 py-12">
-            <div className="max-w-6xl mx-auto px-4">
+            <div className="max-w-6xl  mx-auto px-4">
                 <div className="bg-white rounded-xl shadow-sm border">
                     <div className="bg-gradient-to-r from-green-600 to-green-800 px-6 py-8 text-white rounded-t-xl relative">
-                        {/* Close button added here */}
                         <button
                             type="button"
                             onClick={() => navigate('/dashboard/advertiser/campaigns')}
@@ -181,7 +180,7 @@ export default function CreateAssetCreationCampaign() {
                         </div>
                     </div>
 
-                    <form onSubmit={onSubmit} className="px-6 py-8 space-y-10">
+                    <form onSubmit={onSubmit} className="px-6 py-8 bg-gray-100 space-y-10">
                         {/* Campaign Basics */}
                         <div className="space-y-6">
                             <h2 className="text-xl font-semibold">Basics</h2>
@@ -193,119 +192,62 @@ export default function CreateAssetCreationCampaign() {
                                     value={form.title}
                                     onChange={onChange}
                                     required
-                                    className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                    className="mt-1 w-full rounded-md border-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">Desired Number of Videos</label>
-                                <input
-                                    type="number"
-                                    name="desiredVideos"
-                                    value={form.desiredVideos}
-                                    onChange={onChange}
-                                    min={MIN_VIDEOS}
-                                    max={MAX_VIDEOS}
-                                    required
-                                    className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                                />
-                                <p className="mt-1 text-sm text-gray-500">Between {MIN_VIDEOS} and {MAX_VIDEOS}. Creators will see this as your target.</p>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Budget</label>
+                                <label className="block text-sm font-medium text-gray-700">Budget (₦)</label>
                                 <input
                                     type="number"
                                     name="budget"
                                     value={form.budget}
                                     onChange={onChange}
-                                    min={estimatedCost}
-                                    step={ASSET_CREATION_COST_PER_VIDEO}
+                                    min={MIN_BUDGET}
+                                    step={1}  // Allows any amount >= 7500; use step={7500} for exact multiples
                                     required
                                     className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                 />
-                                <p className="mt-1 text-sm text-gray-500">Minimum ₦{estimatedCost} for {form.desiredVideos} videos (₦{ASSET_CREATION_COST_PER_VIDEO} each). Your wallet balance: ₦{walletBalance}.</p>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Primary CTA URL <span className="text-gray-400 text-xs">(optional)</span></label>
-                                <input
-                                    type="url"
-                                    name="cta_url"
-                                    value={form.cta_url}
-                                    onChange={onChange}
-                                    placeholder="https://example.com"
-                                    className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                                />
+                                {form.budget >= MIN_BUDGET && (
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        This budget will fund up to {desiredVideos} video{desiredVideos !== 1 ? 's' : ''} at ₦7,500 each (estimated cost: ₦{estimatedCost.toLocaleString()}).
+                                    </p>
+                                )}
                             </div>
                         </div>
 
-                        {/* Creative Guidelines */}
+                        {/* Categories */}
+                        <div className="space-y-6">
+                            <h2 className="text-xl font-semibold">Categories</h2>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                {categoryOptions.map(category => (
+                                    <label key={category} className="flex items-center space-x-2">
+                                        <input
+                                            type="checkbox"
+                                            name="categories"
+                                            value={category}
+                                            checked={form.categories.includes(category)}
+                                            onChange={onChange}
+                                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <span className="text-sm text-gray-700">{category}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Guidelines */}
                         <div className="space-y-6">
                             <h2 className="text-xl font-semibold">Creative Guidelines</h2>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Hashtags <span className="text-gray-400 text-xs">(optional, comma-separated)</span></label>
-                                <input
-                                    type="text"
-                                    name="hashtags"
-                                    value={form.hashtags}
-                                    onChange={onChange}
-                                    placeholder="#hashtag1, #hashtag2"
-                                    className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Directions</label>
-                                <textarea
-                                    name="directions"
-                                    value={form.directions}
-                                    onChange={onChange}
-                                    rows={4}
-                                    placeholder="e.g.\nUse trending audio\nFilm in landscape\nInclude product shot at end"
-                                    className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                                />
-                                <p className="mt-1 text-xs text-gray-500">One instruction per line works best.</p>
-                            </div>
-
-                            <fieldset>
-                                <legend className="block text-sm font-medium text-gray-700 mb-2">Categories</legend>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    {categoryOptions.map((cat) => {
-                                        const on = form.categories.includes(cat);
-                                        return (
-                                            <label
-                                                key={cat}
-                                                className={`flex items-center gap-2 rounded-md px-3 py-2 border cursor-pointer ${on ? 'bg-green-50 border-green-300 text-green-800' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'}`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    name="categories"
-                                                    value={cat}
-                                                    checked={on}
-                                                    onChange={onChange}
-                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                                />
-                                                <span className="text-sm">{cat}</span>
-                                            </label>
-                                        );
-                                    })}
-                                </div>
-                            </fieldset>
-                        </div>
-
-                        {/* Brief & Requirements */}
-                        <div className="space-y-6">
-                            <h2 className="text-xl font-semibold">Brief & Requirements</h2>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Creative Brief</label>
                                 <textarea
                                     name="brief"
                                     value={form.brief}
                                     onChange={onChange}
-                                    rows={6}
-                                    placeholder="Describe the video concept, key messages, target audience, tone, length, etc."
+                                    rows={5}
                                     required
+                                    placeholder="e.g. Create a 30-60 second video showcasing our product in a fun, engaging way..."
                                     className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                 />
                             </div>
@@ -316,15 +258,38 @@ export default function CreateAssetCreationCampaign() {
                                     name="deliverables"
                                     value={form.deliverables}
                                     onChange={onChange}
-                                    rows={4}
-                                    placeholder="e.g.\nOne 30-second video\nRaw footage files\nCaption suggestions"
+                                    rows={3}
+                                    placeholder="e.g. 1 vertical video, 30-60 seconds, 1080p resolution"
                                     className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                 />
-                                <p className="mt-1 text-xs text-gray-500">List items separated by commas or new lines.</p>
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">Caption Template <span className="text-gray-400 text-xs">(optional)</span></label>
+                                <label className="block text-sm font-medium text-gray-700">Hashtags</label>
+                                <input
+                                    type="text"
+                                    name="hashtags"
+                                    value={form.hashtags}
+                                    onChange={onChange}
+                                    placeholder="e.g. #BrandName, #ProductLaunch"
+                                    className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Directions</label>
+                                <textarea
+                                    name="directions"
+                                    value={form.directions}
+                                    onChange={onChange}
+                                    rows={3}
+                                    placeholder="e.g. Show the product in use, include a clear call-to-action"
+                                    className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Caption Template (optional)</label>
                                 <textarea
                                     name="captionTemplate"
                                     value={form.captionTemplate}

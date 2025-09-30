@@ -29,7 +29,7 @@ const campaignSchema = new Schema({
   budget_remaining: { type: Number, required: true },
   views_purchased: { type: Number }, // Optional for PGC
   views_left: { type: Number }, // Optional for PGC
-  desiredVideos: { type: Number, min: 1, max: 10 }, // PGC-specific
+  desiredVideos: { type: Number, min: 1, max: 500 }, // PGC-specific
   approvedVideosCount: { type: Number, default: 0 }, // PGC-specific
 
   platforms: { type: [String], enum: ['tiktok','instagram','youtube','facebook', 'X'] }, // Optional for PGC

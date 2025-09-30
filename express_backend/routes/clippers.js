@@ -442,6 +442,49 @@ router.get('/my-pgc-submissions', requireAuth, async (req, res) => {
  * GET /api/campaigns/available
  * List campaigns clippers can join/post to, following all business rules.
  */
+// router.get('/available', requireAuth, async (req, res) => {
+//   try {
+//     const now = new Date();
+//     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+//     const campaigns = await Campaign.find({
+//       status: 'active',
+//       adWorkerStatus: 'ready',
+//       $or: [
+//         // Non-PGC: > 50% views remaining
+//         {
+//           kind: { $ne: 'pgc' },
+//           $expr: { $gt: ['$views_left', { $multiply: ['$views_purchased', 0.5] }] }
+//         },
+//         // Non-PGC: <= 50% views remaining but updated within last 24h
+//         {
+//           kind: { $ne: 'pgc' },
+//           $and: [
+//             { $expr: { $lte: ['$views_left', { $multiply: ['$views_purchased', 0.5] }] } },
+//             { updatedAt: { $gte: twentyFourHoursAgo } }
+//           ]
+//         },
+//         // PGC: approvedVideosCount < desiredVideos
+//         {
+//           kind: 'pgc',
+//           $expr: { $lt: ['$approvedVideosCount', '$desiredVideos'] }
+//         }
+//       ]
+//     })
+//       // Put PGC and UGC first, then newest
+//       .sort({ kind: -1, updatedAt: -1 })
+//       .select(
+//         '_id title thumb_url rate_per_1000 clipper_cpm payPerView budget_total budget_remaining views_purchased views_left desiredVideos approvedVideosCount categories hashtags status adWorkerStatus kind createdAt updatedAt'
+//       )
+//       .lean();
+
+//     res.json(campaigns);
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Could not fetch available campaigns.' });
+//   }
+// });
+
 router.get('/available', requireAuth, async (req, res) => {
   try {
     const now = new Date();
@@ -450,26 +493,26 @@ router.get('/available', requireAuth, async (req, res) => {
     const campaigns = await Campaign.find({
       status: 'active',
       adWorkerStatus: 'ready',
-      $or: [
-        // Non-PGC: > 50% views remaining
-        {
-          kind: { $ne: 'pgc' },
-          $expr: { $gt: ['$views_left', { $multiply: ['$views_purchased', 0.5] }] }
-        },
-        // Non-PGC: <= 50% views remaining but updated within last 24h
-        {
-          kind: { $ne: 'pgc' },
-          $and: [
-            { $expr: { $lte: ['$views_left', { $multiply: ['$views_purchased', 0.5] }] } },
-            { updatedAt: { $gte: twentyFourHoursAgo } }
-          ]
-        },
-        // PGC: approvedVideosCount < desiredVideos
-        {
-          kind: 'pgc',
-          $expr: { $lt: ['$approvedVideosCount', '$desiredVideos'] }
-        }
-      ]
+      // $or: [  // Commented out for troubleshooting - this ignores progress filters
+      //   // Non-PGC: > 50% views remaining
+      //   {
+      //     kind: { $ne: 'pgc' },
+      //     $expr: { $gt: ['$views_left', { $multiply: ['$views_purchased', 0.5] }] }
+      //   },
+      //   // Non-PGC: <= 50% views remaining but updated within last 24h
+      //   {
+      //     kind: { $ne: 'pgc' },
+      //     $and: [
+      //       { $expr: { $lte: ['$views_left', { $multiply: ['$views_purchased', 0.5] }] } },
+      //       { updatedAt: { $gte: twentyFourHoursAgo } }
+      //     ]
+      //   },
+      //   // PGC: approvedVideosCount < desiredVideos
+      //   {
+      //     kind: 'pgc',
+      //     $expr: { $lt: ['$approvedVideosCount', '$desiredVideos'] }
+      //   }
+      // ]
     })
       // Put PGC and UGC first, then newest
       .sort({ kind: -1, updatedAt: -1 })
@@ -484,8 +527,6 @@ router.get('/available', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Could not fetch available campaigns.' });
   }
 });
-
-
 
 router.get('/:id', requireAuth, async (req, res) => {
   try {
