@@ -132,41 +132,47 @@ export default function ClipperCampaignList() {
                     <div className="bg-green-500 text-white text-[10px] font-extrabold px-3 py-1 rounded-full animate-pulse">
                       LIVE
                     </div>
-                    {(c.kind === 'ugc' || c.kind === 'pgc') && (
-                      <div className="flex items-center gap-1">
-                        <div className="bg-red-600 text-white text-[10px] font-extrabold px-3 py-1 rounded-full shadow-sm">
-                          {c.kind === 'ugc' ? 'HOT' : 'PGC'}
-                        </div>
-                        <div
-                          className="relative"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setShowTooltip(showTooltip === c._id ? null : c._id);
-                          }}
-                        >
-                          <Info
-                            size={25}
-                            className="text-gray-300 cursor-pointer hover:text-white"
-                            onMouseEnter={() => setShowTooltip(c._id)}
-                            onMouseLeave={() => setShowTooltip(null)}
-                          />
-                          {showTooltip === c._id && (
-                            <div
-                              className="absolute top-6 right-0 w-48 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg z-20"
+                    <div className="flex items-center gap-1">
+                      {c.kind === 'ugc' || c.kind === 'pgc' ? (
+                        <>
+                          <div className="bg-red-600 text-white text-[10px] font-extrabold px-3 py-1 rounded-full shadow-sm">
+                            {c.kind === 'ugc' ? 'UGC' : 'PGC'}
+                          </div>
+                          <div
+                            className="relative"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowTooltip(showTooltip === c._id ? null : c._id);
+                            }}
+                          >
+                            <Info
+                              size={25}
+                              className="text-gray-300 cursor-pointer hover:text-white"
                               onMouseEnter={() => setShowTooltip(c._id)}
                               onMouseLeave={() => setShowTooltip(null)}
-                            >
-                              <div className="font-bold mb-1">{c.kind === 'ugc' ? 'UGC Campaign' : 'PGC Campaign'}</div>
-                              <p>
-                                {c.kind === 'ugc'
-                                  ? 'User-Generated Content: Create and post your own video showcasing this product for higher earnings!'
-                                  : 'Professional-Generated Content: Submit high-quality videos for approval to earn a fixed payout per video!'}
-                              </p>
-                            </div>
-                          )}
+                            />
+                            {showTooltip === c._id && (
+                              <div
+                                className="absolute top-6 right-0 w-48 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg z-20"
+                                onMouseEnter={() => setShowTooltip(c._id)}
+                                onMouseLeave={() => setShowTooltip(null)}
+                              >
+                                <div className="font-bold mb-1">{c.kind === 'ugc' ? 'UGC Campaign' : 'PGC Campaign'}</div>
+                                <p>
+                                  {c.kind === 'ugc'
+                                    ? 'User-Generated Content: Create and post your own video showcasing this product for higher earnings!'
+                                    : 'Professional-Generated Content: Submit high-quality videos for approval to earn a fixed payout per video!'}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="bg-orange-500 text-white text-[10px] font-extrabold px-3 py-1 rounded-full shadow-sm">
+                          REPOST
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex mt-8 items-center justify-center h-48 px-4 pt-8">
