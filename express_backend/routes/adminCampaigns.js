@@ -11,12 +11,10 @@ import Wallet from '../models/Wallet.js';
 
 import multer from 'multer';
 // File: express_backend/routes/adminCampaigns.js
-import dotenv from 'dotenv';
 
-dotenv.config();
 const router = express.Router();
 // Multer setup for PGC assets
-const pgcAssetsDir = path.join(process.cwd(), 'Uploads/pgc-assets');
+const pgcAssetsDir = path.join(process.cwd(), 'uploads/pgc-assets');
 await fs.mkdir(pgcAssetsDir, { recursive: true });
 
 const pgcAssetStorage = multer.diskStorage({
@@ -46,13 +44,7 @@ const parseArr = (val, fallback = []) => {
   }
 };
 
-
-
-
-/**
- * PUT /admin-campaigns/:id
- * Update a campaign and manage uploaded assets
- */
+// Extended PUT route
 router.put(
   '/admin-campaigns/:id',
   pgcAssetUpload.array('assets'),
@@ -72,30 +64,20 @@ router.put(
         return res.status(404).json({ error: 'Campaign not found' });
       }
 
-      // ✅ Build allowed updates
       const allowedUpdates = {
         title: updates.title,
         platforms: updates.platforms ? parseArr(updates.platforms) : undefined,
         hashtags: updates.hashtags
-          ? updates.hashtags
-              .split(',')
-              .map(s => s.trim())
-              .filter(Boolean)
+          ? updates.hashtags.split(',').map(s => s.trim()).filter(Boolean)
           : undefined,
         directions: updates.directions
-          ? updates.directions
-              .split(',')
-              .map(s => s.trim())
-              .filter(Boolean)
+          ? updates.directions.split(',').map(s => s.trim()).filter(Boolean)
           : undefined,
         categories: updates.categories ? parseArr(updates.categories) : undefined,
         cta_url: updates.cta_url || undefined,
         'ugc.brief': updates.brief,
         'ugc.deliverables': updates.deliverables
-          ? updates.deliverables
-              .split(',')
-              .map(s => s.trim())
-              .filter(Boolean)
+          ? updates.deliverables.split(',').map(s => s.trim()).filter(Boolean)
           : undefined,
         'ugc.captionTemplate': updates.captionTemplate,
         'ugc.usageRights': updates.usageRights,
@@ -106,7 +88,6 @@ router.put(
         if (allowedUpdates[key] === undefined) delete allowedUpdates[key];
       });
 
-      // ✅ Apply updates to campaign
       Object.entries(allowedUpdates).forEach(([key, value]) => {
         if (key.includes('.')) {
           const [parent, child] = key.split('.');
@@ -117,56 +98,45 @@ router.put(
         }
       });
 
-      // ✅ Validate PGC requirements
       if (campaign.kind === 'pgc') {
-        if (!campaign.ugc.brief) {
+        if (campaign.ugc.brief === '') {
           return res.status(400).json({ error: 'Creative brief is required for PGC campaigns' });
         }
-        if (!campaign.ugc.approvalCriteria) {
+        if (campaign.ugc.approvalCriteria === '') {
           return res.status(400).json({ error: 'Approval criteria is required for PGC campaigns' });
         }
-        if (!campaign.categories || campaign.categories.length === 0) {
+        if (campaign.categories && campaign.categories.length === 0) {
           return res.status(400).json({ error: 'At least one category is required for PGC campaigns' });
         }
       }
 
-      // ✅ Add new assets with absolute URLs
       if (req.files && req.files.length > 0) {
-        const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
-        const newAssets = req.files.map(
-          file => `${baseUrl}/uploads/pgc-assets/${file.filename}`
-        );
+        const newAssets = req.files.map(file => `/uploads/pgc-assets/${file.filename}`);
         console.log('New assets to save:', newAssets);
-
         campaign.ugc = campaign.ugc || {};
         campaign.ugc.assets = [...(campaign.ugc.assets || []), ...newAssets];
       }
 
-      // ✅ Handle asset removal
+      let removeAssets = [];
       if (updates.removeAssets) {
-        const removeAssets = parseArr(updates.removeAssets);
+        removeAssets = parseArr(updates.removeAssets);
         campaign.ugc = campaign.ugc || {};
         campaign.ugc.assets = campaign.ugc.assets.filter(asset => !removeAssets.includes(asset));
-
         for (const asset of removeAssets) {
-          // Convert absolute URL to file path
-          const assetPath = asset.replace(/^https?:\/\/[^/]+/, '');
           const filePath = path.resolve(
-            process.cwd(),
-            assetPath.startsWith('/uploads/')
-              ? assetPath.replace('/uploads/', 'uploads/')
-              : assetPath
+            asset.startsWith('/uploads/pgc-assets/')
+              ? asset.replace('/uploads/pgc-assets/', 'Uploads/pgc-assets/')
+              : asset.replace('/uploads/ugc-assets/', 'Uploads/ugc-assets/')
           );
           console.log('Removing asset:', filePath);
           try {
             await fs.unlink(filePath);
-          } catch (err) {
-            console.warn(`Failed to delete asset ${asset}:`, err.message);
+          } catch (unlinkErr) {
+            console.warn(`Failed to delete asset ${asset}:`, unlinkErr);
           }
         }
       }
 
-      // ✅ Save and return updated campaign
       await campaign.save();
 
       const updatedCampaign = await Campaign.findById(id)
@@ -177,7 +147,6 @@ router.put(
       res.json(updatedCampaign);
     } catch (err) {
       console.error('Error updating campaign:', err);
-      // Cleanup uploaded files if save fails
       for (const f of req.files || []) {
         try {
           await fs.unlink(f.path);
