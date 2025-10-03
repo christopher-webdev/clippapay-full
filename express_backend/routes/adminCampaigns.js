@@ -13,13 +13,15 @@ import multer from 'multer';
 // File: express_backend/routes/adminCampaigns.js
 
 const router = express.Router();
-
 // Multer setup for PGC assets
-const pgcAssetsDir = path.join(process.cwd(), 'uploads/pgc-assets');
-await fs.mkdir(pgcAssetsDir, { recursive: true }); // Use async mkdir
+const pgcAssetsDir = path.join(process.cwd(), 'Uploads/pgc-assets');
+await fs.mkdir(pgcAssetsDir, { recursive: true });
 
 const pgcAssetStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, pgcAssetsDir),
+  destination: (_req, _file, cb) => {
+    console.log('Saving assets to:', pgcAssetsDir);
+    cb(null, pgcAssetsDir);
+  },
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname);
     const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
@@ -28,7 +30,7 @@ const pgcAssetStorage = multer.diskStorage({
 });
 const pgcAssetUpload = multer({
   storage: pgcAssetStorage,
-  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB per file
+  limits: { fileSize: 200 * 1024 * 1024 },
 });
 
 // Utility to parse arrays
@@ -52,13 +54,16 @@ router.put(
       const { id } = req.params;
       const updates = req.body;
 
-      // Find campaign
+      console.log('PUT /admin-campaigns/:id called', {
+        files: req.files,
+        body: req.body,
+      });
+
       const campaign = await Campaign.findById(id);
       if (!campaign) {
         return res.status(404).json({ error: 'Campaign not found' });
       }
 
-      // Allowed updates (all fields from CreateAssetCreationCampaign.tsx)
       const allowedUpdates = {
         title: updates.title,
         platforms: updates.platforms ? parseArr(updates.platforms) : undefined,
@@ -79,39 +84,51 @@ router.put(
         'ugc.approvalCriteria': updates.approvalCriteria,
       };
 
-      // Remove undefined keys
       Object.keys(allowedUpdates).forEach(key => {
         if (allowedUpdates[key] === undefined) delete allowedUpdates[key];
       });
 
-      // Validate for PGC campaigns
+      Object.entries(allowedUpdates).forEach(([key, value]) => {
+        if (key.includes('.')) {
+          const [parent, child] = key.split('.');
+          campaign[parent] = campaign[parent] || {};
+          campaign[parent][child] = value;
+        } else {
+          campaign[key] = value;
+        }
+      });
+
       if (campaign.kind === 'pgc') {
-        if (allowedUpdates['ugc.brief'] === '') {
+        if (campaign.ugc.brief === '') {
           return res.status(400).json({ error: 'Creative brief is required for PGC campaigns' });
         }
-        if (allowedUpdates['ugc.approvalCriteria'] === '') {
+        if (campaign.ugc.approvalCriteria === '') {
           return res.status(400).json({ error: 'Approval criteria is required for PGC campaigns' });
         }
-        if (allowedUpdates.categories && allowedUpdates.categories.length === 0) {
+        if (campaign.categories && campaign.categories.length === 0) {
           return res.status(400).json({ error: 'At least one category is required for PGC campaigns' });
         }
       }
 
-      // Handle new assets (append to ugc.assets)
       if (req.files && req.files.length > 0) {
         const newAssets = req.files.map(file => `/uploads/pgc-assets/${file.filename}`);
+        console.log('New assets to save:', newAssets);
         campaign.ugc = campaign.ugc || {};
         campaign.ugc.assets = [...(campaign.ugc.assets || []), ...newAssets];
       }
 
-      // Handle removed assets
       let removeAssets = [];
       if (updates.removeAssets) {
         removeAssets = parseArr(updates.removeAssets);
         campaign.ugc = campaign.ugc || {};
         campaign.ugc.assets = campaign.ugc.assets.filter(asset => !removeAssets.includes(asset));
         for (const asset of removeAssets) {
-          const filePath = path.resolve(asset.replace('/uploads/pgc-assets/', 'uploads/pgc-assets/'));
+          const filePath = path.resolve(
+            asset.startsWith('/uploads/pgc-assets/')
+              ? asset.replace('/uploads/pgc-assets/', 'Uploads/pgc-assets/')
+              : asset.replace('/uploads/ugc-assets/', 'Uploads/ugc-assets/')
+          );
+          console.log('Removing asset:', filePath);
           try {
             await fs.unlink(filePath);
           } catch (unlinkErr) {
@@ -120,18 +137,16 @@ router.put(
         }
       }
 
-      // Apply updates
-      await Campaign.findByIdAndUpdate(id, { $set: allowedUpdates }, { new: true, runValidators: true });
+      await campaign.save();
 
-      // Fetch updated campaign
       const updatedCampaign = await Campaign.findById(id)
         .populate('advertiser', 'email firstName lastName contactName company')
         .populate('assignedWorker', 'email firstName lastName');
 
+      console.log('Updated campaign assets:', updatedCampaign.ugc?.assets);
       res.json(updatedCampaign);
     } catch (err) {
       console.error('Error updating campaign:', err);
-      // Clean up uploaded files on error
       for (const f of req.files || []) {
         try {
           await fs.unlink(f.path);
@@ -141,6 +156,7 @@ router.put(
     }
   }
 );
+
 // --- GET ALL CAMPAIGNS (with stats) ---
 router.get('/', requireAdminAuth, async (req, res) => {
   try {

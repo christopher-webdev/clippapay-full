@@ -97,7 +97,7 @@ export default function CampaignsManagement() {
     };
 
     fetchCampaigns();
-    const intervalId = setInterval(fetchCampaigns, 15000);
+    const intervalId = setInterval(fetchCampaigns, 150000);
     return () => clearInterval(intervalId);
   }, []);
 

@@ -33,7 +33,6 @@ const videoStorage = multer.diskStorage({
 });
 const upload = multer({ storage: videoStorage });
 // ──────────────────────────────────────────────────────────────────────────────
-// Add this near your other multer setup (around line 20)
 
 const thumbnailStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, path.join(process.cwd(), 'uploads/thumbnails')),
@@ -1109,67 +1108,31 @@ router.post(
   }
 );
 
-// File: express_backend/routes/campaigns.js
 router.post(
   '/:id/pgc/assets',
   requireAuth,
   requireAdvertiser,
-  pgcAssetUpload.array('assets', 12), // Use pgcAssetUpload
+  ugcAssetUpload.array('assets', 12),
   async (req, res) => {
     try {
       const camp = await Campaign.findById(req.params.id);
       if (!camp) return res.status(404).json({ error: 'Campaign not found' });
       if (!camp.advertiser.equals(req.user._id)) return res.status(403).json({ error: 'Access denied' });
-      if (camp.kind !== 'pgc') return res.status(400).json({ error: 'Not a PGC campaign' });
+      if (camp.kind !== 'pgc') return res.status(400).json({ error: 'Not a UGC campaign' });
 
       const newAssets = (req.files || []).map(f => `/uploads/pgc-assets/${path.basename(f.path)}`);
-      camp.ugc = camp.ugc || {}; // Use ugc, not pgc
-      camp.ugc.assets = [...(camp.ugc.assets || []), ...newAssets];
+      camp.pgc = camp.pgc || {};
+      camp.pgc.assets = [...(camp.pgc.assets || []), ...newAssets];
 
       await camp.save();
-      return res.json({ assets: camp.ugc.assets });
+      return res.json({ assets: camp.pgc.assets });
     } catch (err) {
       console.error('PGC assets upload error:', err);
-      // Clean up uploaded files on error
+      // cleanup uploaded files on error
       for (const f of (req.files || [])) {
         try { await fs.promises.unlink(f.path); } catch {}
       }
       return res.status(500).json({ error: 'Failed to upload assets' });
-    }
-  }
-);
-// File: express_backend/routes/campaigns.js
-router.delete(
-  '/:id/pgc/assets/:index',
-  requireAuth,
-  requireAdvertiser,
-  async (req, res) => {
-    try {
-      const idx = Number(req.params.index);
-      const camp = await Campaign.findById(req.params.id);
-      if (!camp) return res.status(404).json({ error: 'Campaign not found' });
-      if (!camp.advertiser.equals(req.user._id)) return res.status(403).json({ error: 'Access denied' });
-      if (camp.kind !== 'pgc') return res.status(400).json({ error: 'Not a PGC campaign' });
-
-      const assets = camp.ugc?.assets || [];
-      if (!(idx >= 0 && idx < assets.length)) {
-        return res.status(400).json({ error: 'Invalid asset index' });
-      }
-
-      const [removed] = assets.splice(idx, 1);
-      camp.ugc.assets = assets;
-      await camp.save();
-
-      // Delete file
-      if (removed) {
-        const abs = path.join(process.cwd(), removed);
-        try { await fs.promises.unlink(abs); } catch {}
-      }
-
-      return res.json({ assets });
-    } catch (err) {
-      console.error('PGC asset delete error:', err);
-      return res.status(500).json({ error: 'Failed to delete asset' });
     }
   }
 );
