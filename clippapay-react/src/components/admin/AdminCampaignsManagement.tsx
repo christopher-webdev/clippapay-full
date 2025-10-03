@@ -1,7 +1,7 @@
-// src/components/admin/CampaignsManagement.tsx
-import React, { useEffect, useState } from "react";
+// File: src/components/admin/CampaignsManagement.tsx
+import React, { useEffect, useState, ChangeEvent } from "react";
 import axios from "axios";
-import { HiSearch, HiTrash, HiPencil, HiEye, HiX } from "react-icons/hi";
+import { HiSearch, HiTrash, HiPencil, HiX } from "react-icons/hi";
 import Modal from "react-modal";
 
 const PAGE_SIZE = 100;
@@ -15,6 +15,13 @@ const platformLabels: Record<string, string> = {
   facebook: "Facebook",
   X: "X",
 };
+
+const categoryOptions = [
+  'Fashion', 'Science & Tech', 'Gaming', 'Food', 'Travel', 'TV/Movies & Entertainment',
+  'Sports', 'Education', 'Politics', 'Religion', 'Business & Investment', 'Health & Fitness',
+  'Lifestyle', 'News & Media', 'Real Estate', 'Pets & Animals', 'Agriculture',
+  'Music', 'Comedy', 'DIY & Crafts', 'Other',
+];
 
 interface CampaignRow {
   _id: string;
@@ -33,9 +40,18 @@ interface CampaignRow {
   countries?: string[];
   hashtags?: string[];
   directions?: string[];
+  cta_url?: string;
   createdAt: string;
   adWorkerStatus?: string;
   clippersCount?: number;
+  ugc?: {
+    brief?: string;
+    deliverables?: string[];
+    assets?: string[];
+    captionTemplate?: string;
+    usageRights?: string;
+    approvalCriteria?: string;
+  };
 }
 
 export default function CampaignsManagement() {
@@ -51,9 +67,19 @@ export default function CampaignsManagement() {
   const [editForm, setEditForm] = useState({
     title: '',
     platforms: [] as string[],
-    hashtags: [] as string[],
-    directions: [] as string[],
+    hashtags: '' as string,
+    directions: '' as string,
+    categories: [] as string[],
+    cta_url: '' as string,
+    brief: '' as string,
+    deliverables: '' as string,
+    captionTemplate: '' as string,
+    usageRights: '' as string,
+    approvalCriteria: '' as string,
   });
+  const [existingAssets, setExistingAssets] = useState<string[]>([]);
+  const [newAssets, setNewAssets] = useState<File[]>([]);
+  const [removedAssets, setRemovedAssets] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -77,17 +103,18 @@ export default function CampaignsManagement() {
 
   // Filter
   const filtered = campaigns.filter(c => {
-  if (search &&
-    !(
-      c.title?.toLowerCase().includes(search.toLowerCase()) ||
-      c.advertiser?.email?.toLowerCase().includes(search.toLowerCase()) ||
-      c.platforms.join(",").toLowerCase().includes(search.toLowerCase())
-    )
-  ) return false;
-  if (status && c.status !== status) return false;
-  if (platform && !c.platforms.includes(platform)) return false;
-  return true;
-});
+    if (
+      search &&
+      !(
+        c.title?.toLowerCase().includes(search.toLowerCase()) ||
+        c.advertiser?.email?.toLowerCase().includes(search.toLowerCase()) ||
+        c.platforms.join(",").toLowerCase().includes(search.toLowerCase())
+      )
+    ) return false;
+    if (status && c.status !== status) return false;
+    if (platform && !c.platforms.includes(platform)) return false;
+    return true;
+  });
 
   // Pagination
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
@@ -111,9 +138,19 @@ export default function CampaignsManagement() {
     setEditForm({
       title: campaign.title,
       platforms: campaign.platforms || [],
-      hashtags: campaign.hashtags || [],
-      directions: campaign.directions || [],
+      hashtags: campaign.hashtags?.join(', ') || '',
+      directions: campaign.directions?.join(', ') || '',
+      categories: campaign.categories || [],
+      cta_url: campaign.cta_url || '',
+      brief: campaign.ugc?.brief || '',
+      deliverables: campaign.ugc?.deliverables?.join(', ') || '',
+      captionTemplate: campaign.ugc?.captionTemplate || '',
+      usageRights: campaign.ugc?.usageRights || '',
+      approvalCriteria: campaign.ugc?.approvalCriteria || '',
     });
+    setExistingAssets(campaign.ugc?.assets || []);
+    setNewAssets([]);
+    setRemovedAssets([]);
     setIsEditModalOpen(true);
   };
 
@@ -124,12 +161,34 @@ export default function CampaignsManagement() {
       const options = e.target as HTMLSelectElement;
       const selectedPlatforms = Array.from(options.selectedOptions).map(opt => opt.value);
       setEditForm(prev => ({ ...prev, platforms: selectedPlatforms }));
-    } else if (name === 'hashtags' || name === 'directions') {
-      const arrayValue = value.split(',').map(item => item.trim()).filter(item => item);
-      setEditForm(prev => ({ ...prev, [name]: arrayValue }));
+    } else if (name === 'hashtags' || name === 'directions' || name === 'deliverables') {
+      setEditForm(prev => ({ ...prev, [name]: value }));
+    } else if (name === 'brief' || name === 'captionTemplate' || name === 'usageRights' || name === 'approvalCriteria' || name === 'cta_url') {
+      setEditForm(prev => ({ ...prev, [name]: value }));
     } else {
       setEditForm(prev => ({ ...prev, [name]: value }));
     }
+  };
+
+  const handleCategoryChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const { value, checked } = e.target;
+    setEditForm(prev => ({
+      ...prev,
+      categories: checked
+        ? [...prev.categories, value]
+        : prev.categories.filter(c => c !== value),
+    }));
+  };
+
+  const handleNewAssets = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setNewAssets(prev => [...prev, ...files]);
+    e.target.value = '';
+  };
+
+  const handleRemoveAsset = (asset: string) => {
+    setExistingAssets(prev => prev.filter(a => a !== asset));
+    setRemovedAssets(prev => [...prev, asset]);
   };
 
   const handleEditSubmit = async (e: React.FormEvent) => {
@@ -138,8 +197,33 @@ export default function CampaignsManagement() {
 
     setErr(null);
     setIsSubmitting(true);
+
     try {
-      const res = await axios.put(`/admin-campaigns/admin-campaigns/${currentCampaign._id}`, editForm);
+      const fd = new FormData();
+      fd.append('title', editForm.title);
+      fd.append('platforms', JSON.stringify(editForm.platforms));
+      fd.append('hashtags', editForm.hashtags);
+      fd.append('directions', editForm.directions);
+      fd.append('categories', JSON.stringify(editForm.categories));
+      fd.append('cta_url', editForm.cta_url);
+      fd.append('brief', editForm.brief);
+      fd.append('deliverables', editForm.deliverables);
+      fd.append('captionTemplate', editForm.captionTemplate);
+      fd.append('usageRights', editForm.usageRights);
+      fd.append('approvalCriteria', editForm.approvalCriteria);
+
+      // Append new assets
+      newAssets.forEach(file => fd.append('assets', file));
+
+      // Append removed assets (if any)
+      if (removedAssets.length > 0) {
+        fd.append('removeAssets', JSON.stringify(removedAssets));
+      }
+
+      const res = await axios.put(`/admin-campaigns/admin-campaigns/${currentCampaign._id}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
       setCampaigns(prev =>
         prev.map(c =>
           c._id === currentCampaign._id ? { ...c, ...res.data } : c
@@ -268,7 +352,6 @@ export default function CampaignsManagement() {
                   </td>
                   <td className="px-2 py-3 align-top text-xs">
                     <div className="flex flex-col gap-2">
-                     
                       <button
                         title="Edit"
                         className="flex items-center gap-1 px-2 py-1 rounded bg-indigo-100 hover:bg-indigo-200 text-indigo-800"
@@ -300,7 +383,7 @@ export default function CampaignsManagement() {
         overlayClassName="modal-overlay"
         contentLabel="Edit Campaign"
       >
-        <div className="bg-grey rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-bold">Edit Campaign</h2>
             <button
@@ -334,7 +417,6 @@ export default function CampaignsManagement() {
                     value={editForm.platforms}
                     onChange={handleEditFormChange}
                     className="w-full rounded border px-3 py-2"
-                    required
                   >
                     {Object.entries(platformLabels).map(([value, label]) => (
                       <option key={value} value={value}>{label}</option>
@@ -344,11 +426,42 @@ export default function CampaignsManagement() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Categories</label>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {categoryOptions.map(category => (
+                      <label key={category} className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          name="categories"
+                          value={category}
+                          checked={editForm.categories.includes(category)}
+                          onChange={handleCategoryChange}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-sm text-gray-700">{category}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">CTA URL (optional)</label>
+                  <input
+                    type="text"
+                    name="cta_url"
+                    value={editForm.cta_url}
+                    onChange={handleEditFormChange}
+                    className="w-full rounded border px-3 py-2"
+                    placeholder="e.g. https://example.com"
+                  />
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Hashtags</label>
                   <input
                     type="text"
                     name="hashtags"
-                    value={editForm.hashtags.join(', ')}
+                    value={editForm.hashtags}
                     onChange={handleEditFormChange}
                     className="w-full rounded border px-3 py-2"
                     placeholder="comma, separated, list"
@@ -359,12 +472,130 @@ export default function CampaignsManagement() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Directions</label>
                   <textarea
                     name="directions"
-                    value={editForm.directions.join(', ')}
+                    value={editForm.directions}
                     onChange={handleEditFormChange}
                     className="w-full rounded border px-3 py-2"
                     placeholder="comma, separated, list"
                     rows={3}
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Creative Brief</label>
+                  <textarea
+                    name="brief"
+                    value={editForm.brief}
+                    onChange={handleEditFormChange}
+                    className="w-full rounded border px-3 py-2"
+                    rows={5}
+                    placeholder="e.g. Create a 30-60 second video..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Deliverables</label>
+                  <textarea
+                    name="deliverables"
+                    value={editForm.deliverables}
+                    onChange={handleEditFormChange}
+                    className="w-full rounded border px-3 py-2"
+                    rows={3}
+                    placeholder="comma, separated, list"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Caption Template</label>
+                  <textarea
+                    name="captionTemplate"
+                    value={editForm.captionTemplate}
+                    onChange={handleEditFormChange}
+                    className="w-full rounded border px-3 py-2"
+                    rows={3}
+                    placeholder="e.g. Check out [product]!..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Usage Rights</label>
+                  <textarea
+                    name="usageRights"
+                    value={editForm.usageRights}
+                    onChange={handleEditFormChange}
+                    className="w-full rounded border px-3 py-2"
+                    rows={3}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Approval Criteria</label>
+                  <textarea
+                    name="approvalCriteria"
+                    value={editForm.approvalCriteria}
+                    onChange={handleEditFormChange}
+                    className="w-full rounded border px-3 py-2"
+                    rows={4}
+                    placeholder="e.g. Must be 1080p..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Reference Assets</label>
+                  <div className="border-2 border-dashed border-gray-300 rounded-md px-6 py-4 text-center">
+                    <div className="space-y-1 text-sm text-gray-600">
+                      <div className="flex text-sm text-gray-600">
+                        <label
+                          htmlFor="new-asset-upload"
+                          className="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500"
+                        >
+                          <span>Upload new files</span>
+                          <input
+                            id="new-asset-upload"
+                            name="new-asset-upload"
+                            type="file"
+                            multiple
+                            onChange={handleNewAssets}
+                            className="sr-only"
+                          />
+                        </label>
+                        <p className="pl-1">or drag and drop</p>
+                      </div>
+                      <p className="text-xs text-gray-500">Images, videos, PDFs up to 200MB</p>
+                    </div>
+                  </div>
+
+                  {existingAssets.length > 0 && (
+                    <div className="mt-4">
+                      <h3 className="text-sm font-medium text-gray-700">Existing Assets</h3>
+                      <ul className="space-y-2 mt-2">
+                        {existingAssets.map((asset, index) => (
+                          <li key={index} className="flex items-center justify-between bg-gray-50 rounded-md px-3 py-2">
+                            <span className="text-sm text-gray-900 truncate max-w-xs">{asset.split('/').pop()}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveAsset(asset)}
+                              className="text-red-600 hover:text-red-500 text-sm"
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {newAssets.length > 0 && (
+                    <div className="mt-4">
+                      <h3 className="text-sm font-medium text-gray-700">New Assets to Upload</h3>
+                      <ul className="space-y-2 mt-2">
+                        {newAssets.map((file, index) => (
+                          <li key={index} className="flex items-center justify-between bg-gray-50 rounded-md px-3 py-2">
+                            <span className="text-sm text-gray-900 truncate max-w-xs">{file.name}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </div>
 
