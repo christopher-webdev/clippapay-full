@@ -7,6 +7,7 @@ import HomePage from './pages/HomePage';
 import SignupPage from './pages/SignupPage';
 import LoginPage from './pages/LoginPage';
 import AboutPage from './pages/AboutPage';
+import Campaign from './pages/Campaign.tsx'
 
 // Advertiser
 import AdvertiserDashboardLayout from './components/advertiser/DashboardLayout';
@@ -36,20 +37,20 @@ import ClipperHowTo from './components/clipper/ClipperHowTo';
 import ClipperPGCSubmissions from './components/clipper/ClipperPGCSubmissions.tsx';
 
 // Admin
-import AdminLayout from './components/admin/AdminLayout.tsx';
-import AdminOverview from './components/admin/AdminOverview.tsx';
-import AdminUsersManagement from './components/admin/AdminUsersManagement.tsx';
-import AdminCampaignsManagement from './components/admin/AdminCampaignsManagement.tsx';
-import AdminSubmissionsManagement from './components/admin/AdminSubmissionsManagement.tsx';
-import AdminWalletsManagement from './components/admin/AdminWalletsManagement.tsx';
-import AdminWithdrawalsManagement from './components/admin/AdminWithdrawalsManagement.tsx';
-import AdminSettings from './components/admin/AdminSettings.tsx';
-import AdminCorrectApproval from './components/admin/AdminCorrectApproval.tsx';
+import AdminLayout from './components/advertiser/admin/AdminLayout.tsx';
+import AdminOverview from './components/advertiser/admin/AdminOverview.tsx';
+import AdminUsersManagement from './components/advertiser/admin/AdminUsersManagement.tsx';
+import AdminCampaignsManagement from './components/advertiser/admin/AdminCampaignsManagement.tsx';
+import AdminSubmissionsManagement from './components/advertiser/admin/AdminSubmissionsManagement.tsx';
+import AdminWalletsManagement from './components/advertiser/admin/AdminWalletsManagement.tsx';
+import AdminWithdrawalsManagement from './components/advertiser/admin/AdminWithdrawalsManagement.tsx';
+import AdminSettings from './components/advertiser/admin/AdminSettings.tsx';
+import AdminCorrectApproval from './components/advertiser/admin/AdminCorrectApproval.tsx';
 // import AdminSubscriptions   from './components/admin/AdminSubscriptions';
 
-import AdminSignup from '@/components/admin/AdminSignup';
-import AdminLogin from '@/components/admin/AdminLogin';
-import AdminWorkerCreation from '@/components/admin/AdminWorkerCreation';
+import AdminSignup from '@/components/advertiser/admin/AdminSignup.tsx';
+import AdminLogin from '@/components/advertiser/admin/AdminLogin.tsx';
+import AdminWorkerCreation from '@/components/advertiser/admin/AdminWorkerCreation.tsx';
 
 //Ad-Workers
 import AdWorkerDashboard from './components/AdWorkerDashboard';
@@ -71,6 +72,7 @@ export default function App() {
       <Route path="signup" element={<SignupPage />} />
       <Route path="login" element={<LoginPage />} />
       <Route path="about" element={<AboutPage />} />
+      <Route path="campaign" element={<Campaign />} />
       <Route path="terms" element={<Terms />} />
       <Route path="privacy" element={<Privacy />} />
       <Route path="contact" element={<Contact />} />

@@ -2,14 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-
-/* Add this to your global CSS file */
+/* Modal styles */
 .modal {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: white;
+  background: hsl(var(--card));
   padding: 20px;
   border-radius: 8px;
   outline: none;
@@ -26,6 +25,7 @@
   z-index: 1000;
 }
 
+/* Card component */
 .card {
   @apply relative rounded-2xl shadow-md overflow-hidden transition-transform transform;
 }
@@ -46,7 +46,7 @@
 
 /* User-related gradients */
 .card[data-variant="teal"] {
-  @apply bg-gradient-to-br from-teal-400 to-teal-600 text-white;
+  @apply bg-gradient-to-br from-teal-500 to-teal-600 text-white;
 }
 
 .card[data-variant="blue"] {
@@ -54,11 +54,11 @@
 }
 
 .card[data-variant="indigo"] {
-  @apply bg-gradient-to-br from-indigo-400 to-indigo-600 text-white;
+  @apply bg-gradient-to-br from-indigo-500 to-indigo-600 text-white;
 }
 
 .card[data-variant="violet"] {
-  @apply bg-gradient-to-br from-violet-400 to-violet-600 text-white;
+  @apply bg-gradient-to-br from-violet-500 to-violet-600 text-white;
 }
 
 /* Campaign-related gradients */
@@ -84,7 +84,7 @@
 
 /* Financial gradients */
 .card[data-variant="amber"] {
-  @apply bg-gradient-to-br from-amber-400 to-amber-600 text-white;
+  @apply bg-gradient-to-br from-amber-400 to-amber-500 text-gray-900;
 }
 
 .card[data-variant="orange"] {
@@ -96,52 +96,167 @@
 }
 
 .card[data-variant="emerald"] {
-  @apply bg-gradient-to-br from-emerald-400 to-emerald-600 text-white;
+  @apply bg-gradient-to-br from-emerald-500 to-emerald-600 text-white;
 }
 
 .card[data-variant="cyan"] {
   @apply bg-gradient-to-br from-cyan-400 to-cyan-600 text-white;
 }
 
-/* Indigo - Primary action */
-.card[data-variant="indigo"] {
-  @apply bg-gradient-to-br from-indigo-500 to-indigo-600 text-white;
-}
-
-/* Teal - Professional metric */
-.card[data-variant="teal"] {
-  @apply bg-gradient-to-br from-teal-500 to-teal-600 text-white;
-}
-
-/* Amber - Attention needed */
-.card[data-variant="amber"] {
-  @apply bg-gradient-to-br from-amber-400 to-amber-500 text-gray-900;
-  /* Dark text for better contrast */
-}
-
-/* Sky - Current activity */
 .card[data-variant="sky"] {
   @apply bg-gradient-to-br from-sky-400 to-sky-500 text-white;
 }
 
-/* Emerald - Financial stability */
-.card[data-variant="emerald"] {
-  @apply bg-gradient-to-br from-emerald-500 to-emerald-600 text-white;
-}
-
-/* Violet - Premium achievement */
-.card[data-variant="violet"] {
-  @apply bg-gradient-to-br from-violet-500 to-violet-600 text-white;
-}
-
+/* Scrollbar hiding */
 .hide-scrollbar {
   -ms-overflow-style: none;
-  /* IE and Edge */
   scrollbar-width: none;
-  /* Firefox */
 }
 
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
-  /* Chrome, Safari, Opera */
+}
+
+@layer base {
+  :root {
+    --background: 220 20% 97%;
+    --foreground: 225 15% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 225 15% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 225 15% 15%;
+    --primary: 234 89% 25%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 234 89% 45%;
+    --secondary: 280 60% 50%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 15% 92%;
+    --muted-foreground: 225 10% 45%;
+    --accent: 25 95% 53%;
+    --accent-foreground: 0 0% 100%;
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 15% 88%;
+    --input: 220 15% 88%;
+    --ring: 234 89% 25%;
+    --radius: 0.75rem;
+    --gradient-primary: linear-gradient(135deg, hsl(234 89% 25%) 0%, hsl(280 60% 50%) 100%);
+    --gradient-hero: linear-gradient(180deg, hsl(234 89% 25%) 0%, hsl(234 89% 15%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(280 60% 50%) 0%, hsl(25 95% 53%) 100%);
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%) 0%, hsl(220 20% 98%) 100%);
+    --shadow-elegant: 0 20px 60px -15px hsl(234 89% 25% / 0.3);
+    --shadow-soft: 0 4px 20px hsl(234 89% 25% / 0.1);
+    --shadow-glow: 0 0 40px hsl(234 89% 45% / 0.4);
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .dark {
+    --background: 225 25% 8%;
+    --foreground: 220 20% 95%;
+    --card: 225 20% 12%;
+    --card-foreground: 220 20% 95%;
+    --popover: 225 20% 12%;
+    --popover-foreground: 220 20% 95%;
+    --primary: 234 89% 55%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 234 89% 65%;
+    --secondary: 280 60% 60%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 225 15% 18%;
+    --muted-foreground: 220 15% 60%;
+    --accent: 25 95% 58%;
+    --accent-foreground: 0 0% 100%;
+    --success: 142 76% 45%;
+    --success-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 225 15% 20%;
+    --input: 225 15% 20%;
+    --ring: 234 89% 55%;
+    --gradient-primary: linear-gradient(135deg, hsl(234 89% 35%) 0%, hsl(280 60% 50%) 100%);
+    --gradient-hero: linear-gradient(180deg, hsl(234 89% 15%) 0%, hsl(234 89% 8%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(280 60% 50%) 0%, hsl(25 95% 53%) 100%);
+    --gradient-card: linear-gradient(145deg, hsl(225 20% 14%) 0%, hsl(225 20% 10%) 100%);
+    --shadow-elegant: 0 20px 60px -15px hsl(0 0% 0% / 0.5);
+    --shadow-soft: 0 4px 20px hsl(0 0% 0% / 0.3);
+    --shadow-glow: 0 0 40px hsl(234 89% 55% / 0.3);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer utilities {
+  .gradient-primary {
+    background: var(--gradient-primary);
+  }
+  
+  .gradient-hero {
+    background: var(--gradient-hero);
+  }
+  
+  .gradient-accent {
+    background: var(--gradient-accent);
+  }
+  
+  .gradient-card {
+    background: var(--gradient-card);
+  }
+  
+  .shadow-elegant {
+    box-shadow: var(--shadow-elegant);
+  }
+  
+  .shadow-soft {
+    box-shadow: var(--shadow-soft);
+  }
+  
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+  
+  .transition-smooth {
+    transition: var(--transition-smooth);
+  }
+
+  .animate-fade-in-up {
+    animation: fadeInUp 0.6s ease-out forwards;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.5s ease-out forwards;
+  }
+
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes scaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
 }
