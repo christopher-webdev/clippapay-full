@@ -8,30 +8,200 @@ import {
   HiExternalLink,
   HiPhotograph,
   HiVideoCamera,
-  HiPencilAlt
+  HiPencilAlt,
+  HiPlus,
+  HiX,
+  HiChatAlt2
 } from 'react-icons/hi';
 
-const ALL_PLATFORMS = ['TikTok', 'Instagram', 'YouTube', 'Facebook', 'X'];
-const PLATFORM_LABELS = {
-  TikTok: 'TikTok',
-  Instagram: 'Instagram',
-  YouTube: 'YouTube',
-  Facebook: 'Facebook',
-  X: 'X',
-  tiktok: 'TikTok',
-  instagram: 'Instagram',
-  youtube: 'YouTube',
-  facebook: 'Facebook',
-  x: 'X',
+
+const ALL_PLATFORMS = ['TikTok', 'Instagram', 'YouTube', 'Facebook', 'X', 'WhatsApp'];
+const PLATFORM_LABELS: Record<string, string> = {
+  TikTok: 'TikTok', Instagram: 'Instagram', YouTube: 'YouTube',
+  Facebook: 'Facebook', X: 'X', WhatsApp: 'WhatsApp'
 };
 
-const HTTPS_ONLY_REGEX = /^https:\/\/.+/i;
+const HTTPS_REGEX = /^https:\/\//i;
 
-// ======= CONFIG =======
-const PAGE_SIZE = 7;
-const HIDE_COMPLETED_CARDS = false;
-const SHOW_COMPLETED_BADGE = true;
-// ======================
+// Reusable Proof Form Modal
+const ProofForm: React.FC<{
+  campaign: any;
+  submission: any;
+  existingProof?: any;
+  mode: 'new' | 'add' | 'edit';
+  onSuccess: () => void;
+  onCancel: () => void;
+}> = ({ campaign, submission, existingProof, mode, onSuccess, onCancel }) => {
+  const [platform, setPlatform] = useState(existingProof?.platform || '');
+  const [submissionUrl, setSubmissionUrl] = useState(existingProof?.submissionUrl || '');
+  const [views, setViews] = useState(existingProof?.views?.toString() || '');
+  const [proofVideo, setProofVideo] = useState<File | null>(null);
+  const [proofImage, setProofImage] = useState<File | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const isWhatsApp = platform === 'WhatsApp';
+  const campaignPlatforms = campaign?.platforms || ALL_PLATFORMS;
+  const alreadyUsed = submission?.proofs?.map((p: any) => p.platform) || [];
+
+  const availablePlatforms = campaignPlatforms.filter((p: string) =>
+    p === platform || !alreadyUsed.includes(p)
+  );
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    if (!platform) return setError('Please select a platform');
+    if (!isWhatsApp && !submissionUrl.trim()) return setError('Link is required');
+    if (!isWhatsApp && !HTTPS_REGEX.test(submissionUrl.trim())) {
+      return setError('Link must start with https://');
+    }
+    if (isWhatsApp && !proofImage && !proofVideo && mode !== 'edit') {
+      return setError('WhatsApp requires at least one screenshot or video');
+    }
+
+    const formData = new FormData();
+    formData.append('platform', platform);
+    if (submissionUrl.trim()) formData.append('submissionUrl', submissionUrl.trim());
+    if (views) formData.append('views', views);
+    if (proofVideo) formData.append('proofVideo', proofVideo);
+    if (proofImage) formData.append('proofImage', proofImage);
+
+    try {
+      const token = localStorage.getItem('token');
+      if (mode === 'edit' && existingProof) {
+        await axios.patch(
+          `/clippers/${submission._id}/update-proof/${existingProof._id}`,
+          formData,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      } else {
+        await axios.post(
+          `/clippers/${campaign._id}/submit-clip`,
+          formData,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      }
+      onSuccess();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Submission failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-screen overflow-y-auto">
+        <div className="flex justify-between items-center mb-5">
+          <h3 className="text-2xl font-bold text-gray-800">
+            {mode === 'edit' ? 'Update Proof' : 'Submit Proof'}
+          </h3>
+          <button onClick={onCancel} className="text-gray-500 hover:text-gray-700">
+            <HiX className="w-7 h-7" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Platform</label>
+            <select
+              value={platform}
+              onChange={(e) => setPlatform(e.target.value)}
+              disabled={mode === 'edit'}
+              className="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-800"
+              required
+            >
+              <option value="">Select platform</option>
+              {availablePlatforms.map(p => (
+                <option key={p} value={p}>{PLATFORM_LABELS[p]}</option>
+              ))}
+            </select>
+          </div>
+
+          {platform && !isWhatsApp && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Post Link <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="url"
+                value={submissionUrl}
+                onChange={(e) => setSubmissionUrl(e.target.value)}
+                placeholder="https://tiktok.com/@user/video/123456789"
+                className="w-full border border-gray-300 rounded-lg px-4 py-3"
+                required
+              />
+            </div>
+          )}
+
+          {platform && isWhatsApp && (
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900">
+              <strong>WhatsApp Status:</strong> No link needed. Upload a screenshot or short video of your status showing the post.
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Current Views</label>
+            <input
+              type="number"
+              min="0"
+              value={views}
+              onChange={(e) => setViews(e.target.value)}
+              placeholder="e.g. 1250"
+              className="w-full border border-gray-300 rounded-lg px-4 py-3"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Video Proof {isWhatsApp ? '(Recommended)' : '(Optional)'}
+            </label>
+            <input
+              type="file"
+              accept="video/*"
+              onChange={(e) => setProofVideo(e.target.files?.[0] || null)}
+              className="w-full text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Image Proof {isWhatsApp ? '(Required if no video)' : '(Optional)'}
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setProofImage(e.target.files?.[0] || null)}
+              className="w-full text-sm"
+            />
+          </div>
+
+          {error && <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
+
+          <div className="flex gap-4 pt-4">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 py-3 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold disabled:opacity-70"
+            >
+              {loading ? 'Submitting...' : (mode === 'edit' ? 'Update Proof' : 'Submit Proof')}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
 
 export default function ClipperSubmissions() {
   const location = useLocation();
@@ -39,503 +209,199 @@ export default function ClipperSubmissions() {
   const params = new URLSearchParams(location.search);
   const campaignId = params.get('campaign');
 
-  const [page, setPage] = useState(1);
-  const [campaign, setCampaign] = useState<any>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
+  const [campaign, setCampaign] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  const [formVisible, setFormVisible] = useState(false);
-  const [formMode, setFormMode] = useState<'new' | 'edit'>('new');
-  const [formSubmissionId, setFormSubmissionId] = useState<string | null>(null);
-  const [formProofId, setFormProofId] = useState<string | null>(null);
-  const [platformBlocks, setPlatformBlocks] = useState<any[]>([
-    { platform: '', submissionUrl: '', views: '', proofVideo: null, proofImage: null }
-  ]);
-  const [formError, setFormError] = useState('');
-  const [formLoading, setFormLoading] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState<'new' | 'add' | 'edit'>('new');
+  const [currentSubmission, setCurrentSubmission] = useState<any>(null);
+  const [currentProof, setCurrentProof] = useState<any>(null);
 
-  // ——— Helpers: robust campaign completion & stats ———
-  const getCampaignObj = (submission: any) =>
-    (typeof submission.campaign === 'object' && submission.campaign) ? submission.campaign : null;
 
-  const getCampaignStatus = (submission: any) => {
-    const camp = getCampaignObj(submission);
-    return camp?.status ?? submission.campaignStatus ?? submission.status;
-  };
-
-  const getViewsLeft = (submission: any): number | undefined => {
-    const camp = getCampaignObj(submission);
-    return (typeof camp?.views_left === 'number')
-      ? camp.views_left
-      : (typeof submission.campaignViewsLeft === 'number' ? submission.campaignViewsLeft : undefined);
-  };
-
-  const getViewsPurchased = (submission: any): number | undefined => {
-    const camp = getCampaignObj(submission);
-    return (typeof camp?.views_purchased === 'number')
-      ? camp.views_purchased
-      : (typeof submission.campaignViewsPurchased === 'number' ? submission.campaignViewsPurchased : undefined);
-  };
-
-  const isCampaignCompleted = (submission: any) => {
-    const status = getCampaignStatus(submission);
-    const viewsLeft = getViewsLeft(submission);
-    if (status === 'completed') return true;
-    if (typeof viewsLeft === 'number' && viewsLeft <= 0) return true;
-    return false;
-  };
-
-  const getCompletionRatio = (submission: any): number | undefined => {
-    const total = getViewsPurchased(submission);
-    const left = getViewsLeft(submission);
-    if (typeof total === 'number' && typeof left === 'number' && total > 0) {
-      return (total - left) / total;
-    }
-    return undefined;
-  };
-
-  const fmt = (n?: number) => (typeof n === 'number' ? n.toLocaleString() : '—');
-
-  // Fetch campaign info if needed
+  // Smooth scroll to top + fresh feel every time
   useEffect(() => {
-    async function fetchCampaign() {
-      if (!campaignId) return setCampaign(null);
-      try {
-        const token = localStorage.getItem('token');
-        const res = await axios.get(`/clippers/${campaignId}`, { headers: { Authorization: `Bearer ${token}` } });
-        setCampaign(res.data);
-      } catch {
-        setCampaign(null);
-      }
-    }
-    fetchCampaign();
-  }, [campaignId]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [location.pathname]);
 
-  // Fetch submissions
-  async function loadSubmissions() {
+  const loadSubmissions = async () => {
     setLoading(true);
     try {
       const res = await axios.get('/clippers/my-ugc-submissions', {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       setSubmissions(res.data || []);
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
-  }
+  };
+
   useEffect(() => { loadSubmissions(); }, []);
 
-  // Auto-show form
+  // Auto-open logic (unchanged)
+  // useEffect(() => {
+  //   if (!campaignId) return;
+  //   axios.get(`/clippers/${campaignId}`, {
+  //     headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+  //   }).then(res => setCampaign(res.data)).catch(() => {});
+  // }, [campaignId]);
+
   useEffect(() => {
-    if (!campaignId || !campaign) return;
-    const existing = submissions.find(s => s.campaign?._id === campaignId || s.campaign === campaignId);
-    if (!existing) {
-      setPlatformBlocks(
-        (campaign.platforms || []).map((p: string) => ({
-          platform: p,
-          submissionUrl: '',
-          views: '',
-          proofVideo: null,
-          proofImage: null
-        }))
-      );
-      setFormMode('new');
-      setFormSubmissionId(null);
-      setFormProofId(null);
-      setFormVisible(true);
-    } else if (existing && existing.proofs?.length > 0) {
-      const firstProof = existing.proofs[0];
-      setPlatformBlocks([{
-        platform: firstProof.platform,
-        submissionUrl: firstProof.submissionUrl || '',
-        views: firstProof.views || '',
-        proofVideo: null,
-        proofImage: null
-      }]);
-      setFormMode('edit');
-      setFormSubmissionId(existing._id);
-      setFormProofId(firstProof._id);
-      setFormVisible(true);
+    if (!campaignId || submissions.length === 0) return;
+
+    const hasSubmission = submissions.some(s => 
+      String(s.campaign?._id || s.campaign) === campaignId
+    );
+
+    if (!hasSubmission) {
+      axios.get(`/clippers/${campaignId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      }).then(res => {
+        setCampaign(res.data);
+        setFormMode('new');
+        setCurrentSubmission(null);
+        setCurrentProof(null);
+        setFormOpen(true);
+      }).catch(() => setFormOpen(false));
+    } else {
+      navigate('/dashboard/clipper/submissions', { replace: true });
     }
-  }, [campaignId, campaign, submissions]);
+  }, [campaignId, submissions, navigate]);
 
-  // Build visible list based on completion setting
-  const visibleSubmissions = HIDE_COMPLETED_CARDS
-    ? submissions.filter(s => !isCampaignCompleted(s))
-    : submissions.slice();
-
-  // Pagination computed off visible list
-  const totalPages = Math.max(1, Math.ceil(visibleSubmissions.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pagedSubmissions = visibleSubmissions.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
-  );
-
-  // Reset page to 1 when the visible list changes (prevents empty pages)
-  useEffect(() => {
-    setPage(1);
-  }, [submissions.length, HIDE_COMPLETED_CARDS]); // eslint-disable-line
-
-  const platformOptions = (excludeIdx: number) =>
-    (campaign?.platforms || ALL_PLATFORMS).filter(
-      (p: string) => !platformBlocks.map((b, i) => (i !== excludeIdx ? b.platform : null)).includes(p)
-    );
-
-  const addPlatformBlock = () =>
-    setPlatformBlocks(blocks => [
-      ...blocks,
-      { platform: '', submissionUrl: '', views: '', proofVideo: null, proofImage: null }
-    ]);
-
-  const removePlatformBlock = (idx: number) =>
-    setPlatformBlocks(blocks =>
-      blocks.length === 1 ? blocks : blocks.filter((_, i) => i !== idx)
-    );
-
-  const handleBlockChange = (idx: number, field: string, value: any) => {
-    setPlatformBlocks(blocks =>
-      blocks.map((b, i) => (i === idx ? { ...b, [field]: value } : b))
-    );
+  const openAddProof = (sub: any) => {
+    setCurrentSubmission(sub);
+    setCurrentProof(null);
+    setFormMode('add');
+    setFormOpen(true);
   };
 
-  // Update form
-  async function openProofFormEdit(sub: any, proof: any) {
-    let camp = sub.campaign;
-    if (!camp || typeof camp === 'string') {
-      try {
-        const token = localStorage.getItem('token');
-        const res = await axios.get(`/clippers/${typeof camp === 'string' ? camp : proof.campaign || sub.campaign}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        camp = res.data;
-      } catch {
-        camp = { _id: typeof sub.campaign === 'string' ? sub.campaign : undefined, title: 'Untitled campaign' };
-      }
-    }
-    setCampaign(camp);
-    setPlatformBlocks([{
-      platform: proof.platform,
-      submissionUrl: proof.submissionUrl || '',
-      views: proof.views || '',
-      proofVideo: null,
-      proofImage: null
-    }]);
+  const openEditProof = (sub: any, proof: any) => {
+    setCurrentSubmission(sub);
+    setCurrentProof(proof);
     setFormMode('edit');
-    setFormSubmissionId(sub._id);
-    setFormProofId(proof._id);
-    setFormVisible(true);
-  }
-
-  const handleFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError('');
-    setFormLoading(true);
-    try {
-      const token = localStorage.getItem('token');
-
-      // Validate each block BEFORE sending
-      for (let i = 0; i < platformBlocks.length; i++) {
-        const b = platformBlocks[i];
-        if (!b.platform || !b.submissionUrl) {
-          setFormError('Platform and Submission Link are required.');
-          setFormLoading(false);
-          return;
-        }
-        const url = String(b.submissionUrl).trim();
-        if (!HTTPS_ONLY_REGEX.test(url)) {
-          setFormError(`Invalid link in block ${i + 1}. Use full link starting with "https://".`);
-          setFormLoading(false);
-          return;
-        }
-
-        const fd = new FormData();
-        fd.append('platform', b.platform);
-        fd.append('submissionUrl', url);
-        fd.append('views', b.views || '0');
-        if (b.proofVideo) fd.append('proofVideo', b.proofVideo);
-        if (b.proofImage) fd.append('proofImage', b.proofImage);
-
-        if (formMode === 'edit' && formSubmissionId && formProofId) {
-          await axios.patch(`/clippers/${formSubmissionId}/update-proof/${formProofId}`, fd, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-        } else {
-          await axios.post(`/clippers/${campaignId}/submit-clip`, fd, {
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' }
-          });
-        }
-      }
-
-      setFormVisible(false);
-      setFormError('');
-      setPlatformBlocks([{ platform: '', submissionUrl: '', views: '', proofVideo: null, proofImage: null }]);
-      await loadSubmissions();
-      if (campaignId) navigate('/dashboard/clipper/submissions', { replace: true });
-    } catch (err: any) {
-      setFormError(err.response?.data?.error || 'Could not submit.');
-    } finally {
-      setFormLoading(false);
-    }
+    setFormOpen(true);
   };
 
-  const closeForm = () => {
-    setFormVisible(false);
-    setFormError('');
-    setPlatformBlocks([{ platform: '', submissionUrl: '', views: '', proofVideo: null, proofImage: null }]);
-    if (campaignId) navigate('/dashboard/clipper/submissions', { replace: true });
-  };
+  const getProofForPlatform = (sub: any, platform: string) =>
+    sub.proofs?.find((p: any) => p.platform === platform);
 
-  // —— UI helpers ——
-  const ProgressBar = ({ ratio }: { ratio: number }) => (
-    <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-      <div
-        className="h-2 bg-indigo-600 rounded-full transition-all duration-500"
-        style={{ width: `${Math.max(0, Math.min(100, Math.round(ratio * 100)))}%` }}
-      />
-    </div>
-  );
-
-  const StatPill = ({ label, value }: { label: string, value: React.ReactNode }) => (
-    <div className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-full text-xs text-gray-700">
-      <span className="font-semibold">{value}</span> <span className="text-gray-500">· {label}</span>
-    </div>
-  );
+  const fmt = (n?: number) => n?.toLocaleString() || '—';
 
   return (
-    <div className="max-w-4xl mx-auto px-2 py-7">
-      <h2 className="text-2xl font-bold mb-4">My Submissions</h2>
-
-      {formVisible && (
-        <section className="mb-7 bg-white shadow rounded-xl p-5 border border-gray-200">
-          <form onSubmit={handleFormSubmit}>
-            {campaign && campaign.title && (
-              <h1 className="text-2xl font-bold mb-3">{campaign.title}</h1>
-            )}
-            {platformBlocks.map((block, idx) => (
-              <div key={idx} className="border rounded-lg p-4 mb-5 bg-gray-50">
-                <div className="flex items-center gap-2 mb-2">
-                  <select
-                    value={block.platform}
-                    onChange={e => handleBlockChange(idx, 'platform', e.target.value)}
-                    required
-                    disabled={formMode === 'edit'}
-                    className="border p-2 rounded flex-1"
-                  >
-                    <option value="">Select Platform</option>
-                    {platformOptions(idx).map((p: string) => (
-                      <option key={p} value={p}>{PLATFORM_LABELS[p] || p}</option>
-                    ))}
-                  </select>
-                  {platformBlocks.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removePlatformBlock(idx)}
-                      className="text-red-500 text-xs ml-2"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-                <input
-                  value={block.submissionUrl}
-                  onChange={e => handleBlockChange(idx, 'submissionUrl', e.target.value)}
-                  onBlur={e => handleBlockChange(idx, 'submissionUrl', e.target.value.trim())}
-                  placeholder='Submission Link (must start with "https://")'
-                  className="border p-2 rounded mb-2 block w-full"
-                  required
-                />
-                <input
-                  value={block.views}
-                  onChange={e => handleBlockChange(idx, 'views', e.target.value)}
-                  placeholder="Views (optional)"
-                  type="number"
-                  min={0}
-                  className="border p-2 rounded mb-2 block w-full"
-                />
-                <div className="mb-2">
-                  <label className="text-xs block mb-1">Upload Video Proof (optional)</label>
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={e => handleBlockChange(idx, 'proofVideo', e.target.files?.[0] || null)}
-                  />
-                </div>
-                <div className="mb-2">
-                  <label className="text-xs block mb-1">Upload Image Proof (optional)</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleBlockChange(idx, 'proofImage', e.target.files?.[0] || null)}
-                  />
-                </div>
-              </div>
-            ))}
-            {formMode === 'new' && (
-              <button
-                type="button"
-                onClick={addPlatformBlock}
-                disabled={platformBlocks.length === (campaign?.platforms?.length || ALL_PLATFORMS.length)}
-                className="bg-blue-100 text-blue-800 rounded px-3 py-1 mb-4 mr-2"
-              >
-                + Add Platform
-              </button>
-            )}
-            {formError && <div className="text-red-500 mb-3">{formError}</div>}
-            <div className="flex gap-2">
-              <button type="button" className="bg-gray-300 text-gray-700 rounded px-5 py-2" onClick={closeForm}>Cancel</button>
-              <button type="submit" className="bg-green-600 text-white rounded px-5 py-2">
-                {formLoading ? 'Submitting…' : (formMode === 'edit' ? 'Update' : 'Submit')}
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
+    <div className="max-w-5xl mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold mb-8 text-gray-800">My Submissions</h1>
 
       {loading ? (
-        <div className="text-center py-10 text-gray-500">Loading...</div>
+        <div className="text-center py-20 text-gray-500">Loading your submissions...</div>
+      ) : submissions.length === 0 ? (
+        <div className="text-center py-20 text-gray-600 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-300">
+          <p className="text-lg">You haven't joined any campaigns yet.</p>
+          <p className="text-sm mt-2">Go to campaigns and click "Start Promoting" to begin!</p>
+        </div>
       ) : (
-        <>
-          {pagedSubmissions.length === 0 ? (
-            <div className="text-center text-gray-500 py-12">No submissions yet.</div>
-          ) : (
-            pagedSubmissions.map(sub => {
-              const campaignObj = getCampaignObj(sub);
-              const campTitle = campaignObj?.title ?? 'Untitled campaign';
-              const completed = isCampaignCompleted(sub);
+        <div className="space-y-8">
+          {submissions.map(sub => {
+            const camp = sub.campaign || {};
+            const whatsappProof = getProofForPlatform(sub, 'WhatsApp');
 
-              const totalViews = getViewsPurchased(sub);
-              const viewsLeft = getViewsLeft(sub);
-              const ratio = getCompletionRatio(sub); // 0..1 or undefined
-              const pct = typeof ratio === 'number' ? Math.round(ratio * 100) : undefined;
-
-              return (
-                <div
-                  key={sub._id}
-                  className="bg-white p-5 rounded-2xl shadow border border-gray-200 mb-5 overflow-hidden"
-                >
-                  {/* Card header */}
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="text-base sm:text-lg font-semibold text-gray-900">{campTitle}</div>
-                      {completed && !HIDE_COMPLETED_CARDS && (
-                        <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200 text-[11px] font-medium">
-                          Campaign Completed
-                        </span>
-                      )}
-                    </div>
-
-                    {/* top-right stats */}
-                    <div className="flex flex-wrap gap-2">
-                      <StatPill label="Total" value={fmt(totalViews)} />
-                      <StatPill label="Views left" value={fmt(viewsLeft)} />
-                      {typeof pct === 'number' && <StatPill label="Done" value={`${pct}%`} />}
-                    </div>
+            return (
+              <div key={sub._id} className="bg-white rounded-2xl shadow-xl border border-gray-200 p-7">
+                <div className="flex justify-between items-start mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">{camp.title || 'Untitled Campaign'}</h2>
+                    <p className="text-sm text-gray-500 mt-1">Started {new Date(sub.createdAt).toLocaleDateString()}</p>
                   </div>
-
-                  {/* Progress bar */}
-                  {typeof ratio === 'number' && (
-                    <div className="mb-4">
-                      <ProgressBar ratio={ratio} />
-                      <div className="mt-1 text-[11px] text-gray-500">
-                        {fmt(totalViews && viewsLeft ? totalViews - viewsLeft : undefined)} / {fmt(totalViews)} verified
-                      </div>
-                    </div>
+                  {!whatsappProof && (
+                    <span className="bg-red-100 text-red-700 px-4 py-2 rounded-full text-sm font-bold">
+                      WhatsApp Required
+                    </span>
                   )}
-
-                  {/* Proofs grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {(sub.proofs || []).map((proof: any, i: number) => {
-                      const status = proof.status;
-                      const statusIcon =
-                        status === 'approved' ? <HiCheckCircle className="text-green-500 w-5 h-5" /> :
-                          status === 'pending' ? <HiExclamationCircle className="text-yellow-400 w-5 h-5" /> :
-                            <HiExclamationCircle className="text-red-400 w-5 h-5" />;
-
-                      return (
-                        <div key={i} className="border rounded-xl p-3 bg-gray-50">
-                          <div className="flex items-center gap-2 mb-1">
-                            {statusIcon}
-                            <span className="font-bold text-sm">{status?.toUpperCase?.()}</span>
-                          </div>
-
-                          <div className="flex items-center gap-2 text-xs mb-1">
-                            {proof.proofVideo && <span className="flex items-center gap-1 text-blue-700"><HiVideoCamera className="w-4 h-4" /> Video</span>}
-                            {proof.proofImage && <span className="flex items-center gap-1 text-blue-700"><HiPhotograph className="w-4 h-4" /> Image</span>}
-                            {proof.submissionUrl && (
-                              <a href={proof.submissionUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-700 underline">
-                                <HiExternalLink className="w-4 h-4" /> Link
-                              </a>
-                            )}
-                          </div>
-
-                          <div className="text-xs text-gray-700 mb-1">
-                            Reported Views: <b>{proof.views?.toLocaleString?.() ?? 0}</b>
-                          </div>
-                          {proof.verifiedViews && (
-                            <div className="text-xs text-green-700">
-                              Verified: <b>{proof.verifiedViews.toLocaleString()}</b>
-                            </div>
-                          )}
-                          {proof.rewardAmount && (
-                            <div className="text-xs text-green-700">
-                              Reward: ₦{proof.rewardAmount.toLocaleString()}
-                            </div>
-                          )}
-                          {proof.adminNote && (
-                            <div className={`mt-2 p-2 rounded text-xs ${status === 'rejected' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
-                              <b>Admin note:</b> {proof.adminNote}
-                            </div>
-                          )}
-
-                          {/* Update button or Completed badge */}
-                          {!completed ? (
-                            <button
-                              onClick={() => openProofFormEdit(sub, proof)}
-                              className="flex items-center mt-3 px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-xs font-semibold shadow-sm"
-                            >
-                              <HiPencilAlt className="w-4 h-4 mr-1" /> Update
-                            </button>
-                          ) : (
-                            !HIDE_COMPLETED_CARDS && SHOW_COMPLETED_BADGE && (
-                              <div
-                                className="mt-3 inline-flex items-center px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 text-xs font-semibold select-none cursor-not-allowed"
-                                title="Campaign Completed"
-                                aria-disabled="true"
-                              >
-                                Campaign Completed
-                              </div>
-                            )
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
-              );
-            })
-          )}
 
-          {totalPages > 1 && (
-            <div className="flex justify-center items-center gap-3 mt-8">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1 rounded bg-gray-200 text-gray-700 disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <span className="px-2 text-sm">Page {currentPage} of {totalPages}</span>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage === totalPages}
-                className="px-3 py-1 rounded bg-gray-200 text-gray-700 disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-5">
+                  {ALL_PLATFORMS.map(pl => {
+                    const proof = getProofForPlatform(sub, pl);
+
+                    return (
+                      <div
+                        key={pl}
+                        className={`border-2 rounded-xl p-5 text-center transition-all relative ${
+                          proof ? 'border-green-400 bg-green-50' : 'border-gray-300 bg-gray-50'
+                        }`}
+                      >
+                        <div className="font-bold text-lg text-gray-800 mb-2">{pl}</div>
+
+                        {proof ? (
+                          <>
+                            {proof.status === 'approved' && <HiCheckCircle className="w-10 h-10 text-green-600 mx-auto mb-2" />}
+                            {proof.status === 'pending' && <HiExclamationCircle className="w-10 h-10 text-yellow-500 mx-auto mb-2" />}
+                            {proof.status === 'rejected' && <HiExclamationCircle className="w-10 h-10 text-red-500 mx-auto mb-2" />}
+
+                            <div className="text-xs space-y-1">
+                              <div>Views: <strong>{fmt(proof.verifiedViews || proof.views)}</strong></div>
+                              {proof.rewardAmount > 0 && (
+                                <div className="text-green-600 font-bold">₦{proof.rewardAmount}</div>
+                              )}
+                            </div>
+
+                            {/* ADMIN NOTE — Beautifully Styled */}
+                            {proof.adminNote && (
+                              <div className={`mt-3 p-3 rounded-lg text-xs font-medium flex items-start gap-2 ${
+                                proof.status === 'rejected'
+                                  ? 'bg-red-50 text-red-800 border border-red-200'
+                                  : 'bg-blue-50 text-blue-800 border border-blue-200'
+                              }`}>
+                                <HiChatAlt2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                <div>
+                                  <strong>Admin:</strong> {proof.adminNote}
+                                </div>
+                              </div>
+                            )}
+
+                            <button
+                              onClick={() => openEditProof(sub, proof)}
+                              className="mt-4 text-xs bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700"
+                            >
+                              Update
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => openAddProof(sub)}
+                            className="mt-3 text-sm bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-indigo-700"
+                          >
+                            <HiPlus className="inline mr-1" /> Submit
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Modal */}
+      {formOpen && (
+        <ProofForm
+          campaign={campaign || currentSubmission?.campaign}
+          submission={currentSubmission}
+          existingProof={currentProof}
+          mode={formMode}
+          onSuccess={() => {
+            setFormOpen(false);
+            loadSubmissions();
+            navigate('/dashboard/clipper/submissions', { replace: true });
+          }}
+          onCancel={() => {
+            setFormOpen(false);
+            navigate('/dashboard/clipper/submissions', { replace: true });
+          }}
+        />
       )}
     </div>
   );

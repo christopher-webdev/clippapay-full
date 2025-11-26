@@ -191,13 +191,13 @@ router.post('/:submissionId/proof/:proofId/approve', requireAdminAuth, async (re
     res.status(500).json({ error: 'Approval failed' });
   }
 });
-
-// Approve a specific proof by proof _id
+// POST /api/admin/submissions/:submissionId/proof/:proofId/verify
 router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req, res) => {
   try {
     const { verifiedViews, note } = req.body;
-    if (!Number.isFinite(verifiedViews) || verifiedViews < 0)
+    if (!Number.isFinite(verifiedViews) || verifiedViews < 0) {
       return res.status(400).json({ error: 'Invalid view count' });
+    }
 
     const { submissionId, proofId } = req.params;
 
@@ -207,88 +207,292 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
     const proof = sub.proofs.id(proofId);
     if (!proof) return res.status(404).json({ error: 'Proof not found' });
 
-    const lastVerified = proof.verifiedViews || 0;
-    const newVerified = Number(verifiedViews);
-    if (newVerified < lastVerified)
-      return res.status(400).json({ error: "Submitted view count can't be less than last approved" });
-
-    const deltaViews = newVerified - lastVerified;
-    if (deltaViews <= 0)
-      return res.status(400).json({ error: "No new views to approve" });
-
     const campaign = await Campaign.findById(sub.campaign._id).populate('advertiser');
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
-    // >>> Use kind-aware CPMs
-    const { kind: campaignKind, clipper: CLIPPER_CPM, platform: PLATFORM_CPM } = getCPMsForCampaign(campaign);
+    const { clipper: CLIPPER_CPM, platform: PLATFORM_CPM } = getCPMsForCampaign(campaign);
 
-    let advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id }) ||
-      await Wallet.create({ user: campaign.advertiser._id, balance: 0, escrowLocked: 0 });
+    // Wallets
+    const advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id }) ||
+      await Wallet.create({ user: campaign.advertiser._id });
 
-    let clipperWallet = await Wallet.findOne({ user: sub.clipper._id }) ||
-      await Wallet.create({ user: sub.clipper._id, balance: 0, escrowLocked: 0 });
+    const clipperWallet = await Wallet.findOne({ user: sub.clipper._id }) ||
+      await Wallet.create({ user: sub.clipper._id });
 
-    let platformUser = await User.findOne({ role: 'platform' }) ||
-      await User.create({ role: 'platform', email: 'platform@clippapay.com', passwordHash: 'PLATFORM_USER_DOES_NOT_LOGIN', isSuperAdmin: false, company: 'ClippaPay Platform' });
+    const platformUser = await User.findOne({ role: 'platform' }) ||
+      await User.create({
+        role: 'platform',
+        email: 'platform@clippapay.com',
+        passwordHash: 'NO_LOGIN',
+        company: 'ClippaPay Platform'
+      });
 
-    let platformWallet = await Wallet.findOne({ user: platformUser._id }) ||
-      await Wallet.create({ user: platformUser._id, balance: 0, escrowLocked: 0 });
+    const platformWallet = await Wallet.findOne({ user: platformUser._id }) ||
+      await Wallet.create({ user: platformUser._id });
 
-    // Calculate payouts for deltaViews using kind-aware CPMs
-    const payoutClipper = (deltaViews * CLIPPER_CPM) / 1000;
-    const payoutPlatform = (deltaViews * PLATFORM_CPM) / 1000;
-    const totalDeduct = payoutClipper + payoutPlatform;
+    // VIEW DELTAS
+    const lastVerified = proof.verifiedViews || 0;
+    const newVerified = Number(verifiedViews);
+    const deltaViews = newVerified - lastVerified;
 
-    if (advertiserWallet.escrowLocked < totalDeduct)
-      return res.status(400).json({ error: 'Insufficient escrow balance' });
+    let payoutClipper = 0;
+    let payoutPlatform = 0;
+    let totalDeduct = 0;
+    let viewsToDeduct = 0;
+    let fixedPayoutApplied = false;
 
-    // Update proof
+    // ------------------------------------------------------------
+    // UGC LOGIC (Version-Safe)
+    // ------------------------------------------------------------
+
+    const ugcVersion = campaign.ugcVersion || 1;    // default = old behavior
+    const isUGC = campaign.kind === 'ugc';
+    const isOldUGC = isUGC && ugcVersion === 1;
+    const isNewUGC = isUGC && ugcVersion >= 2;
+
+    // ============================================================
+    // OLD UGC → ₦2,000 per proof (original behavior)
+    // ============================================================
+    if (isOldUGC && !proof.fixedPayoutGiven) {
+
+      // ensure clipper slot available
+      if (campaign.approvedClipperCount >= campaign.clipperSlots) {
+        return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+      }
+
+      // PAY FIXED CLIPPER RATE
+      payoutClipper = campaign.fixedClipperPayout;        // ₦2000
+      payoutPlatform = campaign.platformFeePerClipper;   // ₦500
+      fixedPayoutApplied = true;
+
+      if (newVerified > 0) {
+        payoutClipper += (newVerified * CLIPPER_CPM) / 1000;
+        payoutPlatform += (newVerified * PLATFORM_CPM) / 1000;
+        viewsToDeduct = newVerified;
+      }
+
+      totalDeduct = payoutClipper + payoutPlatform;
+
+      proof.fixedPayoutGiven = true;
+      campaign.approvedClipperCount += 1;
+    }
+
+    // ============================================================
+    // NEW UGC → ONE-TIME ₦2,000 PER CAMPAIGN
+    // ============================================================
+    else if (isNewUGC && !sub.firstPayoutGiven) {
+
+      if (campaign.approvedClipperCount >= campaign.clipperSlots) {
+        return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+      }
+
+      // One-time fixed payout per clipper per campaign
+      payoutClipper = campaign.fixedClipperPayout;       // 2000
+      payoutPlatform = campaign.platformFeePerClipper;   // 500
+      fixedPayoutApplied = true;
+
+      // also pay any initial views
+      if (newVerified > 0) {
+        payoutClipper += (newVerified * CLIPPER_CPM) / 1000;
+        payoutPlatform += (newVerified * PLATFORM_CPM) / 1000;
+        viewsToDeduct = newVerified;
+      }
+
+      totalDeduct = payoutClipper + payoutPlatform;
+
+      // NEW BEHAVIOR: used only once per campaign per clipper
+      sub.firstPayoutGiven = true;
+      campaign.approvedClipperCount += 1;
+    }
+
+    // ============================================================
+    // NORMAL CAMPAIGNS + UGC SUBSEQUENT VERIFICATIONS
+    // ============================================================
+    else if (deltaViews > 0) {
+
+      payoutClipper = (deltaViews * CLIPPER_CPM) / 1000;
+      payoutPlatform = (deltaViews * PLATFORM_CPM) / 1000;
+
+      viewsToDeduct = deltaViews;
+      totalDeduct = payoutClipper + payoutPlatform;
+    }
+
+    else {
+      return res.status(400).json({ error: 'No new views to approve' });
+    }
+
+    // ------------------------------------------------------------
+    // ESCROW CHECK
+    // ------------------------------------------------------------
+    if (advertiserWallet.escrowLocked < totalDeduct) {
+      return res.status(400).json({
+        error: 'Insufficient escrow funds',
+        required: totalDeduct,
+        available: advertiserWallet.escrowLocked
+      });
+    }
+
+    // ------------------------------------------------------------
+    // UPDATE PROOF + SUBMISSION
+    // ------------------------------------------------------------
     proof.status = 'approved';
     proof.verifiedViews = newVerified;
-    proof.rewardAmount = (proof.rewardAmount || 0) + payoutClipper;
-    proof.adminNote = note || "";
+    proof.rewardAmount += payoutClipper;
+    proof.adminNote = note || '';
     proof.lastVerified = new Date();
+
+    sub.markModified('proofs');
     await sub.save();
 
-    // Update campaign/budgets
-    await campaign.deductViewsAndBudget(deltaViews);
+    // ------------------------------------------------------------
+    // UPDATE CAMPAIGN
+    // ------------------------------------------------------------
+    if (viewsToDeduct > 0) {
+      await campaign.deductViewsAndBudget(viewsToDeduct);
+    }
 
-    // Wallet moves
+    // NEW UGC fixed deduction from budget
+    if (fixedPayoutApplied && isNewUGC) {
+      campaign.budget_remaining -=
+        (campaign.fixedClipperPayout + campaign.platformFeePerClipper);
+    }
+
+    await campaign.save();
+
+    // ------------------------------------------------------------
+    // WALLET TRANSFERS
+    // ------------------------------------------------------------
     advertiserWallet.escrowLocked -= totalDeduct;
-    await advertiserWallet.save();
-
     clipperWallet.balance += payoutClipper;
-    await clipperWallet.save();
-
     platformWallet.balance += payoutPlatform;
-    await platformWallet.save();
 
-    // <<< Include kind + CPMs so the UI can show UGC math
+    await Promise.all([
+      advertiserWallet.save(),
+      clipperWallet.save(),
+      platformWallet.save()
+    ]);
+
+    // ------------------------------------------------------------
+    // RESPONSE
+    // ------------------------------------------------------------
     res.json({
-      submissionId: sub._id,
-      proofId: proof._id,
-      clipperName: sub.clipper.name || sub.clipper.email,
-      campaignTitle: campaign.title,
-      platform: proof.platform,
-      proofUrl: proof.proofVideo || proof.proofImage || proof.submissionUrl,
-      reportedViews: proof.views,
-      verifiedViews: proof.verifiedViews,
-      status: proof.status,
-      rewardAmount: proof.rewardAmount,
-      adminNote: proof.adminNote,
-      campaignStatus: campaign.status,
+      message: 'Proof verified successfully',
+      fixedPayoutApplied,
+      campaignKind: campaign.kind,
+      ugcVersion,
+      payoutClipper: payoutClipper.toFixed(2),
+      payoutPlatform: payoutPlatform.toFixed(2),
+      totalDeducted: totalDeduct.toFixed(2),
+      viewsDeducted: viewsToDeduct,
+      approvedClipperCount: campaign.approvedClipperCount,
+      clipperSlots: campaign.clipperSlots,
       campaignViewsLeft: campaign.views_left,
-
-      // NEW FIELDS:
-      campaignKind,
-      clipperCPM: CLIPPER_CPM,
-      platformCPM: PLATFORM_CPM
+      campaignBudgetRemaining: campaign.budget_remaining
     });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Verification failed' });
+    console.error('Verification error:', err);
+    res.status(500).json({ error: 'Verification failed', details: err.message });
   }
 });
+
+// // Approve a specific proof by proof _id
+// router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req, res) => {
+//   try {
+//     const { verifiedViews, note } = req.body;
+//     if (!Number.isFinite(verifiedViews) || verifiedViews < 0)
+//       return res.status(400).json({ error: 'Invalid view count' });
+
+//     const { submissionId, proofId } = req.params;
+
+//     const sub = await ClipSubmission.findById(submissionId).populate('campaign clipper');
+//     if (!sub) return res.status(404).json({ error: 'Submission not found' });
+
+//     const proof = sub.proofs.id(proofId);
+//     if (!proof) return res.status(404).json({ error: 'Proof not found' });
+
+//     const lastVerified = proof.verifiedViews || 0;
+//     const newVerified = Number(verifiedViews);
+//     if (newVerified < lastVerified)
+//       return res.status(400).json({ error: "Submitted view count can't be less than last approved" });
+
+//     const deltaViews = newVerified - lastVerified;
+//     if (deltaViews <= 0)
+//       return res.status(400).json({ error: "No new views to approve" });
+
+//     const campaign = await Campaign.findById(sub.campaign._id).populate('advertiser');
+//     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+//     // >>> Use kind-aware CPMs
+//     const { kind: campaignKind, clipper: CLIPPER_CPM, platform: PLATFORM_CPM } = getCPMsForCampaign(campaign);
+
+//     let advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id }) ||
+//       await Wallet.create({ user: campaign.advertiser._id, balance: 0, escrowLocked: 0 });
+
+//     let clipperWallet = await Wallet.findOne({ user: sub.clipper._id }) ||
+//       await Wallet.create({ user: sub.clipper._id, balance: 0, escrowLocked: 0 });
+
+//     let platformUser = await User.findOne({ role: 'platform' }) ||
+//       await User.create({ role: 'platform', email: 'platform@clippapay.com', passwordHash: 'PLATFORM_USER_DOES_NOT_LOGIN', isSuperAdmin: false, company: 'ClippaPay Platform' });
+
+//     let platformWallet = await Wallet.findOne({ user: platformUser._id }) ||
+//       await Wallet.create({ user: platformUser._id, balance: 0, escrowLocked: 0 });
+
+//     // Calculate payouts for deltaViews using kind-aware CPMs
+//     const payoutClipper = (deltaViews * CLIPPER_CPM) / 1000;
+//     const payoutPlatform = (deltaViews * PLATFORM_CPM) / 1000;
+//     const totalDeduct = payoutClipper + payoutPlatform;
+
+//     if (advertiserWallet.escrowLocked < totalDeduct)
+//       return res.status(400).json({ error: 'Insufficient escrow balance' });
+
+//     // Update proof
+//     proof.status = 'approved';
+//     proof.verifiedViews = newVerified;
+//     proof.rewardAmount = (proof.rewardAmount || 0) + payoutClipper;
+//     proof.adminNote = note || "";
+//     proof.lastVerified = new Date();
+//     await sub.save();
+
+//     // Update campaign/budgets
+//     await campaign.deductViewsAndBudget(deltaViews);
+
+//     // Wallet moves
+//     advertiserWallet.escrowLocked -= totalDeduct;
+//     await advertiserWallet.save();
+
+//     clipperWallet.balance += payoutClipper;
+//     await clipperWallet.save();
+
+//     platformWallet.balance += payoutPlatform;
+//     await platformWallet.save();
+
+//     // <<< Include kind + CPMs so the UI can show UGC math
+//     res.json({
+//       submissionId: sub._id,
+//       proofId: proof._id,
+//       clipperName: sub.clipper.name || sub.clipper.email,
+//       campaignTitle: campaign.title,
+//       platform: proof.platform,
+//       proofUrl: proof.proofVideo || proof.proofImage || proof.submissionUrl,
+//       reportedViews: proof.views,
+//       verifiedViews: proof.verifiedViews,
+//       status: proof.status,
+//       rewardAmount: proof.rewardAmount,
+//       adminNote: proof.adminNote,
+//       campaignStatus: campaign.status,
+//       campaignViewsLeft: campaign.views_left,
+
+//       // NEW FIELDS:
+//       campaignKind,
+//       clipperCPM: CLIPPER_CPM,
+//       platformCPM: PLATFORM_CPM
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Verification failed' });
+//   }
+// });
 
 
 // Reject a specific proof by proof _id

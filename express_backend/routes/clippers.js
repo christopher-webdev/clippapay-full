@@ -37,63 +37,137 @@ const proofStorage = multer.diskStorage({
 const uploadProof = multer({ storage: proofStorage });
 const getRelPath = f => f ? `/uploads/proofs/${path.basename(f.path)}` : undefined;
 
-
 router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res) => {
   try {
     const { submissionUrl, views, platform } = req.body;
     const clipper = req.user._id;
     const campaignId = req.params.id;
-    const proofVideo = getRelPath(req.files?.find(f => f.fieldname === 'proofVideo'));
-    const proofImage = getRelPath(req.files?.find(f => f.fieldname === 'proofImage'));
+
+    const proofVideoFile = req.files?.find(f => f.fieldname === 'proofVideo');
+    const proofImageFile = req.files?.find(f => f.fieldname === 'proofImage');
+    const proofVideo = proofVideoFile ? getRelPath(proofVideoFile) : null;
+    const proofImage = proofImageFile ? getRelPath(proofImageFile) : null;
     const viewsNum = Number(views) || 0;
 
-    // Fetch campaign to check type
+    // 1. Fetch campaign
     const campaign = await Campaign.findById(campaignId);
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found.' });
-    }
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+
     const isPgc = campaign.kind === 'pgc';
+    const isUgcOrNormal = ['ugc', 'normal'].includes(campaign.kind);
 
-    // --- GLOBAL DUPLICATE CHECK ---
-    if (submissionUrl && !isPgc) {
-      const existingProof = await ClipSubmission.findOne({
-        'proofs.submissionUrl': submissionUrl
-      });
-      if (existingProof) {
-        return res.status(409).json({ error: 'This proof link has already been submitted by another clipper.' });
-      }
-    }
-
-    // Find by campaign+clipper
-    let isNewClipper = false;
     let submission = await ClipSubmission.findOne({ campaign: campaignId, clipper });
+    let isNewClipper = !submission;
 
     if (!submission) {
-      isNewClipper = true;
-      submission = new ClipSubmission({ campaign: campaignId, clipper, proofs: [] });
+      submission = new ClipSubmission({
+        campaign: campaignId,
+        clipper,
+        proofs: []
+      });
     }
 
-    // Require proof based on campaign type
+    // ———————— PGC CAMPAIGN LOGIC ————————
     if (isPgc) {
+      // PGC: Only one proof allowed (usually), video required
       if (!proofVideo) {
-        return res.status(400).json({ error: 'Proof video file is required for PGC campaigns.' });
+        return res.status(400).json({ error: 'Video proof is required for PGC campaigns.' });
+      }
+
+      // Optional: Prevent multiple submissions
+      if (submission.proofs.length > 0) {
+        return res.status(409).json({ error: 'You have already submitted a video for this PGC campaign.' });
+      }
+
+      submission.proofs = []; // Clear old if any (safety)
+      submission.proofs.push({
+        platform: 'Video', // or null
+        submissionUrl: null,
+        views: 0,
+        proofVideo,
+        proofImage,
+        status: 'pending',
+        adminNote: null,
+        verifiedViews: 0,
+        rewardAmount: 0
+      });
+
+      await submission.save();
+
+      if (isNewClipper) {
+        await Campaign.findByIdAndUpdate(campaignId, { $inc: { clippersCount: 1 } });
+      }
+
+      return res.status(201).json({ message: 'PGC video submitted successfully!', submission });
+    }
+
+    // ———————— UGC & NORMAL CAMPAIGN LOGIC ————————
+    if (!isUgcOrNormal) {
+      return res.status(400).json({ error: 'Invalid campaign type.' });
+    }
+
+    // Platform is required for UGC/Normal
+    if (!platform) return res.status(400).json({ error: 'Platform is required.' });
+
+    const platformLower = platform.trim().toLowerCase();
+    const allowedPlatforms = (campaign.platforms || []).map(p => p.toLowerCase());
+    const isAllowed = allowedPlatforms.includes(platformLower) || allowedPlatforms.length === 0;
+
+    if (!isAllowed) {
+      return res.status(400).json({ 
+        error: `Platform "${platform.trim()}" is not allowed.` 
+      });
+    }
+
+    const isWhatsApp = platformLower === 'whatsapp';
+
+    // WhatsApp rules
+    if (isWhatsApp) {
+      if (submissionUrl) {
+        return res.status(400).json({ error: 'WhatsApp submissions cannot include a link.' });
+      }
+      if (!proofVideo && !proofImage) {
+        return res.status(400).json({ error: 'WhatsApp requires screenshot or video proof.' });
       }
     } else {
-      if (!submissionUrl || !platform) {
-        return res.status(400).json({ error: 'Submission URL and platform are required for non-PGC campaigns.' });
+      // Non-WhatsApp: link required
+      if (!submissionUrl?.trim()) {
+        return res.status(400).json({ error: 'Post link is required.' });
+      }
+      if (!/^https:\/\//i.test(submissionUrl.trim())) {
+        return res.status(400).json({ error: 'Link must start with https://' });
+      }
+
+      // Duplicate link check
+      const existingLink = await ClipSubmission.findOne({
+        campaign: campaignId,
+        'proofs.submissionUrl': submissionUrl.trim(),
+        'proofs.platform': { $ne: 'WhatsApp' }
+      });
+      if (existingLink) {
+        return res.status(409).json({ error: 'This link was already submitted by another clipper.' });
       }
     }
 
-    // Add new proof
+    // Prevent same platform twice
+    const alreadyHasPlatform = submission.proofs.some(
+      p => p.platform?.toLowerCase() === platformLower
+    );
+    if (alreadyHasPlatform) {
+      return res.status(409).json({ 
+        error: `You already submitted for ${platform.trim()}. Use "Update" instead.` 
+      });
+    }
+
+    // Push new proof
     submission.proofs.push({
-      platform: isPgc ? (platform || null) : platform,
-      submissionUrl: isPgc ? (submissionUrl || null) : submissionUrl,
-      views: isPgc ? 0 : viewsNum,
+      platform: platform.trim(),
+      submissionUrl: isWhatsApp ? null : submissionUrl.trim(),
+      views: viewsNum,
       proofVideo,
       proofImage,
       status: 'pending',
       adminNote: null,
-      lastVerified: null,
       verifiedViews: 0,
       rewardAmount: 0
     });
@@ -104,10 +178,109 @@ router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res)
       await Campaign.findByIdAndUpdate(campaignId, { $inc: { clippersCount: 1 } });
     }
 
-    res.status(201).json(submission);
+    return res.status(201).json({ message: 'Proof submitted!', submission });
+
   } catch (err) {
-    console.error('Error in /submit-clip:', err);
-    res.status(500).json({ error: 'Could not submit.' });
+    console.error('Submit clip error:', err);
+    return res.status(500).json({ error: 'Submission failed.' });
+  }
+});
+// router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res) => {
+//   try {
+//     const { submissionUrl, views, platform } = req.body;
+//     const clipper = req.user._id;
+//     const campaignId = req.params.id;
+//     const proofVideo = getRelPath(req.files?.find(f => f.fieldname === 'proofVideo'));
+//     const proofImage = getRelPath(req.files?.find(f => f.fieldname === 'proofImage'));
+//     const viewsNum = Number(views) || 0;
+
+//     // Fetch campaign to check type
+//     const campaign = await Campaign.findById(campaignId);
+//     if (!campaign) {
+//       return res.status(404).json({ error: 'Campaign not found.' });
+//     }
+//     const isPgc = campaign.kind === 'pgc';
+
+//     // --- GLOBAL DUPLICATE CHECK ---
+//     if (submissionUrl && !isPgc) {
+//       const existingProof = await ClipSubmission.findOne({
+//         'proofs.submissionUrl': submissionUrl
+//       });
+//       if (existingProof) {
+//         return res.status(409).json({ error: 'This proof link has already been submitted by another clipper.' });
+//       }
+//     }
+
+//     // Find by campaign+clipper
+//     let isNewClipper = false;
+//     let submission = await ClipSubmission.findOne({ campaign: campaignId, clipper });
+
+//     if (!submission) {
+//       isNewClipper = true;
+//       submission = new ClipSubmission({ campaign: campaignId, clipper, proofs: [] });
+//     }
+
+//     // Require proof based on campaign type
+//     if (isPgc) {
+//       if (!proofVideo) {
+//         return res.status(400).json({ error: 'Proof video file is required for PGC campaigns.' });
+//       }
+//     } else {
+//       if (!submissionUrl || !platform) {
+//         return res.status(400).json({ error: 'Submission URL and platform are required for non-PGC campaigns.' });
+//       }
+//     }
+
+//     // Add new proof
+//     submission.proofs.push({
+//       platform: isPgc ? (platform || null) : platform,
+//       submissionUrl: isPgc ? (submissionUrl || null) : submissionUrl,
+//       views: isPgc ? 0 : viewsNum,
+//       proofVideo,
+//       proofImage,
+//       status: 'pending',
+//       adminNote: null,
+//       lastVerified: null,
+//       verifiedViews: 0,
+//       rewardAmount: 0
+//     });
+
+//     await submission.save();
+
+//     if (isNewClipper) {
+//       await Campaign.findByIdAndUpdate(campaignId, { $inc: { clippersCount: 1 } });
+//     }
+
+//     res.status(201).json(submission);
+//   } catch (err) {
+//     console.error('Error in /submit-clip:', err);
+//     res.status(500).json({ error: 'Could not submit.' });
+//   }
+// });
+// Generic join route — works for normal, ugc, pgc
+router.post('/:id/join', requireAuth, requireClipper, async (req, res) => {
+  try {
+    const campaignId = req.params.id;
+    const clipper = req.user._id;
+
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    if (campaign.status !== 'active') return res.status(403).json({ error: 'Campaign not active' });
+
+    let submission = await ClipSubmission.findOne({ campaign: campaignId, clipper });
+    if (!submission) {
+      submission = await ClipSubmission.create({
+        campaign: campaignId,
+        clipper,
+        proofs: []
+      });
+      await Campaign.findByIdAndUpdate(campaignId, { $inc: { clippersCount: 1 } });
+    }
+
+    res.json({ submission });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not join campaign' });
   }
 });
 
@@ -438,52 +611,6 @@ router.get('/my-pgc-submissions', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Could not fetch PGC submissions.' });
   }
 });
-/**
- * GET /api/campaigns/available
- * List campaigns clippers can join/post to, following all business rules.
- */
-// router.get('/available', requireAuth, async (req, res) => {
-//   try {
-//     const now = new Date();
-//     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-//     const campaigns = await Campaign.find({
-//       status: 'active',
-//       adWorkerStatus: 'ready',
-//       $or: [
-//         // Non-PGC: > 50% views remaining
-//         {
-//           kind: { $ne: 'pgc' },
-//           $expr: { $gt: ['$views_left', { $multiply: ['$views_purchased', 0.5] }] }
-//         },
-//         // Non-PGC: <= 50% views remaining but updated within last 24h
-//         {
-//           kind: { $ne: 'pgc' },
-//           $and: [
-//             { $expr: { $lte: ['$views_left', { $multiply: ['$views_purchased', 0.5] }] } },
-//             { updatedAt: { $gte: twentyFourHoursAgo } }
-//           ]
-//         },
-//         // PGC: approvedVideosCount < desiredVideos
-//         {
-//           kind: 'pgc',
-//           $expr: { $lt: ['$approvedVideosCount', '$desiredVideos'] }
-//         }
-//       ]
-//     })
-//       // Put PGC and UGC first, then newest
-//       .sort({ kind: -1, updatedAt: -1 })
-//       .select(
-//         '_id title thumb_url rate_per_1000 clipper_cpm payPerView budget_total budget_remaining views_purchased views_left desiredVideos approvedVideosCount categories hashtags status adWorkerStatus kind createdAt updatedAt'
-//       )
-//       .lean();
-
-//     res.json(campaigns);
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ error: 'Could not fetch available campaigns.' });
-//   }
-// });
 
 router.get('/available', requireAuth, async (req, res) => {
   try {

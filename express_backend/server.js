@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 
+
 // Import routes
 import authRouter from './routes/auth.js';
 import adminAuthRouter from './routes/adminAuth.js';
@@ -180,3 +181,4 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Uploads directory: ${uploadsRoot}`);
 
 });
+

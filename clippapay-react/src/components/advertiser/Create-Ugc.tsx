@@ -6,8 +6,13 @@ import { Upload, Loader2, Paperclip, X, Info, AlertCircle, Check } from 'lucide-
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-const UGC_ADVERTISER_CPM = 5000; // ₦ per 1000 views
-const UGC_COST_PER_VIEW = UGC_ADVERTISER_CPM / 1000; // ₦5 per view
+// CORRECTED PRICING MODEL
+const CLIPPER_FIXED_PAYOUT = 2000;     // ₦2,000 per approved clipper
+const PLATFORM_FEE_PER_CLIPPER = 500; // ₦500 per clipper
+const FIXED_COST_PER_CLIPPER = CLIPPER_FIXED_PAYOUT + PLATFORM_FEE_PER_CLIPPER; // ₦2,500
+const MIN_BUDGET = 10000;
+const VIEWS_CPM = 5000; // ₦5,000 per 1000 views
+const VIEWS_COST_PER_VIEW = VIEWS_CPM / 1000; // ₦5 per view
 
 const platformOptions = [
     { label: 'TikTok', value: 'tiktok' },
@@ -15,6 +20,7 @@ const platformOptions = [
     { label: 'YouTube', value: 'youtube' },
     { label: 'Facebook', value: 'facebook' },
     { label: 'X', value: 'X' },
+    { label: 'WhatsApp', value: 'whatsapp' },
 ];
 
 const categoryOptions = [
@@ -44,7 +50,7 @@ type UGCForm = {
 
 const initialForm: UGCForm = {
     title: '',
-    budget: 0,
+    budget: MIN_BUDGET,
     platforms: [],
     countries: [],
     hashtags: '',
@@ -69,16 +75,25 @@ export default function CreateUGCCampaignForm() {
     const [uploadingAssets, setUploadingAssets] = useState(false);
     const navigate = useNavigate();
 
+    // CORRECTED CALCULATION: Budget is split between clippers and views
+    const { clipperSlots, fixedCost, viewsBudget, estimatedViews } = useMemo(() => {
+        const clipperBudget = form.budget * 0.5;
+        const viewsBudget = form.budget * 0.5;
+
+        const slots = Math.floor(clipperBudget / FIXED_COST_PER_CLIPPER);
+        const fixedCost = slots * FIXED_COST_PER_CLIPPER;
+
+        const views = Math.floor(viewsBudget / (VIEWS_CPM / 1000));
+
+        return { clipperSlots: slots, fixedCost, viewsBudget, estimatedViews: views };
+    }, [form.budget]);
+
+
     useEffect(() => {
         axios.get<{ balance: number }>(`${API_BASE}/wallet`)
             .then(r => setWalletBalance(r.data.balance))
             .catch(() => { });
     }, []);
-
-    const estimatedViews = useMemo(
-        () => Math.floor((form.budget || 0) / UGC_COST_PER_VIEW),
-        [form.budget]
-    );
 
     function onChange(e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
         const t = e.target as HTMLInputElement;
@@ -98,7 +113,12 @@ export default function CreateUGCCampaignForm() {
             return;
         }
 
-        setForm(f => ({ ...f, [name]: value }));
+        // Handle number inputs
+        if (type === 'number') {
+            setForm(f => ({ ...f, [name]: Number(value) }));
+        } else {
+            setForm(f => ({ ...f, [name]: value }));
+        }
     }
 
     function onAssets(e: ChangeEvent<HTMLInputElement>) {
@@ -116,10 +136,11 @@ export default function CreateUGCCampaignForm() {
         setError(null); setMessage(null);
 
         if (!form.title) return setError('Please provide a campaign title.');
-        if (form.budget <= 0) return setError('Enter a valid budget.');
+        if (form.budget < MIN_BUDGET) return setError(`Minimum budget is ₦${MIN_BUDGET.toLocaleString()}`);
         if (form.budget > walletBalance) return setError('Budget exceeds wallet balance.');
         if (form.platforms.length === 0) return setError('Select at least one platform.');
-        if (estimatedViews < 1000) return setError('Minimum budget for UGC is ₦5,000 (1,000 views).');
+        if (clipperSlots < 1) return setError('Budget too low for even 1 clipper');
+        if (estimatedViews < 1000) return setError('Need at least ₦5,000 for views (1,000 views)');
 
         try {
             setLoading(true);
@@ -150,6 +171,12 @@ export default function CreateUGCCampaignForm() {
             fd.append('usageRights', form.usageRights);
             fd.append('draftRequired', String(form.draftRequired));
 
+            // Budget breakdown (new fields)
+            fd.append('clipperSlots', String(clipperSlots));
+            fd.append('fixedCost', String(fixedCost));
+            fd.append('viewsBudget', String(viewsBudget));
+            fd.append('estimatedViews', String(estimatedViews));
+
             // Assets (optional files)
             setUploadingAssets(true);
             form.assets.forEach(f => fd.append('assets', f));
@@ -170,34 +197,69 @@ export default function CreateUGCCampaignForm() {
 
     return (
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 {/* Header */}
-
                 <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 px-6 py-8 text-white">
                     <button
                         type="button"
-                        onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            onclose?.(); // if parent passed one
-                            navigate('/dashboard/advertiser/campaigns'); // uncomment only if you WANT to redirect
-                        }}
+                        onClick={() => navigate('/dashboard/advertiser/campaigns')}
                         aria-label="Close form"
                         className="relative top-3 right-3 z-10 rounded-md border bg-white/60 px-2 py-1 text-sm text-gray-600 hover:text-gray-900 hover:bg-white"
                     >
                         ✕
                     </button>
                     <div className="max-w-3xl mx-auto">
-
                         <h1 className="text-3xl font-bold">Create UGC Campaign</h1>
                         <div className="mt-3 flex items-start gap-2 bg-indigo-700/50 rounded-lg p-3">
                             <Info className="w-5 h-5 mt-0.5 flex-shrink-0" />
                             <p className="text-sm">
-                                UGC runs at <span className="font-semibold">₦5,000 per 1,000 views</span> (₦5 per view).
-                                Your campaign runs until your escrowed budget is used up.
+                                Each clipper gets <span className="font-semibold">₦2,000</span> on approval •
+                                Platform fee <span className="font-semibold">₦500</span> per clipper •
+                                Views cost <span className="font-semibold">₦5 per view</span>
                             </p>
                         </div>
+                    </div>
+                </div>
+
+                {/* Budget Breakdown Section */}
+                <div className="px-6 py-6 bg-gradient-to-r from-indigo-500 to-purple-600 text-white">
+                    <div className="max-w-3xl mx-auto">
+                        <h2 className="text-2xl font-bold mb-4">Budget Breakdown</h2>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                            <div className="bg-white/20 backdrop-blur rounded-lg p-4">
+                                <div className="text-3xl font-bold">{clipperSlots}</div>
+                                <div className="text-sm">Clipper Slots</div>
+                            </div>
+                            <div className="bg-white/20 backdrop-blur rounded-lg p-4">
+                                <div className="text-3xl font-bold">₦{fixedCost.toLocaleString()}</div>
+                                <div className="text-sm">Fixed Cost</div>
+                            </div>
+                            <div className="bg-white/20 backdrop-blur rounded-lg p-4">
+                                <div className="text-3xl font-bold">₦{viewsBudget.toLocaleString()}</div>
+                                <div className="text-sm">Views Budget</div>
+                            </div>
+                            <div className="bg-white/20 backdrop-blur rounded-lg p-4">
+                                <div className="text-3xl font-bold">{estimatedViews.toLocaleString()}</div>
+                                <div className="text-sm">Est. Views</div>
+                            </div>
+                        </div>
+
+                        {/* Budget Calculation Details */}
+                        <div className="mt-6 bg-white/10 rounded-lg p-4">
+                            <h3 className="font-semibold mb-2">Calculation Details:</h3>
+                            <div className="text-sm space-y-1">
+                                <div>• Total Budget: <strong>₦{form.budget.toLocaleString()}</strong></div>
+                                <div>• {clipperSlots} Clipper(s): <strong>{clipperSlots} × ₦2,500</strong> = ₦{fixedCost.toLocaleString()}</div>
+                                <div>• Clipper Payout: {clipperSlots} × ₦2,000 = <strong>₦{(clipperSlots * CLIPPER_FIXED_PAYOUT).toLocaleString()}</strong></div>
+                                <div>• Platform Fees: {clipperSlots} × ₦500 = <strong>₦{(clipperSlots * PLATFORM_FEE_PER_CLIPPER).toLocaleString()}</strong></div>
+                                <div>• Remaining for Views: <strong>₦{viewsBudget.toLocaleString()}</strong></div>
+                                <div>• Estimated Views: <strong>{estimatedViews.toLocaleString()} views</strong> at ₦5 per view</div>
+                            </div>
+                        </div>
+
+                        <p className="mt-4 text-sm opacity-90">
+                            Minimum budget: <strong>₦{MIN_BUDGET.toLocaleString()}</strong> (2 clippers + 1,000 views)
+                        </p>
                     </div>
                 </div>
 
@@ -209,7 +271,7 @@ export default function CreateUGCCampaignForm() {
                             <div>
                                 <h2 className="text-xl font-semibold text-gray-900">Campaign Basics</h2>
                                 <p className="mt-1 text-sm text-gray-500">
-                                    Give your campaign a clear title and budget. Estimated views are calculated from your budget at ₦5 per view.
+                                    Give your campaign a clear title and budget. The budget is split between clipper payouts and views.
                                 </p>
                             </div>
 
@@ -243,35 +305,50 @@ export default function CreateUGCCampaignForm() {
                                             type="number"
                                             name="budget"
                                             id="budget"
-                                            min={0}
+                                            min={MIN_BUDGET}
+                                            step="2500"
                                             value={form.budget}
                                             onChange={onChange}
                                             className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-3 px-4 border"
-                                            placeholder="5000"
+                                            placeholder="10000"
                                         />
                                     </div>
                                     <p className="mt-2 text-xs text-gray-500">
-                                        Wallet balance: ₦{walletBalance.toLocaleString()}
+                                        Wallet balance: ₦{walletBalance.toLocaleString()} • Minimum: ₦{MIN_BUDGET.toLocaleString()}
                                     </p>
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                                    <p className="text-xs font-medium text-gray-500">Estimated Views</p>
-                                    <p className="mt-1 text-xl font-semibold text-gray-900">{estimatedViews.toLocaleString()}</p>
-                                </div>
-                                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                                    <p className="text-xs font-medium text-gray-500">Cost per View</p>
-                                    <p className="mt-1 text-xl font-semibold text-gray-900">₦{UGC_COST_PER_VIEW}</p>
-                                </div>
-                                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                                    <p className="text-xs font-medium text-gray-500">Minimum Budget</p>
-                                    <p className="mt-1 text-xl font-semibold text-gray-900">₦5,000 for 1,000 views</p>
+                            {/* Quick Budget Examples */}
+                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                <h3 className="text-sm font-medium text-gray-700 mb-2">Budget Examples:</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                                    <div className="text-center p-2 bg-white rounded border">
+                                        <div className="font-semibold">₦10,000</div>
+                                        <div>2 clippers</div>
+                                        <div>1,000 views</div>
+                                    </div>
+                                    <div className="text-center p-2 bg-white rounded border">
+                                        <div className="font-semibold">₦15,000</div>
+                                        <div>3 clippers</div>
+                                        <div>1,500 views</div>
+                                    </div>
+                                    <div className="text-center p-2 bg-white rounded border">
+                                        <div className="font-semibold">₦20,000</div>
+                                        <div>4 clippers</div>
+                                        <div>2,000 views</div>
+                                    </div>
+                                    <div className="text-center p-2 bg-white rounded border">
+                                        <div className="font-semibold">₦25,000</div>
+                                        <div>5 clippers</div>
+                                        <div>2,500 views</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
+
+                        {/* Rest of the form remains the same */}
                         {/* Targeting & Distribution */}
                         <div className="pt-8 space-y-6">
                             <div>
@@ -450,7 +527,7 @@ export default function CreateUGCCampaignForm() {
                                             value={form.captionTemplate}
                                             onChange={onChange}
                                             className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-3 px-4 border"
-                                            placeholder="This is where you can add title suggestions for  clippers to use"
+                                            placeholder="This is where you can add title suggestions for clippers to use"
                                         />
                                     </div>
                                     <p className="mt-2 text-xs text-gray-500">Optional caption scaffold creators can copy and edit.</p>
@@ -463,17 +540,16 @@ export default function CreateUGCCampaignForm() {
                                     <div className="mt-1">
                                         <span className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-3 px-4 border"
                                         >
-                                            Brands and creators may use, modify, and repost assets content on brand social channels.
+                                            Brands and creators may use, modify, and repost assets content on brand and creators social channels.
                                         </span>
                                     </div>
-
                                 </div>
 
-                                {/* <div>
-                                    <label className="block text-sm font-medium text-gray-700">Require Draft Review?</label>
+                                <div>
+                                    {/* <label className="block text-sm font-medium text-gray-700">Require Draft Review?</label> */}
                                     <div className="mt-1 flex items-center">
                                         <div className="relative flex items-start py-2">
-                                            <div className="flex h-6 items-center">
+                                            {/* <div className="flex h-6 items-center">
                                                 <input
                                                     id="draftRequired"
                                                     name="draftRequired"
@@ -482,25 +558,25 @@ export default function CreateUGCCampaignForm() {
                                                     onChange={onChange}
                                                     className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                 />
-                                            </div>
-                                            <div className="ml-3">
+                                            </div> */}
+                                            {/* <div className="ml-3">
                                                 <label htmlFor="draftRequired" className="text-sm text-gray-700">
                                                     {form.draftRequired ? 'Yes' : 'No'}
                                                 </label>
-                                            </div>
+                                            </div> */}
                                         </div>
                                     </div>
-                                    <p className="mt-2 text-xs text-gray-500">
+                                    {/* <p className="mt-2 text-xs text-gray-500">
                                         If on, creators submit a draft for your review before posting live.
-                                    </p>
-                                </div>*/}
+                                    </p> */}
+                                </div>
                             </div>
 
                             <div className="max-w-xs">
-                                <label htmlFor="numClipsSuggested" className="block text-sm font-medium text-gray-700">
+                                {/* <label htmlFor="numClipsSuggested" className="block text-sm font-medium text-gray-700">
                                     Suggested Number of Clips
-                                </label>
-                                <div className="mt-1">
+                                </label> */}
+                                {/* <div className="mt-1">
                                     <input
                                         type="number"
                                         name="numClipsSuggested"
@@ -511,10 +587,7 @@ export default function CreateUGCCampaignForm() {
                                         onChange={onChange}
                                         className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-3 px-4 border"
                                     />
-                                </div>
-                                <p className="mt-2 text-xs text-gray-500">
-                                    A soft guideline for how many distinct pieces of content you're hoping to gather.
-                                </p>
+                                </div> */}
                             </div>
                         </div>
 
@@ -583,7 +656,7 @@ export default function CreateUGCCampaignForm() {
                             <div className="flex justify-end">
                                 <button
                                     type="submit"
-                                    disabled={loading || uploadingAssets}
+                                    disabled={loading || uploadingAssets || clipperSlots < 1}
                                     className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-70 disabled:cursor-not-allowed"
                                 >
                                     {loading ? (

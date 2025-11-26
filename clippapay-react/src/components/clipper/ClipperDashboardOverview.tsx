@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   HiClipboardCheck,
   HiCollection,
@@ -8,7 +8,6 @@ import {
   HiCheckCircle,
 } from "react-icons/hi";
 import axios from "axios";
-import { motion, AnimatePresence } from "framer-motion";
 
 interface ClipperStats {
   joinedCampaigns: number;
@@ -17,6 +16,13 @@ interface ClipperStats {
   activeCampaigns: number;
   walletBalance: number;
   totalEarned: number;
+}
+
+interface RecentCampaign {
+  _id: string;
+  title: string;
+  kind: "normal" | "ugc" | "pgc";
+  createdAt: string;
 }
 
 const ICONS: Record<keyof ClipperStats, React.ComponentType<{ className?: string }>> = {
@@ -38,122 +44,123 @@ const VARIANTS: Record<keyof ClipperStats, string> = {
 };
 
 /* =========================
-   Scrolling News Ticker
+   UPGRADED REAL-TIME TICKER (3 Days)
    ========================= */
-function ClippaPayTicker({
-  showBanner,
-  speed = 180, // ⏩ pixels/sec (increase for faster)
-}: {
-  showBanner: boolean;
-  speed?: number;
-}) {
-  const messages = [
-    "📢 ClippaPay Update: Earnings per 1,000 views have increased from ₦200 to ₦500 for all new campaigns.",
-    "🆕 UGC is live: Earn ₦2,000 per 1,000 views by creating videos to an advertiser’s brief. Check the Campaign Jobs section for details and new tasks.",
-  ];
-  const tickerText = messages.join("   •   ");
+function ClippaPayTicker() {
+  const [recentCampaigns, setRecentCampaigns] = useState<RecentCampaign[]>([]);
 
-  const trackRef = useRef<HTMLDivElement>(null);
-  const copyRef = useRef<HTMLSpanElement>(null);
-  const [contentWidth, setContentWidth] = useState(0);
+  const permanentMessages = [
+    "Earnings per 1,000 views increased to ₦500!",
+    "UGC live → ₦2,000 per 1,000 views",
+    "PGC available → ₦5,000 flat per approved video!",
+  ];
 
   useEffect(() => {
-    const measure = () => {
-      if (!copyRef.current) return;
-      setContentWidth(copyRef.current.offsetWidth);
+    const fetchRecent = async () => {
+      try {
+        const res = await axios.get("/campaigns/recent-for-ticker");
+        setRecentCampaigns(res.data);
+      } catch (err) {
+        console.error("Failed to load recent campaigns");
+      }
     };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (trackRef.current) ro.observe(trackRef.current);
-    if (copyRef.current) ro.observe(copyRef.current);
-    return () => ro.disconnect();
-  }, [tickerText]);
 
-  const duration = contentWidth > 0 ? contentWidth / speed : 10;
+    fetchRecent();
+    const interval = setInterval(fetchRecent, 120_000); // Refresh every 2 mins
+    return () => clearInterval(interval);
+  }, []);
+
+  const campaignMessages = recentCampaigns.map((camp) => {
+    const badge = camp.kind === "ugc" ? " [UGC]" : camp.kind === "pgc" ? " [PGC]" : "";
+    return `NEW CAMPAIGN${badge}: "${camp.title}" — Join now & start earing!`;
+  });
+
+  const allMessages = [...permanentMessages, ...campaignMessages];
+  if (allMessages.length === 0) return null;
+
+  const tickerText = allMessages.join("   •   ");
 
   return (
-    <AnimatePresence>
-      {showBanner && (
-        <motion.div
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          exit={{ y: -20, opacity: 0 }}
-          className="bg-yellow-300 text-black px-4 py-3 rounded-md shadow text-sm font-medium overflow-hidden relative"
-        >
-          <div ref={trackRef} className="relative overflow-hidden">
-            <motion.div
-              className="flex whitespace-nowrap will-change-transform"
-              animate={{ x: [0, -contentWidth] }}
-              transition={{ duration, ease: "linear", repeat: Infinity }}
-            >
-              <span ref={copyRef} className="pr-12">
-                {tickerText}
-              </span>
-              <span className="pr-12">{tickerText}</span>
-            </motion.div>
-          </div>
-        </motion.div>
+    <div className="relative bg-gradient-to-r from-purple-600 via-pink-600 to-red-600 text-white font-bold text-sm md:text-base px-6 py-4 rounded-xl shadow-2xl overflow-hidden">
+      {/* Flashing bell when new campaigns exist */}
+      {campaignMessages.length > 0 && (
+        <div className="absolute -top-3 -right-3 text-5xl animate-pulse pointer-events-none">
+          
+        </div>
       )}
-    </AnimatePresence>
+
+      <div className="overflow-hidden whitespace-nowrap">
+        <div
+          className="inline-block will-change-transform"
+          style={{
+            animation: `scroll-left ${Math.max(15, tickerText.length * 0.08)}s linear infinite`,
+          }}
+        >
+          <span className="px-10">{tickerText}</span>
+          <span className="px-10">{tickerText}</span>
+        </div>
+      </div>
+
+      <style jsx>{`
+        @keyframes scroll-left {
+          0% {
+            transform: translateX(0);
+          }
+          100% {
+            transform: translateX(-50%);
+          }
+        }
+      `}</style>
+    </div>
   );
 }
 
 /* =========================
-   Dashboard Overview
+   MAIN DASHBOARD COMPONENT
    ========================= */
 export default function ClipperDashboardOverview() {
   const [stats, setStats] = useState<ClipperStats | null>(null);
-  const [showBanner, setShowBanner] = useState(true);
 
   useEffect(() => {
     axios
       .get("/clippers/overview")
       .then((res) => setStats(res.data))
       .catch(() => setStats(null));
-
-    // Hide after 90 seconds
-   // const timer = setTimeout(() => setShowBanner(false), 90_000);
-    return //() => clearTimeout(timer);
   }, []);
 
   if (!stats) {
-    return <p className="text-center py-10 text-gray-500">Loading overview…</p>;
+    return <p className="text-center py-20 text-gray-500 text-lg">Loading your dashboard…</p>;
   }
 
-  const cards: { key: keyof ClipperStats; label: string; value: string | number }[] = [
-    { key: "joinedCampaigns", label: "Campaigns Joined", value: stats.joinedCampaigns },
-    { key: "activeCampaigns", label: "Active Campaigns", value: stats.activeCampaigns },
-    { key: "submissions", label: "Submissions Made", value: stats.submissions },
-    { key: "pendingVerifications", label: "Pending Verifications", value: stats.pendingVerifications },
-    {
-      key: "walletBalance",
-      label: "Wallet Balance (₦)",
-      value: `₦${stats.walletBalance?.toLocaleString?.() || 0}`,
-    },
-    {
-      key: "totalEarned",
-      label: "Total Earned (₦)",
-      value: `₦${stats.totalEarned?.toLocaleString?.() || 0}`,
-    },
+  const cards = [
+    { key: "joinedCampaigns" as const, label: "Campaigns Joined", value: stats.joinedCampaigns },
+    { key: "activeCampaigns" as const, label: "Active Campaigns", value: stats.activeCampaigns },
+    { key: "submissions" as const, label: "Submissions Made", value: stats.submissions },
+    { key: "pendingVerifications" as const, label: "Pending Verifications", value: stats.pendingVerifications },
+    { key: "walletBalance" as const, label: "Wallet Balance (₦)", value: `₦${stats.walletBalance.toLocaleString()}` },
+    { key: "totalEarned" as const, label: "Total Earned (₦)", value: `₦${stats.totalEarned.toLocaleString()}` },
   ];
 
   return (
-    <div className="space-y-6">
-      {/* 🔔 News Banner */}
-      <ClippaPayTicker showBanner={showBanner} speed={100} /> {/* ⚡ Fast scroll */}
+    <div className="space-y-8">
+      {/* LIVE NEW CAMPAIGN TICKER */}
+      <ClippaPayTicker />
 
-      {/* 🔢 Stat Cards */}
+      {/* STAT CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {cards.map(({ key, label, value }) => {
           const Icon = ICONS[key];
           const variant = VARIANTS[key];
           return (
-            <div key={key} className="card p-6" data-variant={variant}>
+            <div
+              key={key}
+              className={`card bg-white rounded-2xl shadow-lg p-6 border-l-4 border-${variant}-500 transition-all hover:shadow-xl`}
+            >
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium opacity-90">{label}</p>
-                <Icon className="w-6 h-6 opacity-80" />
+                <p className="text-sm font-medium text-gray-600">{label}</p>
+                <Icon className={`w-8 h-8 text-${variant}-500`} />
               </div>
-              <p className="mt-3 text-3xl font-extrabold">{value}</p>
+              <p className="mt-4 text-4xl font-extrabold text-gray-800">{value}</p>
             </div>
           );
         })}

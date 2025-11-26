@@ -13,6 +13,7 @@ import Wallet from '../models/Wallet.js';
 import { requireAuth, requireAdvertiser } from '../middleware/auth.js';
 
 
+
 import ClipSubmission from '../models/ClipSubmission.js';
 
 
@@ -378,7 +379,6 @@ router.post(
 
       const campaign = new Campaign(campaignData);
       await campaign.save();
-
       return res.status(201).json(campaign);
 
      } catch (err) {
@@ -886,136 +886,309 @@ router.delete(
  * - Locks FULL escrow = budget (uses UGC rate_per_1000 = 5000)
  * - Sets clipper_cpm = 2000
  */
+// router.post(
+//   '/ugc',
+//   requireAuth,
+//   requireAdvertiser,
+//   ugcAssetUpload.array('assets', 12), // optional files from form field `assets`
+//   async (req, res) => {
+//     try {
+//       const advertiserId = req.user._id;
+
+//       // BODY: title, budget, platforms[], countries[], hashtags[], directions[], categories[], numClipsSuggested
+//       // UGC meta: brief, deliverables[], draftRequired, captionTemplate, usageRights, creativeDeadline, postDeadline
+//       const {
+//         title,
+//         budget,
+//         platforms, countries, hashtags, directions, categories,
+//         numClipsSuggested,
+
+//         brief,
+//         deliverables,
+//         draftRequired,
+//         captionTemplate,
+//         usageRights,
+//         creativeDeadline,
+//         postDeadline,
+//       } = req.body;
+
+//       // Required
+//       if (!title) return res.status(400).json({ error: 'title is required' });
+//       const budgetVal = Number(budget);
+//       if (!Number.isFinite(budgetVal) || budgetVal <= 0) {
+//         return res.status(400).json({ error: 'Invalid budget' });
+//       }
+
+//       const platformsArr   = parseArr(platforms);
+//       const countriesArr   = parseArr(countries);
+//       const hashtagsArr    = parseArr(hashtags);
+//       const directionsArr  = parseArr(directions);
+//       const categoriesArr  = parseArr(categories);
+//       const deliverablesArr= parseArr(deliverables);
+
+//       if (platformsArr.length === 0) return res.status(400).json({ error: 'At least one platform is required' });
+//       if (categoriesArr.length === 0) return res.status(400).json({ error: 'At least one category is required' });
+
+//       // UGC fixed economics
+//       const UGC_ADVERTISER_CPM = 5000; // advertiser pays
+//       const UGC_CLIPPER_CPM    = 2000; // clipper earns
+//       const costPerView        = UGC_ADVERTISER_CPM / 1000; // ₦5 per view
+
+//       // Minimum 1,000 views (₦5,000)
+//       if (budgetVal < 1000 * costPerView) {
+//         return res.status(400).json({ error: 'Minimum budget for UGC is ₦5,000 (1,000 views)' });
+//       }
+
+//       // Views purchasable from budget at advertiser rate
+//       const viewsPurchased = Math.floor(budgetVal / costPerView);
+
+//       // Wallet + escrow
+//       const advertiserWallet = await Wallet.findOne({ user: advertiserId });
+//       if (!advertiserWallet) return res.status(400).json({ error: 'Wallet not found' });
+//       if (advertiserWallet.balance < budgetVal) {
+//         return res.status(400).json({
+//           error: 'Insufficient wallet balance',
+//           currentBalance: advertiserWallet.balance,
+//           required: budgetVal
+//         });
+//       }
+
+//       // Build assets list (relative paths)
+//       const assetPaths = (req.files || []).map(f => `/uploads/ugc-assets/${path.basename(f.path)}`);
+
+//       // Create campaign document
+//       const campaign = new Campaign({
+//         kind: 'ugc',
+//         advertiser: advertiserId,
+//         title,
+
+//         // Financials
+//         rate_per_1000: UGC_ADVERTISER_CPM,
+//         clipper_cpm: UGC_CLIPPER_CPM,
+
+//         // Budget/Views
+//         budget_total: budgetVal,
+//         budget_remaining: budgetVal,
+//         views_purchased: viewsPurchased,
+//         views_left: viewsPurchased,
+
+//         // Targeting/Meta
+//         platforms: platformsArr,
+//         countries: countriesArr,
+//         hashtags: hashtagsArr,
+//         directions: directionsArr,
+//         cta_url: req.body.cta_url || undefined,
+//         categories: categoriesArr,
+//         numClipsSuggested: Number.parseInt(numClipsSuggested || '1', 10) || 1,
+
+//         // UGC meta
+//         ugc: {
+//           brief: brief || '',
+//           deliverables: deliverablesArr,
+//           assets: assetPaths,
+//           draftRequired: typeof draftRequired === 'string' ? draftRequired === 'true' : (draftRequired ?? true),
+//           captionTemplate: captionTemplate || '',
+//           usageRights: usageRights || '',
+//           creativeDeadline: creativeDeadline ? new Date(creativeDeadline) : undefined,
+//           postDeadline: postDeadline ? new Date(postDeadline) : undefined,
+//           hashtags: hashtagsArr, // can override/append if you want different behavior
+//         },
+
+//         status: 'pending',
+//       });
+
+//       // Assign ad worker (optional – reuse your helper)
+//       const worker = await getNextAdWorker();
+//       if (worker) campaign.assignedWorker = worker._id;
+
+//       // Lock FULL advertiser cost in escrow
+//       await advertiserWallet.lockEscrow(budgetVal);
+
+//       await campaign.save();
+//       return res.status(201).json(campaign);
+//     } catch (err) {
+//       console.error('UGC create error:', err);
+//       // cleanup uploaded files on error
+//       for (const f of (req.files || [])) {
+//         try { await fs.promises.unlink(f.path); } catch {}
+//       }
+//       return res.status(500).json({ error: 'Server error creating UGC campaign' });
+//     }
+//   }
+// );
+// POST /api/campaigns/ugc - NEW 2025 50/50 UGC HYBRID MODEL
 router.post(
   '/ugc',
   requireAuth,
   requireAdvertiser,
-  ugcAssetUpload.array('assets', 12), // optional files from form field `assets`
+  ugcAssetUpload.array('assets', 12),
   async (req, res) => {
     try {
       const advertiserId = req.user._id;
-
-      // BODY: title, budget, platforms[], countries[], hashtags[], directions[], categories[], numClipsSuggested
-      // UGC meta: brief, deliverables[], draftRequired, captionTemplate, usageRights, creativeDeadline, postDeadline
       const {
         title,
-        budget,
-        platforms, countries, hashtags, directions, categories,
-        numClipsSuggested,
-
+        budget: budgetStr,
         brief,
         deliverables,
-        draftRequired,
         captionTemplate,
         usageRights,
+        draftRequired,
         creativeDeadline,
         postDeadline,
+        platforms,
+        countries,
+        hashtags,
+        directions,
+        categories,
+        numClipsSuggested,
+        cta_url
       } = req.body;
 
-      // Required
-      if (!title) return res.status(400).json({ error: 'title is required' });
-      const budgetVal = Number(budget);
-      if (!Number.isFinite(budgetVal) || budgetVal <= 0) {
-        return res.status(400).json({ error: 'Invalid budget' });
+      // === VALIDATION ===
+      if (!title?.trim()) return res.status(400).json({ error: 'Campaign title is required' });
+
+      const budget = Number(budgetStr);
+      if (!Number.isFinite(budget) || budget < 10000 || budget % 1000 !== 0) {
+        return res.status(400).json({ error: 'Budget must be at least ₦10,000 and in ₦1,000 increments' });
       }
 
-      const platformsArr   = parseArr(platforms);
-      const countriesArr   = parseArr(countries);
-      const hashtagsArr    = parseArr(hashtags);
-      const directionsArr  = parseArr(directions);
-      const categoriesArr  = parseArr(categories);
-      const deliverablesArr= parseArr(deliverables);
+      const platformsArr = parseArr(platforms);
+      if (platformsArr.length === 0) return res.status(400).json({ error: 'At least one platform required' });
 
-      if (platformsArr.length === 0) return res.status(400).json({ error: 'At least one platform is required' });
-      if (categoriesArr.length === 0) return res.status(400).json({ error: 'At least one category is required' });
+      // === 50/50 SPLIT CALCULATION ===
+      const halfBudget = budget / 2;
 
-      // UGC fixed economics
-      const UGC_ADVERTISER_CPM = 5000; // advertiser pays
-      const UGC_CLIPPER_CPM    = 2000; // clipper earns
-      const costPerView        = UGC_ADVERTISER_CPM / 1000; // ₦5 per view
+      const CLIPPER_FIXED_PAYOUT = 2000;
+      const PLATFORM_FEE_PER_CLIPPER = 500;
+      const COST_PER_CLIPPER_SLOT = CLIPPER_FIXED_PAYOUT + PLATFORM_FEE_PER_CLIPPER; // ₦2,500
 
-      // Minimum 1,000 views (₦5,000)
-      if (budgetVal < 1000 * costPerView) {
-        return res.status(400).json({ error: 'Minimum budget for UGC is ₦5,000 (1,000 views)' });
+      const clipperSlots = Math.floor(halfBudget / COST_PER_CLIPPER_SLOT);
+      const fixedCost = clipperSlots * COST_PER_CLIPPER_SLOT;
+      const viewsBudget = halfBudget; // 50% of total
+      const viewsPurchased = Math.floor(viewsBudget / 5); // ₦5 per view (advertiser cost)
+
+      if (clipperSlots < 1) {
+        return res.status(400).json({ error: 'Budget too low — need at least ₦10,000 for 1 clipper + views' });
       }
 
-      // Views purchasable from budget at advertiser rate
-      const viewsPurchased = Math.floor(budgetVal / costPerView);
-
-      // Wallet + escrow
-      const advertiserWallet = await Wallet.findOne({ user: advertiserId });
-      if (!advertiserWallet) return res.status(400).json({ error: 'Wallet not found' });
-      if (advertiserWallet.balance < budgetVal) {
+      // === WALLET CHECK & ESCROW LOCK ===
+      const wallet = await Wallet.findOne({ user: advertiserId });
+      if (!wallet) return res.status(400).json({ error: 'Wallet not found' });
+      if (wallet.balance < budget) {
         return res.status(400).json({
           error: 'Insufficient wallet balance',
-          currentBalance: advertiserWallet.balance,
-          required: budgetVal
+          currentBalance: wallet.balance,
+          required: budget
         });
       }
 
-      // Build assets list (relative paths)
+      await wallet.lockEscrow(budget);
+
+      // === PROCESS ASSETS ===
       const assetPaths = (req.files || []).map(f => `/uploads/ugc-assets/${path.basename(f.path)}`);
 
-      // Create campaign document
-      const campaign = new Campaign({
-        kind: 'ugc',
+      // === CREATE CAMPAIGN + UGC VERSIONING ===
+      const campaign = await Campaign.create({
         advertiser: advertiserId,
-        title,
+        title: title.trim(),
+        kind: 'ugc',
+
+        // *** NEW VERSIONING FIELD ***
+        ugcVersion: 2,  // 👈 this ensures NEW UGC rules (₦2,000 once per clipper)
 
         // Financials
-        rate_per_1000: UGC_ADVERTISER_CPM,
-        clipper_cpm: UGC_CLIPPER_CPM,
+        budget_total: budget,
+        budget_remaining: budget,
+        rate_per_1000: 5000,     // ₦5 CPM = advertiser
+        clipper_cpm: 2000,       // ₦2 CPM = clipper from views
 
-        // Budget/Views
-        budget_total: budgetVal,
-        budget_remaining: budgetVal,
+        // Views
         views_purchased: viewsPurchased,
         views_left: viewsPurchased,
 
-        // Targeting/Meta
-        platforms: platformsArr,
-        countries: countriesArr,
-        hashtags: hashtagsArr,
-        directions: directionsArr,
-        cta_url: req.body.cta_url || undefined,
-        categories: categoriesArr,
-        numClipsSuggested: Number.parseInt(numClipsSuggested || '1', 10) || 1,
+        // NEW UGC HYBRID FIELDS
+        clipperSlots,
+        approvedClipperCount: 0,
+        fixedClipperPayout: CLIPPER_FIXED_PAYOUT,
+        platformFeePerClipper: PLATFORM_FEE_PER_CLIPPER,
 
-        // UGC meta
+        // Targeting
+        platforms: platformsArr,
+        countries: parseArr(countries),
+        hashtags: parseArr(hashtags),
+        directions: parseArr(directions),
+        categories: parseArr(categories),
+        cta_url: cta_url || undefined,
+        numClipsSuggested: Number(numClipsSuggested) || 1,
+
+        // UGC Brief
         ugc: {
           brief: brief || '',
-          deliverables: deliverablesArr,
+          deliverables: parseArr(deliverables),
           assets: assetPaths,
-          draftRequired: typeof draftRequired === 'string' ? draftRequired === 'true' : (draftRequired ?? true),
+          draftRequired: draftRequired === 'true' || draftRequired === true,
           captionTemplate: captionTemplate || '',
-          usageRights: usageRights || '',
+          usageRights: usageRights || 'Brand may repost creator content on brand social channels.',
           creativeDeadline: creativeDeadline ? new Date(creativeDeadline) : undefined,
           postDeadline: postDeadline ? new Date(postDeadline) : undefined,
-          hashtags: hashtagsArr, // can override/append if you want different behavior
         },
 
         status: 'pending',
       });
 
-      // Assign ad worker (optional – reuse your helper)
+      // Optional: assign ad worker
       const worker = await getNextAdWorker();
       if (worker) campaign.assignedWorker = worker._id;
-
-      // Lock FULL advertiser cost in escrow
-      await advertiserWallet.lockEscrow(budgetVal);
-
       await campaign.save();
-      return res.status(201).json(campaign);
+
+      res.status(201).json({
+        message: 'UGC Campaign Created Successfully!',
+        campaign,
+        breakdown: {
+          totalBudget: budget,
+          clipperSlots,
+          fixedCost,
+          clipperPayoutTotal: clipperSlots * CLIPPER_FIXED_PAYOUT,
+          platformFeesTotal: clipperSlots * PLATFORM_FEE_PER_CLIPPER,
+          viewsBudget,
+          estimatedViews: viewsPurchased
+        }
+      });
+
     } catch (err) {
-      console.error('UGC create error:', err);
-      // cleanup uploaded files on error
-      for (const f of (req.files || [])) {
-        try { await fs.promises.unlink(f.path); } catch {}
+      console.error('UGC creation error:', err);
+
+      // Clean uploaded files
+      for (const file of (req.files || [])) {
+        try { await fs.promises.unlink(file.path); } catch {}
       }
-      return res.status(500).json({ error: 'Server error creating UGC campaign' });
+
+      res.status(500).json({ error: 'Failed to create UGC campaign', details: err.message });
     }
   }
 );
+
+// GET /api/campaigns/recent-for-ticker
+// Returns all active campaigns created in the last 3 days – for the ticker
+router.get('/recent-for-ticker', async (req, res) => {
+  try {
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+
+    const recent = await Campaign.find({
+      status: 'active',
+      createdAt: { $gte: threeDaysAgo }
+    })
+      .select('title kind createdAt')
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    res.json(recent);
+  } catch (err) {
+    console.error('Recent campaigns ticker error:', err);
+    res.status(500).json([]);
+  }
+});
 /**
  * GET /api/campaigns/ugc
  * List advertiser's UGC campaigns

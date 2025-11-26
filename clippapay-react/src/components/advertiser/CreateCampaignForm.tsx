@@ -18,6 +18,7 @@ const platformOptions = [
   { label: 'YouTube', value: 'youtube' },
   { label: 'Facebook', value: 'facebook' },
   { label: 'X', value: 'X' },
+  { label: 'WhatsApp', value: 'whatsapp' },
 ];
 
 const categoryOptions = [
@@ -326,7 +327,9 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
                   return (
                     <label
                       key={opt.value}
-                      className={`px-3 py-1.5 rounded-full text-sm border cursor-pointer select-none ${on ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                      className={`px-4 py-2 rounded-full text-sm font-medium border cursor-pointer select-none transition-all ${on
+                          ? 'bg-indigo-100 border-indigo-400 text-indigo-800 shadow-sm'
+                          : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
                         }`}
                     >
                       <input
@@ -338,6 +341,8 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
                         className="hidden"
                       />
                       {opt.label}
+                      {/* Optional: small checkmark when selected */}
+                      {on && <span className="ml-1.5">, ✔</span>}
                     </label>
                   );
                 })}
@@ -460,7 +465,7 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
                   })}
                 </div>
               </fieldset>
-
+{/* 
               <div>
                 <label className="block text-sm font-medium text-gray-700">Suggested Number of Clips</label>
                 <input
@@ -473,7 +478,7 @@ export default function CreateCampaignForm({ onClose }: CreateCampaignFormProps)
                   className="mt-1 w-full rounded-md border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
                 />
                 <p className="text-xs text-gray-500 mt-1">Creators will see this as your preferred number.</p>
-              </div>
+              </div> */}
             </div>
           </section>
 
