@@ -628,6 +628,9 @@ router.get(
  * - Advertisers can update any field on their own campaigns.
  * - Ad-workers can only update adWorkerStatus on campaigns assigned to them.
  */
+
+import { sendTelegramCampaignAlert } from '../utils/telegram.js';
+
 router.put(
   '/:id',
   requireAuth,
@@ -643,10 +646,7 @@ router.put(
         if (!camp.advertiser.equals(req.user._id)) {
           return res.status(403).json({ error: 'Access denied.' });
         }
-        // (optional) prevent advertisers from forcing worker/status changes
-        // const { adWorkerStatus, status, ...safe } = req.body;
-        // Object.assign(camp, safe);
-
+        
         Object.assign(camp, req.body);
         await camp.save();
         return res.json(camp);
@@ -671,11 +671,14 @@ router.put(
         }
 
         await camp.save();
-        if (camp.status === 'active') {
-            import('../utils/telegram.js').then(module => {
-              module.sendTelegramCampaignAlert(camp);
-            });
-}
+        
+        // Send Telegram notification when campaign becomes active
+        if (adWorkerStatus === 'ready' && camp.status === 'active') {
+          sendTelegramCampaignAlert(camp)
+            .then(() => console.log('✅ Telegram notification sent for campaign:', camp.title))
+            .catch(err => console.error('❌ Telegram notification failed:', err.message));
+        }
+        
         return res.json(camp);
       }
 
