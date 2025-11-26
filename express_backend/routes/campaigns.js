@@ -671,6 +671,11 @@ router.put(
         }
 
         await camp.save();
+        if (camp.status === 'active') {
+            import('../utils/telegram.js').then(module => {
+              module.sendTelegramCampaignAlert(camp);
+            });
+}
         return res.json(camp);
       }
 

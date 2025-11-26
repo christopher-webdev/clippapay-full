@@ -1,14 +1,15 @@
 // utils/telegram.js
 import axios from 'axios';
 
-const BOT_TOKEN = '8224906351:AAG0izS9EGbl4yVIfP3Y4r4PA9cug83uxb4';822065636
-const CHANNEL_ID = '-1001234567890';            // ← Replace with your channel ID
+const BOT_TOKEN = '8387831510:AAFXC2lPWwPXlgWnW8BeA_G_kzYOwTfCekY'; //82206563
+const CHANNEL_ID = '8387831510';           // ← Replace with your channel ID
 
 export async function sendTelegramCampaignAlert(campaign) {
   const title = campaign.title;
   const kind = campaign.kind === 'pgc' ? 'PGC (Professional Video)' 
              : campaign.kind === 'ugc' ? 'UGC (Create Your Own)' 
-             : 'Normal Promotion';
+             : campaign.kind === 'normal' ? 'Normal Video' 
+             : 'Unknown Type';
 
   const payout = campaign.clipperPayoutRate 
     ? `₦${campaign.clipperPayoutRate.toLocaleString()} per 1k views`
@@ -22,7 +23,7 @@ export async function sendTelegramCampaignAlert(campaign) {
     ? `${campaign.totalViews.toLocaleString()} views`
     : 'Unlimited';
 
-  const link = `https://yourdomain.com/campaigns/${campaign._id}`;  // ← Change to your real domain
+  const link = `https://clippapay.com/campaigns/${campaign._id}`;  // ← Change to your real domain
 
   const message = `
 *NEW CAMPAIGN ALERT!*
