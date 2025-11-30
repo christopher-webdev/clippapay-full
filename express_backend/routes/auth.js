@@ -300,4 +300,62 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// routes/auth.js — add this NEW route
+// Add this to your auth.js (replace the old one)
+router.post('/verify-telegram', async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ error: "Phone required" });
+
+    // Remove everything except digits
+    const digits = phone.replace(/\D/g, '');
+
+    // Try to match any phone in DB that ends with these digits
+    // This handles +234 vs 0 vs 234 differences
+    const user = await User.findOne({
+      role: 'clipper',
+      phone: { $regex: digits + '$' } // ends with these digits
+    });
+
+    if (!user) {
+      return res.json({ verified: false });
+    }
+
+    res.json({
+      verified: !!user.hasJoinedTelegram
+    });
+  } catch (err) {
+    console.error('Verify telegram error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+// POST or GET — both work
+router.get('/check-telegram', async (req, res) => {
+  try {
+    // If you use JWT cookie/session
+    const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Not logged in' });
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (user.role !== 'clipper') {
+      return res.json({ verified: true }); // advertisers skip
+    }
+
+    if (user.hasJoinedTelegram) {
+      return res.json({ verified: true });
+    } else {
+      return res.status(403).json({
+        error: 'Please join Telegram channel to continue',
+        verified: false
+      });
+    }
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
 export default router;

@@ -55,7 +55,15 @@ const userSchema = new mongoose.Schema({
   isVerified:       { type: Boolean, default: false },
   emailOTP:         String,
   otpExpires:       Date,
-
+ 
+  hasJoinedTelegram: {
+    type: Boolean,
+    default: false
+  },
+  telegramId: {
+    type: String,
+    sparse: true // allows null but unique when exists
+  },
   // ----------------------------
   // Wallet & Transactions
   // ----------------------------
