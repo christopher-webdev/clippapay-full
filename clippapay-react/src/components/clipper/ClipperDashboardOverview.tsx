@@ -49,10 +49,11 @@ const VARIANTS: Record<keyof ClipperStats, string> = {
 function ClippaPayTicker() {
   const [recentCampaigns, setRecentCampaigns] = useState<RecentCampaign[]>([]);
 
-  const permanentMessages = [
-    "Earnings per 1,000 views increased to ₦500!",
-    "UGC live → ₦2,000 per 1,000 views",
-    "PGC available → ₦5,000 flat per approved video!",
+const permanentMessages = [
+    "Standard campaigns: ₦0.5 per view",
+    "UGC campaigns: ₦2,000 fixed payout + ₦2 per view",
+    "PGC campaigns: ₦5,000 flat per approved video (no per-view bonus)",
+    "Join our Telegram channel for instant updates → t.me/clippapay",
   ];
 
   useEffect(() => {

@@ -7,6 +7,7 @@ import {
   HiHashtag,
   HiOutlineUserGroup,
   HiOutlineFilm,
+  HiOutlineEye,
 } from 'react-icons/hi';
 import axios from 'axios';
 
@@ -146,7 +147,7 @@ export default function CampaignDetail() {
     : isPgc
     ? 'Submit Video → Earn ₦2,000'
     : isUgc
-    ? 'Create Video → Earn ₦2,000'
+    ? 'Join & Submit Video → Earn ₦2,000 + Views'
     : 'Start Promoting';
 
   // Progress
@@ -203,9 +204,9 @@ export default function CampaignDetail() {
             </button>
             <img src={ugcBanner} alt="UGC/PGC" className="w-full rounded-xl mb-6" />
             <div className="mb-6">
-              <div className="text-5xl font-black text-green-600 mb-2">₦2,000</div>
+              <div className="text-5xl font-black text-green-600 mb-2">₦2,000 </div>
               <h3 className="text-2xl font-bold text-gray-800">
-                {isPgc ? 'Per Approved Professional Video' : 'Per Approved UGC Video'}
+                {isPgc ? 'Per Approved Professional Video' : 'Per Approved UGC Video + ₦2 Per View'}
               </h3>
               <p className="text-gray-600 mt-3">Create high-quality content → Get paid instantly on approval</p>
             </div>
@@ -213,7 +214,7 @@ export default function CampaignDetail() {
               onClick={() => setShowUgcModal(false)}
               className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-lg shadow-lg"
             >
-              Yes, I Want to Earn ₦2,000
+              Yes, I Want to Earn
             </button>
           </div>
         </div>
@@ -263,13 +264,19 @@ export default function CampaignDetail() {
         </div>
 
         {/* Stats - Now shows ₦2,000 clearly for UGC/PGC */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-10">
+                {/* Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-6 mb-10">
+          {/* 1 – Payout per Approved Video (or variable rate) */}
           <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-6 rounded-xl border-2 border-green-200 text-center">
             <HiOutlineLightningBolt className="w-12 h-12 text-green-600 mx-auto mb-3" />
             {(isUgc || isPgc) ? (
               <>
-                <div className="font-black text-4xl text-green-600">₦2,000</div>
-                <div className="text-base font-bold text-gray-800 mt-1">Per Approved Video</div>
+                <div className="font-black text-4xl text-green-600">
+                  ₦{isPgc ? "5,000" : "2,000"}
+                </div>
+                <div className="text-base font-bold text-gray-800 mt-1">
+                  Per Approved Video
+                </div>
                 <div className="text-xs text-gray-600">Fixed payout • Paid on approval</div>
               </>
             ) : (
@@ -280,6 +287,19 @@ export default function CampaignDetail() {
             )}
           </div>
 
+          {/* 2 – Earnings per View (NEW BLOCK) */}
+          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 p-6 rounded-xl border-2 border-indigo-200 text-center">
+            <HiOutlineEye className="w-12 h-12 text-indigo-600 mx-auto mb-3" />
+            <div className="font-black text-4xl text-indigo-600">
+              {isPgc ? "₦0" : isUgc ? "₦2" : "₦0.5"}
+            </div>
+            <div className="text-base font-bold text-gray-800 mt-1">Per View</div>
+            <div className="text-xs text-gray-600">
+              {isPgc ? "No per-view earnings (fixed only)" : "Bonus on every view"}
+            </div>
+          </div>
+
+          {/* 3 – Total Target */}
           <div className="bg-gray-50 p-6 rounded-xl border text-center">
             <HiOutlineClipboardList className="w-10 h-10 text-indigo-600 mx-auto mb-2" />
             <div className="font-bold text-2xl">
@@ -288,12 +308,14 @@ export default function CampaignDetail() {
             <div className="text-sm text-gray-600">{totalLabel}</div>
           </div>
 
+          {/* 4 – Clippers Joined */}
           <div className="bg-gray-50 p-6 rounded-xl border text-center">
             <HiOutlineUserGroup className="w-10 h-10 text-indigo-600 mx-auto mb-2" />
             <div className="font-bold text-2xl">{campaign.clippersCount}</div>
-            <div className="text-sm text-gray-600">clippers joined</div>
+            <div className="text-sm text-gray-600">Clippers joined</div>
           </div>
         </div>
+        
 
         {/* Platforms & Hashtags */}
         <div className="grid md:grid-cols-2 gap-8 mb-10">
