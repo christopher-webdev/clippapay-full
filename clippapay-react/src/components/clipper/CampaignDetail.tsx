@@ -354,8 +354,8 @@ export default function CampaignDetail() {
             {/* BIG PAYOUT BANNER */}
             <div className="mb-8 p-8 bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 border-4 border-green-300 rounded-2xl text-center">
               <div className="text-6xl font-black text-green-600 mb-3">₦2,000</div>
-              <div className="text-2xl font-bold text-gray-800">Fixed Payout Per Approved Video</div>
-              <p className="text-gray-700 mt-2">Create → Submit → Get Paid ₦2,000 (No views needed)</p>
+              <div className="text-2xl font-bold text-gray-800">Fixed Payout Per Approved Video + ₦2 Per view </div>
+              <p className="text-gray-700 mt-2">Create → Submit → Get Paid</p>
             </div>
 
             <div className="space-y-8">
