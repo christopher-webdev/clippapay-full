@@ -247,34 +247,32 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
 
     const ugcVersion = campaign.ugcVersion || 1;    // default = old behavior
     const isUGC = campaign.kind === 'ugc';
+    const isNormal = campaign.kind === 'normal';
     const isOldUGC = isUGC && ugcVersion === 1;
     const isNewUGC = isUGC && ugcVersion >= 2;
 
     // ============================================================
-    // OLD UGC → ₦2,000 per proof (original behavior)
+    // OLD UGC → ₦2,000 per proof (original behavior) && !proof.fixedPayoutGiven
     // ============================================================
-    if (isOldUGC && !proof.fixedPayoutGiven) {
+    if (isOldUGC) {
 
       // ensure clipper slot available
-      if (campaign.approvedClipperCount >= campaign.clipperSlots) {
+      if (campaign.clippersCount >= campaign.clipperSlots) {
         return res.status(400).json({ error: 'All UGC clipper slots already filled' });
       }
 
-      // PAY FIXED CLIPPER RATE
-      payoutClipper = campaign.fixedClipperPayout;        // ₦2000
-      payoutPlatform = campaign.platformFeePerClipper;   // ₦500
-      fixedPayoutApplied = true;
-
       if (newVerified > 0) {
-        payoutClipper += (newVerified * CLIPPER_CPM) / 1000;
-        payoutPlatform += (newVerified * PLATFORM_CPM) / 1000;
+        payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
+        payoutPlatform = (newVerified * PLATFORM_CPM) / 1000;
         viewsToDeduct = newVerified;
       }
 
       totalDeduct = payoutClipper + payoutPlatform;
 
-      proof.fixedPayoutGiven = true;
-      campaign.approvedClipperCount += 1;
+      if (sub.rewardAmount === 0) {
+        sub.firstPayoutGiven = true;
+  
+      }
     }
 
     // ============================================================
@@ -282,7 +280,7 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
     // ============================================================
     else if (isNewUGC && !sub.firstPayoutGiven) {
 
-      if (campaign.approvedClipperCount >= campaign.clipperSlots) {
+      if (campaign.clippersCount >= campaign.clipperSlots) {
         return res.status(400).json({ error: 'All UGC clipper slots already filled' });
       }
 
@@ -301,22 +299,49 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
       totalDeduct = payoutClipper + payoutPlatform;
 
       // NEW BEHAVIOR: used only once per campaign per clipper
-      sub.firstPayoutGiven = true;
-      campaign.approvedClipperCount += 1;
+      if (sub.rewardAmount === 0) {
+        sub.firstPayoutGiven = true;
+      }
     }
+    else if (isNewUGC && sub.firstPayoutGiven) {
 
-    // ============================================================
-    // NORMAL CAMPAIGNS + UGC SUBSEQUENT VERIFICATIONS
-    // ============================================================
-    else if (deltaViews > 0) {
+      if (campaign.clippersCount >= campaign.clipperSlots) {
+        return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+      }
+      // also pay any initial views
+      if (newVerified > 0) {
+        payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
+        payoutPlatform = (newVerified * PLATFORM_CPM) / 1000;
+        viewsToDeduct = newVerified;
+      }
 
-      payoutClipper = (deltaViews * CLIPPER_CPM) / 1000;
-      payoutPlatform = (deltaViews * PLATFORM_CPM) / 1000;
-
-      viewsToDeduct = deltaViews;
       totalDeduct = payoutClipper + payoutPlatform;
-    }
 
+      // NEW BEHAVIOR: used only once per campaign per clipper
+      if (sub.rewardAmount === 0) {
+        sub.firstPayoutGiven = true;
+      
+      }
+     
+    }
+    else if (isNormal) {
+
+      if (campaign.clippersCount >= campaign.clipperSlots) {
+        return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+      }
+      // also pay any initial views
+      if (newVerified > 0) {
+        payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
+        payoutPlatform = (newVerified * PLATFORM_CPM) / 1000;
+        viewsToDeduct = newVerified;
+      }
+
+      totalDeduct = payoutClipper + payoutPlatform;
+
+      if (sub.rewardAmount === 0) {
+        sub.firstPayoutGiven = true;
+      }
+    }
     else {
       return res.status(400).json({ error: 'No new views to approve' });
     }
@@ -384,7 +409,6 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
       payoutPlatform: payoutPlatform.toFixed(2),
       totalDeducted: totalDeduct.toFixed(2),
       viewsDeducted: viewsToDeduct,
-      approvedClipperCount: campaign.approvedClipperCount,
       clipperSlots: campaign.clipperSlots,
       campaignViewsLeft: campaign.views_left,
       campaignBudgetRemaining: campaign.budget_remaining

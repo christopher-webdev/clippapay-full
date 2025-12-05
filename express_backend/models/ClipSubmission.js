@@ -73,9 +73,9 @@ const proofSchema = new Schema({
   adminNote: { type: String },
   lastVerified: { type: Date },
   
-  // CRITICAL FIX: DEFAULT TO 0
-  verifiedViews: { type: Number, default: 0 },
-  rewardAmount: { type: Number, default: 0 },        // ← THIS WAS MISSING
+  verifiedViews: { type: Number }, // Highest view count approved so far
+  rewardAmount: { type: Number }, // Cumulative reward paid for this proof
+        
 }, { timestamps: true });
 
 const clipSubmissionSchema = new Schema({

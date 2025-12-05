@@ -91,7 +91,7 @@ const getCPMs = (row: any) => {
   return { kind, clipper, platform };
 };
 
-const PLATFORM_FILTERS = ["tiktok", "instagram", "youtube", "facebook", "X"];
+const PLATFORM_FILTERS = ["tiktok", "instagram", "youtube", "facebook", "X", "whatsapp"];
 const STATUS_FILTERS = ["pending", "approved", "rejected"];
 
 export default function SubmissionsManagement() {
