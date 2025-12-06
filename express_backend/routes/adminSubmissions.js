@@ -257,9 +257,9 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
     if (isOldUGC) {
 
       // ensure clipper slot available
-      if (campaign.clippersCount >= campaign.clipperSlots) {
-        return res.status(400).json({ error: 'All UGC clipper slots already filled' });
-      }
+      // if (campaign.clippersCount >= campaign.clipperSlots) {
+      //   return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+      // }
 
       if (newVerified > 0) {
         payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
@@ -326,9 +326,9 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
     }
     else if (isNormal) {
 
-      if (campaign.clippersCount >= campaign.clipperSlots) {
-        return res.status(400).json({ error: 'All UGC clipper slots already filled' });
-      }
+      // if (campaign.clippersCount >= campaign.clipperSlots) {
+      //   return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+      // }
       // also pay any initial views
       if (newVerified > 0) {
         payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
