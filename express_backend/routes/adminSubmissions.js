@@ -192,6 +192,7 @@ router.post('/:submissionId/proof/:proofId/approve', requireAdminAuth, async (re
   }
 });
 // POST /api/admin/submissions/:submissionId/proof/:proofId/verify
+// POST /api/admin/submissions/:submissionId/proof/:proofId/verify
 router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req, res) => {
   try {
     const { verifiedViews, note } = req.body;
@@ -256,11 +257,6 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
     // ============================================================
     if (isOldUGC) {
 
-      // ensure clipper slot available
-      // if (campaign.clippersCount >= campaign.clipperSlots) {
-      //   return res.status(400).json({ error: 'All UGC clipper slots already filled' });
-      // }
-
       if (newVerified > 0) {
         payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
         payoutPlatform = (newVerified * PLATFORM_CPM) / 1000;
@@ -271,7 +267,6 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
 
       if (sub.rewardAmount === 0) {
         sub.firstPayoutGiven = true;
-  
       }
     }
 
@@ -280,8 +275,13 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
     // ============================================================
     else if (isNewUGC && !sub.firstPayoutGiven) {
 
-      if (campaign.clippersCount >= campaign.clipperSlots) {
-        return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+      // Check if there are still available clipper slots
+      if (campaign.approvedClipperCount >= campaign.clipperSlots) {
+        return res.status(400).json({ 
+          error: 'All UGC clipper slots already filled',
+          approvedClipperCount: campaign.approvedClipperCount,
+          clipperSlots: campaign.clipperSlots
+        });
       }
 
       // One-time fixed payout per clipper per campaign
@@ -298,17 +298,16 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
 
       totalDeduct = payoutClipper + payoutPlatform;
 
-      // NEW BEHAVIOR: used only once per campaign per clipper
-      if (sub.rewardAmount === 0) {
-        sub.firstPayoutGiven = true;
-      }
+      // Mark first payout as given
+      sub.firstPayoutGiven = true;
+      // Slot will be consumed via approveUGCClipper method below
     }
+
+    // ============================================================
+    // NEW UGC AFTER FIRST PAYOUT → Only pay for views
+    // ============================================================
     else if (isNewUGC && sub.firstPayoutGiven) {
-
-      if (campaign.clippersCount >= campaign.clipperSlots) {
-        return res.status(400).json({ error: 'All UGC clipper slots already filled' });
-      }
-      // also pay any initial views
+      // Only pay for views (clipper already got their ₦2,000)
       if (newVerified > 0) {
         payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
         payoutPlatform = (newVerified * PLATFORM_CPM) / 1000;
@@ -316,20 +315,12 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
       }
 
       totalDeduct = payoutClipper + payoutPlatform;
-
-      // NEW BEHAVIOR: used only once per campaign per clipper
-      if (sub.rewardAmount === 0) {
-        sub.firstPayoutGiven = true;
-      
-      }
-     
     }
+
+    // ============================================================
+    // NORMAL CAMPAIGN
+    // ============================================================
     else if (isNormal) {
-
-      // if (campaign.clippersCount >= campaign.clipperSlots) {
-      //   return res.status(400).json({ error: 'All UGC clipper slots already filled' });
-      // }
-      // also pay any initial views
       if (newVerified > 0) {
         payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
         payoutPlatform = (newVerified * PLATFORM_CPM) / 1000;
@@ -342,6 +333,7 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
         sub.firstPayoutGiven = true;
       }
     }
+
     else {
       return res.status(400).json({ error: 'No new views to approve' });
     }
@@ -376,13 +368,19 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
       await campaign.deductViewsAndBudget(viewsToDeduct);
     }
 
-    // NEW UGC fixed deduction from budget
+    // For New UGC with fixed payout, use the approveUGCClipper method
     if (fixedPayoutApplied && isNewUGC) {
-      campaign.budget_remaining -=
-        (campaign.fixedClipperPayout + campaign.platformFeePerClipper);
+      try {
+        await campaign.approveUGCClipper();
+      } catch (err) {
+        return res.status(400).json({ 
+          error: 'Failed to approve UGC clipper', 
+          details: err.message 
+        });
+      }
+    } else {
+      await campaign.save();
     }
-
-    await campaign.save();
 
     // ------------------------------------------------------------
     // WALLET TRANSFERS
@@ -409,9 +407,11 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
       payoutPlatform: payoutPlatform.toFixed(2),
       totalDeducted: totalDeduct.toFixed(2),
       viewsDeducted: viewsToDeduct,
+      approvedClipperCount: campaign.approvedClipperCount,
       clipperSlots: campaign.clipperSlots,
       campaignViewsLeft: campaign.views_left,
-      campaignBudgetRemaining: campaign.budget_remaining
+      campaignBudgetRemaining: campaign.budget_remaining,
+      firstPayoutGiven: sub.firstPayoutGiven
     });
 
   } catch (err) {
@@ -419,6 +419,233 @@ router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req
     res.status(500).json({ error: 'Verification failed', details: err.message });
   }
 });
+// router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req, res) => {
+//   try {
+//     const { verifiedViews, note } = req.body;
+//     if (!Number.isFinite(verifiedViews) || verifiedViews < 0) {
+//       return res.status(400).json({ error: 'Invalid view count' });
+//     }
+
+//     const { submissionId, proofId } = req.params;
+
+//     const sub = await ClipSubmission.findById(submissionId).populate('campaign clipper');
+//     if (!sub) return res.status(404).json({ error: 'Submission not found' });
+
+//     const proof = sub.proofs.id(proofId);
+//     if (!proof) return res.status(404).json({ error: 'Proof not found' });
+
+//     const campaign = await Campaign.findById(sub.campaign._id).populate('advertiser');
+//     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+//     const { clipper: CLIPPER_CPM, platform: PLATFORM_CPM } = getCPMsForCampaign(campaign);
+
+//     // Wallets
+//     const advertiserWallet = await Wallet.findOne({ user: campaign.advertiser._id }) ||
+//       await Wallet.create({ user: campaign.advertiser._id });
+
+//     const clipperWallet = await Wallet.findOne({ user: sub.clipper._id }) ||
+//       await Wallet.create({ user: sub.clipper._id });
+
+//     const platformUser = await User.findOne({ role: 'platform' }) ||
+//       await User.create({
+//         role: 'platform',
+//         email: 'platform@clippapay.com',
+//         passwordHash: 'NO_LOGIN',
+//         company: 'ClippaPay Platform'
+//       });
+
+//     const platformWallet = await Wallet.findOne({ user: platformUser._id }) ||
+//       await Wallet.create({ user: platformUser._id });
+
+//     // VIEW DELTAS
+//     const lastVerified = proof.verifiedViews || 0;
+//     const newVerified = Number(verifiedViews);
+//     const deltaViews = newVerified - lastVerified;
+
+//     let payoutClipper = 0;
+//     let payoutPlatform = 0;
+//     let totalDeduct = 0;
+//     let viewsToDeduct = 0;
+//     let fixedPayoutApplied = false;
+
+//     // ------------------------------------------------------------
+//     // UGC LOGIC (Version-Safe)
+//     // ------------------------------------------------------------
+
+//     const ugcVersion = campaign.ugcVersion || 1;    // default = old behavior
+//     const isUGC = campaign.kind === 'ugc';
+//     const isNormal = campaign.kind === 'normal';
+//     const isOldUGC = isUGC && ugcVersion === 1;
+//     const isNewUGC = isUGC && ugcVersion >= 2;
+
+//     // ============================================================
+//     // OLD UGC → ₦2,000 per proof (original behavior) && !proof.fixedPayoutGiven
+//     // ============================================================
+//     if (isOldUGC) {
+
+//       // ensure clipper slot available
+//       // if (campaign.clippersCount >= campaign.clipperSlots) {
+//       //   return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+//       // }
+
+//       if (newVerified > 0) {
+//         payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
+//         payoutPlatform = (newVerified * PLATFORM_CPM) / 1000;
+//         viewsToDeduct = newVerified;
+//       }
+
+//       totalDeduct = payoutClipper + payoutPlatform;
+
+//       if (sub.rewardAmount === 0) {
+//         sub.firstPayoutGiven = true;
+  
+//       }
+//     }
+
+//     // ============================================================
+//     // NEW UGC → ONE-TIME ₦2,000 PER CAMPAIGN
+//     // ============================================================
+//     else if (isNewUGC && !sub.firstPayoutGiven) {
+
+//       if (campaign.clippersCount >= campaign.clipperSlots) {
+//         return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+//       }
+
+//       // One-time fixed payout per clipper per campaign
+//       payoutClipper = campaign.fixedClipperPayout;       // 2000
+//       payoutPlatform = campaign.platformFeePerClipper;   // 500
+//       fixedPayoutApplied = true;
+
+//       // also pay any initial views
+//       if (newVerified > 0) {
+//         payoutClipper += (newVerified * CLIPPER_CPM) / 1000;
+//         payoutPlatform += (newVerified * PLATFORM_CPM) / 1000;
+//         viewsToDeduct = newVerified;
+//       }
+
+//       totalDeduct = payoutClipper + payoutPlatform;
+
+//       // NEW BEHAVIOR: used only once per campaign per clipper
+//       if (sub.rewardAmount === 0) {
+//         sub.firstPayoutGiven = true;
+//       }
+//     }
+//     else if (isNewUGC && sub.firstPayoutGiven) {
+
+//       if (campaign.clippersCount >= campaign.clipperSlots) {
+//         return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+//       }
+//       // also pay any initial views
+//       if (newVerified > 0) {
+//         payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
+//         payoutPlatform = (newVerified * PLATFORM_CPM) / 1000;
+//         viewsToDeduct = newVerified;
+//       }
+
+//       totalDeduct = payoutClipper + payoutPlatform;
+
+//       // NEW BEHAVIOR: used only once per campaign per clipper
+//       if (sub.rewardAmount === 0) {
+//         sub.firstPayoutGiven = true;
+      
+//       }
+     
+//     }
+//     else if (isNormal) {
+
+//       // if (campaign.clippersCount >= campaign.clipperSlots) {
+//       //   return res.status(400).json({ error: 'All UGC clipper slots already filled' });
+//       // }
+//       // also pay any initial views
+//       if (newVerified > 0) {
+//         payoutClipper = (newVerified * CLIPPER_CPM) / 1000;
+//         payoutPlatform = (newVerified * PLATFORM_CPM) / 1000;
+//         viewsToDeduct = newVerified;
+//       }
+
+//       totalDeduct = payoutClipper + payoutPlatform;
+
+//       if (sub.rewardAmount === 0) {
+//         sub.firstPayoutGiven = true;
+//       }
+//     }
+//     else {
+//       return res.status(400).json({ error: 'No new views to approve' });
+//     }
+
+//     // ------------------------------------------------------------
+//     // ESCROW CHECK
+//     // ------------------------------------------------------------
+//     if (advertiserWallet.escrowLocked < totalDeduct) {
+//       return res.status(400).json({
+//         error: 'Insufficient escrow funds',
+//         required: totalDeduct,
+//         available: advertiserWallet.escrowLocked
+//       });
+//     }
+
+//     // ------------------------------------------------------------
+//     // UPDATE PROOF + SUBMISSION
+//     // ------------------------------------------------------------
+//     proof.status = 'approved';
+//     proof.verifiedViews = newVerified;
+//     proof.rewardAmount += payoutClipper;
+//     proof.adminNote = note || '';
+//     proof.lastVerified = new Date();
+
+//     sub.markModified('proofs');
+//     await sub.save();
+
+//     // ------------------------------------------------------------
+//     // UPDATE CAMPAIGN
+//     // ------------------------------------------------------------
+//     if (viewsToDeduct > 0) {
+//       await campaign.deductViewsAndBudget(viewsToDeduct);
+//     }
+
+//     // NEW UGC fixed deduction from budget
+//     if (fixedPayoutApplied && isNewUGC) {
+//       campaign.budget_remaining -=
+//         (campaign.fixedClipperPayout + campaign.platformFeePerClipper);
+//     }
+
+//     await campaign.save();
+
+//     // ------------------------------------------------------------
+//     // WALLET TRANSFERS
+//     // ------------------------------------------------------------
+//     advertiserWallet.escrowLocked -= totalDeduct;
+//     clipperWallet.balance += payoutClipper;
+//     platformWallet.balance += payoutPlatform;
+
+//     await Promise.all([
+//       advertiserWallet.save(),
+//       clipperWallet.save(),
+//       platformWallet.save()
+//     ]);
+
+//     // ------------------------------------------------------------
+//     // RESPONSE
+//     // ------------------------------------------------------------
+//     res.json({
+//       message: 'Proof verified successfully',
+//       fixedPayoutApplied,
+//       campaignKind: campaign.kind,
+//       ugcVersion,
+//       payoutClipper: payoutClipper.toFixed(2),
+//       payoutPlatform: payoutPlatform.toFixed(2),
+//       totalDeducted: totalDeduct.toFixed(2),
+//       viewsDeducted: viewsToDeduct,
+//       clipperSlots: campaign.clipperSlots,
+//       campaignViewsLeft: campaign.views_left,
+//       campaignBudgetRemaining: campaign.budget_remaining
+//     });
+
+//   } catch (err) {
+//     console.error('Verification error:', err);
+//     res.status(500).json({ error: 'Verification failed', details: err.message });
+//   }
+// });
 
 // // Approve a specific proof by proof _id
 // router.post('/:submissionId/proof/:proofId/verify', requireAdminAuth, async (req, res) => {
