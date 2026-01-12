@@ -220,8 +220,8 @@ export default function WalletSection() {
   const submitDeposit = async (e: FormEvent) => {
     e.preventDefault();
 
-    if (depAmt < 5000) {
-      setMsg('Minimum deposit amount is ₦5,000.');
+    if (depAmt < 10000) {
+      setMsg('Minimum deposit amount is ₦10,000.');
       return;
     }
 
@@ -481,7 +481,7 @@ export default function WalletSection() {
                     </p>
                   </div>
                   <p className="text-xs text-gray-500">
-                    Minimum: ₦5,000. Email: {email}
+                    Minimum: ₦10,000. Email: {email}
                   </p>
                 </div>
               )}
@@ -492,7 +492,7 @@ export default function WalletSection() {
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₦</span>
                   <input
                     type="number"
-                    min="5000"
+                    min="10000"
                     value={depAmt || ''}
                     onChange={e => setDepAmt(parseFloat(e.target.value) || 0)}
                     required
