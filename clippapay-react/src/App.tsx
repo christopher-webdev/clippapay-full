@@ -46,7 +46,7 @@ import AdminWalletsManagement from './components/admin/AdminWalletsManagement.ts
 import AdminWithdrawalsManagement from './components/admin/AdminWithdrawalsManagement.tsx';
 import AdminSettings from './components/admin/AdminSettings.tsx';
 import AdminCorrectApproval from './components/admin/AdminCorrectApproval.tsx';
-// import AdminSubscriptions   from './components/admin/AdminSubscriptions';
+import AdminManagePremiumCreators   from './components/admin/AdminManagePremiumCreators.tsx';
 
 import AdminSignup from '@/components/admin/AdminSignup.tsx';
 import AdminLogin from '@/components/admin/AdminLogin.tsx';

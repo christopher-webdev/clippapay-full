@@ -216,7 +216,7 @@ router.post('/:id/reset-password', requireAuth, requireAdmin, async (req, res) =
 // PATCH /api/users/:id
 router.patch('/:id', requireAuth, requireAdmin, async (req, res) => {
   const allowed = [
-    'firstName', 'lastName', 'phone', 'country', 'company', 'contactName', 'isBlocked', 'role'
+    'firstName', 'lastName', 'phone', 'country', 'company', 'contactName', 'isBlocked', 'role', 'isPremiumCreator'
   ];
   const user = await User.findById(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });

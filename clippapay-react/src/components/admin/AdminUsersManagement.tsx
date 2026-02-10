@@ -7,6 +7,7 @@ import {
   HiMail,
   HiPhone,
   HiOfficeBuilding,
+  HiStar,
 } from "react-icons/hi";
 import axios from "axios";
 
@@ -24,7 +25,10 @@ interface UserRow {
   country?: string;
   isBlocked?: boolean;
   isVerified?: boolean;
+  isPremiumCreator?: boolean;
   createdAt: string;
+  creatorTypes?: string[];
+  otherCreatorType?: string;
 }
 
 const roleLabels: Record<string, string> = {
@@ -112,7 +116,7 @@ export default function UsersManagement() {
   };
   const clearSelection = () => setSelected([]);
 
-  // Batch Actions
+  // Batch Actions (existing)
   const batchAction = async (
     action: "block" | "unblock" | "delete",
     confirmMsg?: string
@@ -122,8 +126,8 @@ export default function UsersManagement() {
     setBatchLoading(true);
     setErr(null);
     try {
-      const { data } = await axios.post(
-        `/user/all`,
+      await axios.post(
+        `${API_BASE}/user/all`,
         { action, userIds: selected },
         { withCredentials: true }
       );
@@ -139,12 +143,46 @@ export default function UsersManagement() {
     }
   };
 
+  // Toggle Premium Creator (NEW)
+  const togglePremium = async (userId: string, makePremium: boolean) => {
+    if (
+      !window.confirm(
+        makePremium
+          ? "Make this clipper a Premium Creator?"
+          : "Remove Premium Creator status?"
+      )
+    )
+      return;
+
+    try {
+      setErr(null);
+      await axios.patch(
+        `${API_BASE}/user/${userId}`,
+        { isPremiumCreator: makePremium },
+        { withCredentials: true }
+      );
+
+      // Update local state
+      setUsers((prev) =>
+        prev.map((u) =>
+          u._id === userId ? { ...u, isPremiumCreator: makePremium } : u
+        )
+      );
+    } catch (err: any) {
+      setErr(
+        err?.response?.data?.error ||
+        err?.message ||
+        "Failed to update premium status"
+      );
+    }
+  };
+
   // Single block/unblock
   const toggleBlock = async (id: string, block: boolean) => {
     setErr(null);
     try {
-      const { data } = await axios.post(
-        `/user/${id}/block`,
+      await axios.post(
+        `${API_BASE}/user/${id}/block`,
         { block },
         { withCredentials: true }
       );
@@ -170,7 +208,7 @@ export default function UsersManagement() {
       return;
     setErr(null);
     try {
-      const { data } = await axios.delete(`${API_BASE}/user/${id}`, {
+      await axios.delete(`${API_BASE}/user/${id}`, {
         withCredentials: true,
       });
       setUsers((prev) => prev.filter((u) => u._id !== id));
@@ -183,7 +221,7 @@ export default function UsersManagement() {
     }
   };
 
-  // --- UI
+  // --- UI ---
   return (
     <div className="p-2 md:p-6">
       {/* FILTERS & BATCH ACTION BAR */}
@@ -229,6 +267,7 @@ export default function UsersManagement() {
           <option value="pending">Pending</option>
           <option value="blocked">Blocked</option>
         </select>
+
         {selected.length > 0 && (
           <div className="flex flex-col md:flex-row gap-2">
             <button
@@ -275,6 +314,7 @@ export default function UsersManagement() {
           </div>
         )}
       </div>
+
       {err && <div className="text-red-600 text-sm mb-2">{err}</div>}
 
       {/* USERS TABLE */}
@@ -306,6 +346,9 @@ export default function UsersManagement() {
                 Status
               </th>
               <th className="px-2 py-2 text-xs font-semibold text-gray-500 text-left">
+                Premium
+              </th>
+              <th className="px-2 py-2 text-xs font-semibold text-gray-500 text-left">
                 Joined
               </th>
               <th className="px-2 py-2 text-xs font-semibold text-gray-500 text-left">
@@ -316,13 +359,13 @@ export default function UsersManagement() {
           <tbody className="bg-white divide-y divide-gray-200">
             {loading ? (
               <tr>
-                <td colSpan={6} className="py-10 text-center text-gray-400">
+                <td colSpan={7} className="py-10 text-center text-gray-400">
                   Loading users…
                 </td>
               </tr>
             ) : pageUsers.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-10 text-center text-gray-500">
+                <td colSpan={7} className="py-10 text-center text-gray-500">
                   No users found.
                 </td>
               </tr>
@@ -334,8 +377,8 @@ export default function UsersManagement() {
                     u.isBlocked
                       ? "bg-red-50"
                       : u.isVerified
-                        ? "bg-green-50"
-                        : ""
+                      ? "bg-green-50"
+                      : ""
                   }
                 >
                   {/* Checkbox */}
@@ -348,10 +391,12 @@ export default function UsersManagement() {
                       aria-label="Select user"
                     />
                   </td>
-                  {/* Stacked details */}
+
+                  {/* User info */}
                   <td className="px-2 py-3 align-top">
                     <div className="font-semibold text-sm text-gray-900">
-                      {u.firstName || u.contactName || u.company || "—"} {u.lastName || ""}
+                      {u.firstName || u.contactName || u.company || "—"}{" "}
+                      {u.lastName || ""}
                     </div>
                     <div className="flex flex-wrap gap-x-2 items-center text-xs text-gray-600 mt-1">
                       <span className="flex items-center gap-1">
@@ -374,26 +419,26 @@ export default function UsersManagement() {
                       )}
                     </div>
 
-                    {/* Render creatorTypes */}
                     {u.creatorTypes && u.creatorTypes.length > 0 && (
                       <div className="mt-2 text-xs text-gray-700">
                         <span className="font-semibold">Creator Types:</span>{" "}
                         <ul className="list-disc list-inside ml-2">
-                          {u.creatorTypes.map((type, index) => (
-                            <li key={index}>{type}</li>
+                          {u.creatorTypes.map((type, i) => (
+                            <li key={i}>{type}</li>
                           ))}
                         </ul>
                       </div>
                     )}
 
-                    {/* Render otherCreatorType if provided */}
                     {u.otherCreatorType && (
                       <div className="mt-1 text-xs text-gray-700">
-                        <span className="font-semibold">Other:</span> {u.otherCreatorType}
+                        <span className="font-semibold">Other:</span>{" "}
+                        {u.otherCreatorType}
                       </div>
                     )}
                   </td>
 
+                  {/* Role */}
                   <td className="px-2 py-3 align-top text-xs">
                     <span
                       className={
@@ -401,15 +446,17 @@ export default function UsersManagement() {
                         (u.role === "admin"
                           ? "bg-indigo-100 text-indigo-700"
                           : u.role === "clipper"
-                            ? "bg-blue-100 text-blue-700"
-                            : u.role === "advertiser"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "bg-gray-200 text-gray-600")
+                          ? "bg-blue-100 text-blue-700"
+                          : u.role === "advertiser"
+                          ? "bg-yellow-100 text-yellow-800"
+                          : "bg-gray-200 text-gray-600")
                       }
                     >
                       {roleLabels[u.role] || u.role}
                     </span>
                   </td>
+
+                  {/* Status */}
                   <td className="px-2 py-3 align-top text-xs">
                     <div className="flex flex-wrap gap-1 items-center">
                       {u.isVerified && (
@@ -429,11 +476,49 @@ export default function UsersManagement() {
                       )}
                     </div>
                   </td>
+
+                  {/* Premium Badge */}
+                  <td className="px-2 py-3 align-top text-xs">
+                    {u.role === "clipper" && (
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                          u.isPremiumCreator
+                            ? "bg-purple-100 text-purple-800"
+                            : "bg-gray-100 text-gray-600"
+                        }`}
+                      >
+                        <HiStar className="w-3.5 h-3.5" />
+                        {u.isPremiumCreator ? "Premium" : "—"}
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Joined */}
                   <td className="px-2 py-3 align-top text-xs">
                     {new Date(u.createdAt).toLocaleDateString()}
                   </td>
+
+                  {/* Actions */}
                   <td className="px-2 py-3 align-top text-xs">
                     <div className="flex flex-col gap-2">
+                      {/* Premium Toggle - only for clippers */}
+                      {u.role === "clipper" && (
+                        <button
+                          onClick={() =>
+                            togglePremium(u._id, !u.isPremiumCreator)
+                          }
+                          className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold transition ${
+                            u.isPremiumCreator
+                              ? "bg-purple-600 text-white hover:bg-purple-700"
+                              : "bg-purple-100 text-purple-800 hover:bg-purple-200"
+                          }`}
+                        >
+                          <HiStar className="w-4 h-4" />
+                          {u.isPremiumCreator ? "Remove Premium" : "Make Premium"}
+                        </button>
+                      )}
+
+                      {/* Block / Unblock */}
                       <button
                         onClick={() => toggleBlock(u._id, !u.isBlocked)}
                         className={
@@ -453,6 +538,8 @@ export default function UsersManagement() {
                           </>
                         )}
                       </button>
+
+                      {/* Delete */}
                       <button
                         onClick={() => deleteUser(u._id)}
                         className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-gray-200 text-gray-700 hover:bg-gray-300"
@@ -467,11 +554,13 @@ export default function UsersManagement() {
           </tbody>
         </table>
       </div>
+
       {/* PAGINATION */}
       <div className="flex justify-between items-center mt-6 mb-2 px-1">
         <div className="text-sm text-gray-500">
           Showing {(page - 1) * PAGE_SIZE + 1}-
-          {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} users
+          {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}{" "}
+          users
         </div>
         <div className="flex gap-2 items-center">
           <button
