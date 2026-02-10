@@ -115,15 +115,22 @@ const userSchema = new mongoose.Schema({
  * ⭐ AUTO PREMIUM LOGIC
  * If clipper rating >= 4 → premium creator
  */
+// userSchema.pre('save', function(next) {
+//   if (this.role === 'clipper' && this.rating >= 4) {
+//     this.isPremiumCreator = true;
+//   } else {
+//     this.isPremiumCreator = false;
+//   }
+//   next();
+// });
+
 userSchema.pre('save', function(next) {
-  if (this.role === 'clipper' && this.rating >= 4) {
+  if (this.role === 'clipper' && this.rating >= 4 && !this.isPremiumCreator) {
     this.isPremiumCreator = true;
-  } else {
-    this.isPremiumCreator = false;
   }
+  // Removed the else clause to allow manual setting to true even if rating < 4
   next();
 });
-
 /**
  * Hashes a plaintext password and stores it in passwordHash.
  */

@@ -22,6 +22,7 @@
     "AsyncStorage": "^0.1.5",
     "axios": "^1.13.4",
     "expo": "~54.0.32",
+    "expo-av": "~16.0.8",
     "expo-blur": "~15.0.8",
     "expo-constants": "~18.0.13",
     "expo-document-picker": "~14.0.8",
