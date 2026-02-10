@@ -156,11 +156,11 @@ export default function LoginMobileScreen() {
         const role = decoded?.role;
         
         if (role === 'clipper') {
-          router.replace('/clipper_dashboard');
+          router.replace('(dashboard_clipper)/clipper_dashboard');
         } else if (role === 'advertiser') {
-          router.replace('/advertiser_dashboard');
+          router.replace('(dashboard_advertiser)/advertiser_dashboard');
         } else if (role === 'ad-worker') {
-          router.replace('/ad_worker_dashboard');
+          router.replace('(dashboard_ad_worker)/ad_worker_dashboard');
         } else {
           router.replace('/');
         }

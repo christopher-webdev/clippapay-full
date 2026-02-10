@@ -4,7 +4,124 @@ import { requireAuth, requireAdmin, requireSuperAdmin } from '../middleware/auth
 import bcrypt from 'bcryptjs';
 import { requireAdminAuth } from '../middleware/adminAuth.js'
 
+
+// Near the top of users.js
+import path from 'path';
+import fs from 'fs';
+import multer from 'multer';
+import ClipperProfile from '../models/ClipperProfile.js';
+
+// Create upload folder
+const clipperDir = path.join(process.cwd(), 'uploads/clipper-profiles');
+fs.mkdirSync(clipperDir, { recursive: true });
+
+const clipperStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, clipperDir),
+  filename: (req, file, cb) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${unique}${path.extname(file.originalname)}`);
+  }
+});
+
+const clipperUpload = multer({
+  storage: clipperStorage,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Only images (jpg/png/webp) and videos (mp4/mov) allowed'), false);
+  }
+});
+
 const router = express.Router();
+
+
+// GET own profile (works for all clippers, creates if not exists)
+router.get('/clipper-profile/me', requireAuth, async (req, res) => {
+  if (req.user.role !== 'clipper') {
+    return res.status(403).json({ error: 'Only clippers can have profiles' });
+  }
+
+  let profile = await ClipperProfile.findOne({ user: req.user._id });
+  if (!profile) {
+    profile = new ClipperProfile({ user: req.user._id });
+    await profile.save();
+  }
+
+  res.json(profile);
+});
+
+// PATCH own profile
+router.patch(
+  '/clipper-profile/me',
+  requireAuth,
+  clipperUpload.fields([
+    { name: 'profileImage', maxCount: 1 },
+    { name: 'sampleVideo', maxCount: 1 },
+  ]),
+  async (req, res) => {
+    if (req.user.role !== 'clipper') {
+      return res.status(403).json({ error: 'Only clippers can update profiles' });
+    }
+
+    let profile = await ClipperProfile.findOne({ user: req.user._id });
+    if (!profile) {
+      profile = new ClipperProfile({ user: req.user._id });
+    }
+
+    // Always allow sample video & profile image
+    if (req.files?.profileImage) {
+      if (profile.profileImage) {
+        try { fs.unlinkSync(path.join(process.cwd(), profile.profileImage)); } catch {}
+      }
+      profile.profileImage = `/uploads/clipper-profiles/${req.files.profileImage[0].filename}`;
+    }
+
+    if (req.files?.sampleVideo) {
+      if (profile.sampleVideo) {
+        try { fs.unlinkSync(path.join(process.cwd(), profile.sampleVideo)); } catch {}
+      }
+      profile.sampleVideo = `/uploads/clipper-profiles/${req.files.sampleVideo[0].filename}`;
+    }
+
+    // Premium-only fields
+    if (req.user.isPremiumCreator) {
+      if (req.body.bio !== undefined) profile.bio = req.body.bio;
+      if (req.body.categories) profile.categories = JSON.parse(req.body.categories);
+      if (req.body.ratePerVideo) profile.ratePerVideo = Number(req.body.ratePerVideo);
+      if (req.body.expectedDelivery) profile.expectedDelivery = req.body.expectedDelivery;
+      if (req.body.completedProjects) profile.completedProjects = Number(req.body.completedProjects);
+    }
+
+    await profile.save();
+    res.json(profile);
+  }
+);
+
+// GET public profile (for advertisers)
+router.get('/clipper-profile/:userId', requireAuth, async (req, res) => {
+  const targetUser = await User.findById(req.params.userId);
+  if (!targetUser || targetUser.role !== 'clipper' || !targetUser.isPremiumCreator) {
+    return res.status(404).json({ error: 'Premium clipper not found' });
+  }
+
+  const profile = await ClipperProfile.findOne({ user: targetUser._id });
+  if (!profile) {
+    return res.status(404).json({ error: 'Profile not found' });
+  }
+
+  res.json({
+    ...profile.toObject(),
+    user: {
+      firstName: targetUser.firstName,
+      lastName: targetUser.lastName,
+      rating: targetUser.rating,
+      isPremiumCreator: targetUser.isPremiumCreator,
+    }
+  });
+});
+
+
 
 /**
  * Get current user's own profile.

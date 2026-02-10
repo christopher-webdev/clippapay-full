@@ -41,7 +41,9 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(dashboard)" />
+        <Stack.Screen name="(dashboard_advertiser)" />
+        <Stack.Screen name="(dashboard_clipper)" />
+        <Stack.Screen name="(dashboard_ad_worker)" />
       </Stack>
     </>
   );

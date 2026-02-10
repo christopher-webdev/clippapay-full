@@ -52,17 +52,17 @@ export default function LaunchScreen() {
             /* ================= ROLE ROUTING ================= */
 
             if (user.role === 'advertiser') {
-              router.replace('/(dashboard)/advertiser_dashboard');
+              router.replace('(dashboard_advertiser)/advertiser_dashboard');
               return;
             }
 
             if (user.role === 'clipper') {
-              router.replace('/(dashboard)/clipper_dashboard');
+              router.replace('(dashboard_clipper)/clipper_dashboard');
               return;
             }
 
             if (user.role === 'ad-worker') {
-              router.replace('/(dashboard)/ad_worker_dashboard');
+              router.replace('(dashboard_ad_worker)/ad_worker_dashboard');
               return;
             }
 

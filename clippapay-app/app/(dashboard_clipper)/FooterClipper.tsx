@@ -20,26 +20,26 @@ const TAB_ITEMS = [
   {
     name: 'Browse',
     icon: 'grid-outline',
-    route: '/(dashboard)/browse', // adjust to your actual route
+    route: '/(dashboard_clipper)/clipper_dashboard', // adjust to your actual route
   },
   {
     name: 'Submissions',
     icon: 'megaphone-outline',
-    route: '/(dashboard)/mysubmissions',
+    route: '/(dashboard_clipper)/mysubmissions',
   },
   {
     name: 'Wallet',
     icon: 'cash-outline',
-    route: '/(dashboard)/wallet',
+    route: '/(dashboard_clipper)/wallet',
   },
   {
     name: 'Profile',
     icon: 'person-outline',
-    route: '/(dashboard)/profile',
+    route: '/(dashboard_clipper)/clipper_profile_edit',
   },
 ];
 
-export default function Footer() {
+export default function FooterClipper() {
   const pathname = usePathname(); // to highlight active tab
 
   return (
@@ -75,7 +75,6 @@ export default function Footer() {
           })}
         </View>
 
-        {/* "Access top-tier Creators" button / text */}
         <TouchableOpacity
           style={styles.accessButton}
           onPress={() => {
@@ -126,7 +125,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tabLabel: {
-    fontFamily: 'OpenSans',
     fontWeight: '600',
     fontSize: 12 * scale,
     lineHeight: 12 * scale * 1.4,
@@ -144,7 +142,7 @@ const styles = StyleSheet.create({
     
   },
   accessText: {
-    fontFamily: 'OpenSans',
+
     fontWeight: '600',
     fontSize: 13 * scale,
     color: '#7C3AED',

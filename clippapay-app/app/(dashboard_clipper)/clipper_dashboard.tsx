@@ -9,11 +9,11 @@ import {
   StatusBar,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import ProfileHeader from './ProfileHeaderClipper';
-import ReadyLaunchText from './ReadyLaunchText_clipper';
-import CreateUGCsCard from './CreateUGCsCard';
-import CreateUGCsCard_2 from './CreateUGCsCard_2';
-import CreateUGCsCard_3 from './CreateUGCsCard_3';
+import ProfileHeader from '../(dashboard_advertiser)/ProfileHeaderClipper';
+import ReadyLaunchText from '../(dashboard_advertiser)/ReadyLaunchText_clipper';
+import CreateUGCsCard from '../(dashboard_advertiser)/CreateUGCsCard';
+import CreateUGCsCard_2 from '../(dashboard_advertiser)/CreateUGCsCard_2';
+import CreateUGCsCard_3 from '../(dashboard_advertiser)/CreateUGCsCard_3';
 import FooterClipper from './FooterClipper';
 // Import the next cards when you create them
 // import ShareClipCard from '../../components/ShareClipCard';
@@ -22,7 +22,7 @@ import FooterClipper from './FooterClipper';
 const { width } = Dimensions.get('window');
 const scale = width / 428;           // ≈ iPhone 14 Pro Max / Figma 428px base
 
-export default function AdvertiserDashboard() {
+export default function ClipperDashboard() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFF" />
@@ -32,10 +32,6 @@ export default function AdvertiserDashboard() {
         colors={['#FFFFFF', '#F9FAFB', '#F3F4F6']} // very light – adjust to match design
         style={styles.background}
       >
-        {/* Fixed / absolute header – stays at top */}
-        <View style={styles.headerContainer}>
-          <ProfileHeader />
-        </View>
 
         {/* Scrollable content starts below the header */}
         <ScrollView
@@ -57,9 +53,6 @@ export default function AdvertiserDashboard() {
           {/* Bottom padding so last card isn't cut off by bottom nav */}
       
         </ScrollView>
-        <View style={styles.footerContainer}>
-          <FooterClipper />
-        </View>
 
         {/* Optional: bottom tab bar placeholder if you have one */}
         {/* <BottomTabBar /> */}

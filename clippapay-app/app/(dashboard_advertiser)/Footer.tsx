@@ -19,22 +19,22 @@ const TAB_ITEMS = [
   {
     name: 'Browse',
     icon: 'grid-outline',
-    route: '/(dashboard)/advertiser_dashboard', // adjust to your actual route
+    route: '/(dashboard_advertiser)/advertiser_dashboard', // adjust to your actual route
   },
   {
     name: 'My Campaigns',
     icon: 'megaphone-outline',
-    route: '/(dashboard)/Campaigns',
+    route: '/(dashboard_advertiser)/Campaigns',
   },
   {
     name: 'Wallet',
     icon: 'cash-outline',
-    route: '/(dashboard)/WalletScreen',
+    route: '/(dashboard_advertiser)/WalletScreen',
   },
   {
     name: 'Profile',
     icon: 'person-outline',
-    route: '/(dashboard)/Profile',
+    route: '/(dashboard_advertiser)/Profile',
   },
 ];
 

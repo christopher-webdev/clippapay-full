@@ -156,7 +156,7 @@ export default function PremiumCreators() {
           onPress={() => router.push(`/creator_profile?id=${item.id}`)}
         >
           <LinearGradient
-            colors={['#1A1A1A', '#2A2A2A', '#3A1A2A']}
+            colors={['#343434', '#2A2A2A', '#3A1A2A']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.card}
@@ -415,7 +415,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginHorizontal: 20 * scale,
     marginBottom: 24 * scale,
-    shadowColor: '#FF3366',
+    // shadowColor: '#33151c',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.18,
     shadowRadius: 16,

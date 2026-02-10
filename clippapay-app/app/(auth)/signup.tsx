@@ -196,7 +196,7 @@ const SignupScreen = () => {
       } else {
         // Navigate to advertiser dashboard
         console.log('Navigating to advertiser dashboard');
-        router.replace('/advertiser_dashboard');
+        router.replace('(dashboard_advertiser)/advertiser_dashboard');
       }
 
     } catch (err: any) {
