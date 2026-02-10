@@ -1,45 +1,81 @@
 // app/(auth)/launch.tsx
+
 import React, { useEffect } from 'react';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import * as SplashScreen from 'expo-splash-screen';
+import { Platform } from 'react-native';
 
 export default function LaunchScreen() {
+
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        const token = await AsyncStorage.getItem('token');
+
+        /* ================= GET TOKEN ================= */
+
+        let token: string | null = null;
+
+        if (Platform.OS === 'web') {
+          token = await AsyncStorage.getItem('userToken');
+          console.log('[WEB] launch token:', token);
+        } else {
+          token = await SecureStore.getItemAsync('userToken');
+
+          if (!token) {
+            token = await AsyncStorage.getItem('userToken');
+          }
+
+          console.log('[MOBILE] launch token:', token);
+        }
+
+        /* ================= IF TOKEN EXISTS ================= */
 
         if (token) {
+
           const res = await fetch(
             `${process.env.EXPO_PUBLIC_API_URL}/auth/verify-token`,
             {
-              headers: { Authorization: `Bearer ${token}` },
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
             }
           );
 
           if (res.ok) {
+
             const user = await res.json();
 
+            console.log('VERIFY USER:', user);
+
+            /* ================= ROLE ROUTING ================= */
+
             if (user.role === 'advertiser') {
-              return
-              // router.replace('/(dashboard)/advertiser_dashboard');
-            } else if (user.role === 'clipper') {
-              return
-              // router.replace('/(dashboard)/clipper_dashboard');
-            } else if (user.role === 'ad-worker') {
-              return
-              // router.replace('/(dashboard)/ad-worker');
-            } else {
-              router.replace('/onboarding_1');
+              router.replace('/(dashboard)/advertiser_dashboard');
+              return;
             }
 
+            if (user.role === 'clipper') {
+              router.replace('/(dashboard)/clipper_dashboard');
+              return;
+            }
+
+            if (user.role === 'ad-worker') {
+              router.replace('/(dashboard)/ad_worker_dashboard');
+              return;
+            }
+
+            // fallback
+            router.replace('/(auth)/onboarding_1');
             return;
           }
         }
 
-        // No token → onboarding
+        /* ================= NO TOKEN ================= */
+
         router.replace('/(auth)/onboarding_1');
+
       } catch (err) {
         console.log('Auth check failed:', err);
         router.replace('/(auth)/onboarding_1');
@@ -51,5 +87,5 @@ export default function LaunchScreen() {
     bootstrap();
   }, []);
 
-  return null; // no UI, splash is from index.tsx
+  return null;
 }

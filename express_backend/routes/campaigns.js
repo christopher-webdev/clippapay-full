@@ -399,17 +399,28 @@ router.post(
  * - Sets clipper_cpm = 5000 (payout per approved video)
  * - Platform takes 2500 per video
  */
+/**
+ * POST /api/campaigns/pgc
+ * Create a PGC campaign (advertiser only)
+ * - Base price: ₦35,000
+ *   - Platform: ₦15,000 (43%)
+ *   - Creator: ₦20,000 (57%)
+ * - Addons (50/50 split):
+ *   - Creator provides script: +₦1,500 (Platform: ₦750, Creator: ₦750)
+ *   - Creator + Post their WhatsApp: +₦5,000 (Platform: ₦2,500, Creator: ₦2,500)
+ *   - Collaborative - Creator Post on their IG: +₦10,000 (Platform: ₦5,000, Creator: ₦5,000)
+ *   - Creator Post on TikTok: +₦10,000 (Platform: ₦5,000, Creator: ₦5,000)
+ *   - Creator Outdoor shoot: +₦10,000 (Platform: ₦5,000, Creator: ₦5,000)
+ */
 router.post(
   '/pgc',
   requireAuth,
   requireAdvertiser,
-  pgcAssetUpload.array('assets', 12), // optional files from form field `assets`
+  pgcAssetUpload.array('assets', 12),
   async (req, res) => {
     try {
       const advertiserId = req.user._id;
 
-      // BODY: title, budget, desiredVideos, platforms[], countries[], hashtags[], directions[], categories[]
-      // PGC meta: brief, deliverables[], captionTemplate, usageRights, approvalCriteria, cta_url
       const {
         title,
         budget,
@@ -421,6 +432,8 @@ router.post(
         usageRights,
         approvalCriteria,
         cta_url,
+        addons, // array of selected addon IDs ['script', 'whatsapp', etc.]
+        script, // user-provided script if creator doesn't provide
       } = req.body;
 
       // Required fields
@@ -428,50 +441,107 @@ router.post(
       if (!brief) return res.status(400).json({ error: 'brief is required' });
       if (!approvalCriteria) return res.status(400).json({ error: 'approvalCriteria is required' });
 
-      const budgetVal = Number(budget);
-      const desiredVideosVal = Number(desiredVideos);
-      
-      if (!Number.isFinite(budgetVal) || budgetVal <= 0) {
-        return res.status(400).json({ error: 'Invalid budget' });
-      }
-      if (!Number.isFinite(desiredVideosVal) || desiredVideosVal < 1 || desiredVideosVal > 50) {
-        return res.status(400).json({ error: 'Invalid desired videos count (1-50)' });
-      }
-
+      // Parse arrays
       const platformsArr = parseArr(platforms);
       const countriesArr = parseArr(countries);
       const hashtagsArr = parseArr(hashtags);
       const directionsArr = parseArr(directions);
       const categoriesArr = parseArr(categories);
       const deliverablesArr = parseArr(deliverables);
+      const addonsArr = parseArr(addons);
 
-      if (categoriesArr.length === 0) return res.status(400).json({ error: 'At least one category is required' });
-
-      // PGC fixed economics
-      const PGC_VIDEO_COST = 7500; // advertiser pays per video
-      const PGC_CLIPPER_PAYOUT = 5000; // clipper earns per approved video
-      const PLATFORM_FEE = 2500; // platform takes per video
-
-      // Calculate minimum required budget
-      const minBudget = desiredVideosVal * PGC_VIDEO_COST;
-      if (budgetVal < minBudget) {
+      // Validate script if creator doesn't provide it
+      if (!addonsArr.includes('script') && (!script || script.trim() === '')) {
         return res.status(400).json({ 
-          error: `Budget must be at least ₦${minBudget} for ${desiredVideosVal} videos (₦${PGC_VIDEO_COST} each)` 
+          error: 'Script is required when "Creator provides script" is not selected. Please provide the script for the creator to follow.' 
         });
       }
 
-      // Calculate maximum videos possible with budget
-      const maxVideos = Math.floor(budgetVal / PGC_VIDEO_COST);
-      const actualVideos = Math.min(desiredVideosVal, maxVideos);
+      // Define pricing
+      const BASE_PRICE = 35000;
+      const BASE_PLATFORM_FEE = 15000; // Platform gets ₦15,000 from base
+      const BASE_CREATOR_PAYOUT = 20000; // Creator gets ₦20,000 from base
+      
+      const ADDON_PRICES = {
+        script: 1500,
+        whatsapp: 5000,
+        ig: 10000,
+        tiktok: 10000,
+        outdoor: 10000,
+      };
 
-      // Wallet + escrow check
+      // Calculate total price
+      let totalPrice = BASE_PRICE;
+      let addonsTotal = 0;
+      let addonBreakdown = [];
+      
+      addonsArr.forEach(addon => {
+        if (ADDON_PRICES[addon]) {
+          const addonPrice = ADDON_PRICES[addon];
+          totalPrice += addonPrice;
+          addonsTotal += addonPrice;
+          addonBreakdown.push({
+            id: addon,
+            name: getAddonName(addon),
+            price: addonPrice,
+            platformShare: Math.floor(addonPrice / 2),
+            creatorShare: Math.ceil(addonPrice / 2)
+          });
+        }
+      });
+
+      // Calculate addon shares (50/50 split)
+      const addonsPlatformShare = Math.floor(addonsTotal / 2);
+      const addonsCreatorShare = Math.ceil(addonsTotal / 2);
+
+      // Total platform fee and creator payout
+      const totalPlatformFee = BASE_PLATFORM_FEE + addonsPlatformShare;
+      const totalCreatorPayout = BASE_CREATOR_PAYOUT + addonsCreatorShare;
+
+      // Validate budget matches calculated price
+      const budgetVal = Number(budget);
+      if (!Number.isFinite(budgetVal) || budgetVal <= 0) {
+        return res.status(400).json({ error: 'Invalid budget' });
+      }
+
+      if (Math.abs(budgetVal - totalPrice) > 1) { // Allow small floating point differences
+        return res.status(400).json({ 
+          error: `Total price mismatch. Expected ₦${totalPrice.toLocaleString()}, got ₦${budgetVal.toLocaleString()}`,
+          expected: totalPrice,
+          received: budgetVal,
+          breakdown: {
+            base: BASE_PRICE,
+            addons: addonBreakdown,
+            total: totalPrice
+          }
+        });
+      }
+
+      // Validate desired videos (should be 1 for this PGC model)
+      const desiredVideosVal = Number(desiredVideos) || 1;
+      if (desiredVideosVal !== 1) {
+        return res.status(400).json({ 
+          error: 'PGC campaign must have exactly 1 desired video' 
+        });
+      }
+
+      // Validate categories
+      if (categoriesArr.length === 0) {
+        return res.status(400).json({ error: 'At least one category is required' });
+      }
+
+      // Wallet validation
       const advertiserWallet = await Wallet.findOne({ user: advertiserId });
-      if (!advertiserWallet) return res.status(400).json({ error: 'Wallet not found' });
-      if (advertiserWallet.balance < budgetVal) {
+      if (!advertiserWallet) {
+        return res.status(400).json({ error: 'Wallet not found' });
+      }
+
+      if (advertiserWallet.balance < totalPrice) {
         return res.status(400).json({
           error: 'Insufficient wallet balance',
           currentBalance: advertiserWallet.balance,
-          required: budgetVal
+          required: totalPrice,
+          shortfall: totalPrice - advertiserWallet.balance
         });
       }
 
@@ -484,14 +554,18 @@ router.post(
         advertiser: advertiserId,
         title,
 
-        // Financials
-        rate_per_1000: PGC_VIDEO_COST, // Represents cost per video
-        clipper_cpm: PGC_CLIPPER_PAYOUT, // Represents payout per video
+        // Addons and script
+        pgcAddons: addonsArr,
+        script: script || '',
+
+        // Financials - store the actual amounts
+        rate_per_1000: totalPrice, // Total price stored here
+        clipper_cpm: totalCreatorPayout, // Total creator payout
 
         // Budget/Videos
-        budget_total: budgetVal,
-        budget_remaining: budgetVal,
-        desiredVideos: actualVideos,
+        budget_total: totalPrice,
+        budget_remaining: totalPrice,
+        desiredVideos: 1,
         approvedVideosCount: 0,
 
         // Targeting/Meta
@@ -502,12 +576,12 @@ router.post(
         cta_url: cta_url || undefined,
         categories: categoriesArr,
 
-        // PGC meta (reusing ugc subdocument structure)
+        // PGC meta
         ugc: {
           brief: brief || '',
           deliverables: deliverablesArr,
           assets: assetPaths,
-          draftRequired: false, // Always false for PGC
+          draftRequired: false,
           captionTemplate: captionTemplate || '',
           usageRights: usageRights || 'Brand may use and repost creator content on brand social channels and marketing materials.',
           approvalCriteria: approvalCriteria || '',
@@ -517,25 +591,202 @@ router.post(
         status: 'pending',
       });
 
-      // Assign ad worker (optional – reuse your helper)
+      // Assign ad worker
       const worker = await getNextAdWorker();
       if (worker) campaign.assignedWorker = worker._id;
 
       // Lock FULL advertiser cost in escrow
-      await advertiserWallet.lockEscrow(budgetVal);
+      await advertiserWallet.lockEscrow(totalPrice);
 
       await campaign.save();
-      return res.status(201).json(campaign);
+
+      // Return success with detailed breakdown
+      return res.status(201).json({
+        message: 'PGC Campaign Created Successfully!',
+        campaign,
+        pricing: {
+          base: {
+            price: BASE_PRICE,
+            platform: BASE_PLATFORM_FEE,
+            creator: BASE_CREATOR_PAYOUT,
+            breakdown: `₦${BASE_PRICE} = Platform: ₦${BASE_PLATFORM_FEE} (43%), Creator: ₦${BASE_CREATOR_PAYOUT} (57%)`
+          },
+          addons: addonBreakdown,
+          totals: {
+            totalPrice: totalPrice,
+            platformTotal: totalPlatformFee,
+            creatorTotal: totalCreatorPayout,
+            breakdown: `Total: ₦${totalPrice} = Platform: ₦${totalPlatformFee} (${Math.round((totalPlatformFee/totalPrice)*100)}%), Creator: ₦${totalCreatorPayout} (${Math.round((totalCreatorPayout/totalPrice)*100)}%)`
+          }
+        }
+      });
     } catch (err) {
       console.error('PGC create error:', err);
-      // cleanup uploaded files on error
+      
+      // Cleanup uploaded files on error
       for (const f of (req.files || [])) {
-        try { await fs.promises.unlink(f.path); } catch {}
+        try { await fs.promises.unlink(f.path); } catch (cleanupErr) {
+          console.error('Failed to cleanup file:', cleanupErr);
+        }
       }
-      return res.status(500).json({ error: 'Server error creating PGC campaign' });
+      
+      return res.status(500).json({ 
+        error: 'Server error creating PGC campaign',
+        details: process.env.NODE_ENV === 'development' ? err.message : undefined
+      });
     }
   }
 );
+
+// Helper function to get addon display name
+function getAddonName(addonId) {
+  const addonNames = {
+    script: 'Creator provides script',
+    whatsapp: 'Creator + Post their WhatsApp',
+    ig: 'Collaborative - Creator Post on their IG',
+    tiktok: 'Creator Post on TikTok',
+    outdoor: 'Creator Outdoor shoot'
+  };
+  return addonNames[addonId] || addonId;
+}
+
+// router.post(
+//   '/pgc',
+//   requireAuth,
+//   requireAdvertiser,
+//   pgcAssetUpload.array('assets', 12), // optional files from form field `assets`
+//   async (req, res) => {
+//     try {
+//       const advertiserId = req.user._id;
+
+//       // BODY: title, budget, desiredVideos, platforms[], countries[], hashtags[], directions[], categories[]
+//       // PGC meta: brief, deliverables[], captionTemplate, usageRights, approvalCriteria, cta_url
+//       const {
+//         title,
+//         budget,
+//         desiredVideos,
+//         platforms, countries, hashtags, directions, categories,
+//         brief,
+//         deliverables,
+//         captionTemplate,
+//         usageRights,
+//         approvalCriteria,
+//         cta_url,
+//       } = req.body;
+
+//       // Required fields
+//       if (!title) return res.status(400).json({ error: 'title is required' });
+//       if (!brief) return res.status(400).json({ error: 'brief is required' });
+//       if (!approvalCriteria) return res.status(400).json({ error: 'approvalCriteria is required' });
+
+//       const budgetVal = Number(budget);
+//       const desiredVideosVal = Number(desiredVideos);
+      
+//       if (!Number.isFinite(budgetVal) || budgetVal <= 0) {
+//         return res.status(400).json({ error: 'Invalid budget' });
+//       }
+//       if (!Number.isFinite(desiredVideosVal) || desiredVideosVal < 1 || desiredVideosVal > 50) {
+//         return res.status(400).json({ error: 'Invalid desired videos count (1-50)' });
+//       }
+
+//       const platformsArr = parseArr(platforms);
+//       const countriesArr = parseArr(countries);
+//       const hashtagsArr = parseArr(hashtags);
+//       const directionsArr = parseArr(directions);
+//       const categoriesArr = parseArr(categories);
+//       const deliverablesArr = parseArr(deliverables);
+
+//       if (categoriesArr.length === 0) return res.status(400).json({ error: 'At least one category is required' });
+
+//       // PGC fixed economics
+//       const PGC_VIDEO_COST = 7500; // advertiser pays per video
+//       const PGC_CLIPPER_PAYOUT = 5000; // clipper earns per approved video
+//       const PLATFORM_FEE = 2500; // platform takes per video
+
+//       // Calculate minimum required budget
+//       const minBudget = desiredVideosVal * PGC_VIDEO_COST;
+//       if (budgetVal < minBudget) {
+//         return res.status(400).json({ 
+//           error: `Budget must be at least ₦${minBudget} for ${desiredVideosVal} videos (₦${PGC_VIDEO_COST} each)` 
+//         });
+//       }
+
+//       // Calculate maximum videos possible with budget
+//       const maxVideos = Math.floor(budgetVal / PGC_VIDEO_COST);
+//       const actualVideos = Math.min(desiredVideosVal, maxVideos);
+
+//       // Wallet + escrow check
+//       const advertiserWallet = await Wallet.findOne({ user: advertiserId });
+//       if (!advertiserWallet) return res.status(400).json({ error: 'Wallet not found' });
+//       if (advertiserWallet.balance < budgetVal) {
+//         return res.status(400).json({
+//           error: 'Insufficient wallet balance',
+//           currentBalance: advertiserWallet.balance,
+//           required: budgetVal
+//         });
+//       }
+
+//       // Build assets list (relative paths)
+//       const assetPaths = (req.files || []).map(f => `/uploads/pgc-assets/${path.basename(f.path)}`);
+
+//       // Create campaign document
+//       const campaign = new Campaign({
+//         kind: 'pgc',
+//         advertiser: advertiserId,
+//         title,
+
+//         // Financials
+//         rate_per_1000: PGC_VIDEO_COST, // Represents cost per video
+//         clipper_cpm: PGC_CLIPPER_PAYOUT, // Represents payout per video
+
+//         // Budget/Videos
+//         budget_total: budgetVal,
+//         budget_remaining: budgetVal,
+//         desiredVideos: actualVideos,
+//         approvedVideosCount: 0,
+
+//         // Targeting/Meta
+//         platforms: platformsArr,
+//         countries: countriesArr,
+//         hashtags: hashtagsArr,
+//         directions: directionsArr,
+//         cta_url: cta_url || undefined,
+//         categories: categoriesArr,
+
+//         // PGC meta (reusing ugc subdocument structure)
+//         ugc: {
+//           brief: brief || '',
+//           deliverables: deliverablesArr,
+//           assets: assetPaths,
+//           draftRequired: false, // Always false for PGC
+//           captionTemplate: captionTemplate || '',
+//           usageRights: usageRights || 'Brand may use and repost creator content on brand social channels and marketing materials.',
+//           approvalCriteria: approvalCriteria || '',
+//           hashtags: hashtagsArr,
+//         },
+
+//         status: 'pending',
+//       });
+
+//       // Assign ad worker (optional – reuse your helper)
+//       const worker = await getNextAdWorker();
+//       if (worker) campaign.assignedWorker = worker._id;
+
+//       // Lock FULL advertiser cost in escrow
+//       await advertiserWallet.lockEscrow(budgetVal);
+
+//       await campaign.save();
+//       return res.status(201).json(campaign);
+//     } catch (err) {
+//       console.error('PGC create error:', err);
+//       // cleanup uploaded files on error
+//       for (const f of (req.files || [])) {
+//         try { await fs.promises.unlink(f.path); } catch {}
+//       }
+//       return res.status(500).json({ error: 'Server error creating PGC campaign' });
+//     }
+//   }
+// );
 router.get(
   '/pgc',
   requireAuth,

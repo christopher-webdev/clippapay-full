@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { router } from 'expo-router';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const scale = width / 428;
 
 export default function Onboarding1() {
@@ -36,7 +36,7 @@ export default function Onboarding1() {
               styles.logo,
               {
                 top: 405 * scale,
-                left: 53 * scale,
+                left: (width - 323 * scale) / 2, // Center horizontally
               },
             ]}
             resizeMode="contain"
@@ -61,7 +61,6 @@ export default function Onboarding1() {
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
               >
-                {/* Invisible text defines gradient size */}
                 <Text style={[styles.mainText, { opacity: 0 }]}>
                   Create. Share. Earn
                 </Text>
@@ -95,29 +94,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-
   background: {
     flex: 1,
     width: '100%',
     height: '100%',
   },
-
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.35)',
   },
-
   content: {
     flex: 1,
-    position: 'relative',
   },
-
   logo: {
     position: 'absolute',
-    width: 323,
-    height: 64,
+    width: 323 * (width / 428),
+    height: 64 * (width / 428),
   },
-
   subText: {
     position: 'absolute',
     left: 0,
@@ -130,14 +123,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
     color: '#FFFFFF',
   },
-
   gradientTextContainer: {
     position: 'absolute',
     left: 0,
     right: 0,
     alignItems: 'center',
   },
-
   mainText: {
     fontFamily: 'OpenSans',
     fontWeight: '700',
@@ -147,22 +138,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#000',
   },
-
   buttonWrapper: {
     position: 'absolute',
     left: 24,
     right: 24,
     alignItems: 'center',
   },
-
   button: {
-    width: 354,
+    width: '100%',
     height: 56,
     borderRadius: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   buttonText: {
     color: '#FFFFFF',
     fontSize: 16,

@@ -75,7 +75,7 @@ export default function Onboarding2() {
               {/* Subtitle */}
               <Text style={styles.subtitle}>
                 Place Campaigns. Get UGCs. {' '}
-                <Text style={styles.bold}>Go Viral.zs2wwwwwwwx</Text>
+                <Text style={styles.bold}>Go Viral.</Text>
               </Text>
 
               {/* Dots */}
@@ -85,7 +85,7 @@ export default function Onboarding2() {
                 <View style={[styles.dot, styles.dotActive]} />
               </View>
 
-              {/* Next Button */}
+              {/* Got it */}
               <TouchableOpacity
                 activeOpacity={0.9}
                 onPress={() => router.push('/signup')}
@@ -111,7 +111,7 @@ export default function Onboarding2() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#000000',
   },
 
   background: {
@@ -207,6 +207,7 @@ const styles = StyleSheet.create({
   nextWrapper: {
     alignItems: 'center',
     marginTop: 24,
+    marginBottom: 24,
   },
 
   nextBtn: {

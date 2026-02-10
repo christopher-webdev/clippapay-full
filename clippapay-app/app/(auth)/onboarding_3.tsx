@@ -111,13 +111,13 @@ export default function Onboarding2() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#000000',
   },
 
   background: {
     flex: 1,
     width: '100%',
-    height: '100%',
+    height: '60%',
   },
 
   skipBtn: {
@@ -207,6 +207,7 @@ const styles = StyleSheet.create({
   nextWrapper: {
     alignItems: 'center',
     marginTop: 24,
+    marginBottom: 24,
   },
 
   nextBtn: {
