@@ -1,5 +1,5 @@
 // app/premium_creators.tsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,88 +12,21 @@ import {
   Animated,
   Platform,
   FlatList,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import axios from 'axios';
 
 // Create Animated FlatList (required for native driver scroll events)
 const AnimatedFlatList = Animated.createAnimatedComponent(FlatList);
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
-
-// ────────────────────────────────────────────────
-// Mock Data
-// ────────────────────────────────────────────────
-const mockCreators = [
-  {
-    id: '1',
-    name: 'Alex Rivera',
-    description: 'Lifestyle & Tech Reviews',
-    pricePerVideo: 150,
-    rating: 4.9,
-    completedProjects: 42,
-    deliveryTime: '3 days',
-    tags: ['Tech', 'Lifestyle', 'Review'],
-    image: require('../../assets/images/creator1.png'),
-  },
-  {
-    id: '2',
-    name: 'Jordan Lee',
-    description: 'Fitness & Wellness Specialist',
-    pricePerVideo: 200,
-    rating: 5.0,
-    completedProjects: 78,
-    deliveryTime: '5 days',
-    tags: ['Fitness', 'Wellness', 'Coaching'],
-    image: require('../../assets/images/creator2.png'),
-  },
-  {
-    id: '3',
-    name: 'Taylor Kim',
-    description: 'Travel & Adventure Storytelling',
-    pricePerVideo: 120,
-    rating: 4.7,
-    completedProjects: 36,
-    deliveryTime: '7 days',
-    tags: ['Travel', 'Adventure', 'Photography'],
-    image: require('../../assets/images/creator3.png'),
-  },
-  {
-    id: '4',
-    name: 'Morgan Patel',
-    description: 'Culinary & Recipe Tutorials',
-    pricePerVideo: 180,
-    rating: 4.8,
-    completedProjects: 54,
-    deliveryTime: '2 days',
-    tags: ['Food', 'Cooking', 'Tutorial'],
-    image: require('../../assets/images/creator4.png'),
-  },
-  {
-    id: '5',
-    name: 'Casey Chen',
-    description: 'Fashion & Beauty Influencer',
-    pricePerVideo: 220,
-    rating: 4.9,
-    completedProjects: 65,
-    deliveryTime: '4 days',
-    tags: ['Fashion', 'Beauty', 'Style'],
-    image: require('../../assets/images/creator5.png'),
-  },
-  {
-    id: '6',
-    name: 'Riley Morgan',
-    description: 'Business & Finance Education',
-    pricePerVideo: 250,
-    rating: 4.8,
-    completedProjects: 29,
-    deliveryTime: '6 days',
-    tags: ['Finance', 'Business', 'Education'],
-    image: require('../../assets/images/creator6.png'),
-  },
-];
+const API_BASE = 'https://clippapay.com/api';
 
 const CATEGORIES = ['All', 'Tech', 'Fitness', 'Travel', 'Food', 'Fashion', 'Business'];
 
@@ -102,6 +35,9 @@ const CATEGORIES = ['All', 'Tech', 'Fitness', 'Travel', 'Food', 'Fashion', 'Busi
 // ────────────────────────────────────────────────
 export default function PremiumCreators() {
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [creators, setCreators] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const scrollY = useRef(new Animated.Value(0)).current;
 
   // Header collapse values
@@ -123,13 +59,89 @@ export default function PremiumCreators() {
     extrapolate: 'clamp',
   });
 
+  const getToken = async () => {
+    let token = null;
+    if (Platform.OS === 'web') {
+      token = await AsyncStorage.getItem('userToken');
+    } else {
+      token = await SecureStore.getItemAsync('userToken');
+      if (!token) token = await AsyncStorage.getItem('userToken');
+    }
+    return token;
+  };
+
+  const toFullUrl = (path) => {
+    if (!path) return 'https://via.placeholder.com/300x200?text=No+Image';
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (path.startsWith('file://') || path.startsWith('ph://')) return path;
+    let cleanPath = path;
+    if (cleanPath.startsWith('/api/')) {
+      cleanPath = cleanPath.replace('/api', '');
+    } else if (cleanPath.startsWith('api/')) {
+      cleanPath = cleanPath.replace('api/', '');
+    }
+    return `https://clippapay.com${cleanPath.startsWith('/') ? '' : '/'}${cleanPath}`;
+  };
+
+  useEffect(() => {
+    const fetchPremiumCreators = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const token = await getToken();
+        if (!token) {
+          throw new Error('No authentication token found. Please log in.');
+        }
+
+        // Fetch all clippers
+        const { data: users } = await axios.get(`${API_BASE}/users?role=clipper`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        // Filter premium creators
+        const premiumUsers = users.filter((u) => u.isPremiumCreator);
+
+        // Fetch profiles for each premium user
+        const creatorsData = await Promise.all(
+          premiumUsers.map(async (u) => {
+            const { data: profile } = await axios.get(`${API_BASE}/clipper-profile/${u._id}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            return {
+              ...profile,
+              id: u._id,
+              name: `${profile.user.firstName || ''} ${profile.user.lastName || ''}`.trim() || 'Anonymous Creator',
+              rating: profile.user.rating || 0,
+            };
+          })
+        );
+
+        setCreators(creatorsData);
+      } catch (err) {
+        console.error('Error fetching premium creators:', err);
+        setError(err.response?.data?.error || 'Failed to load premium creators. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPremiumCreators();
+  }, []);
+
   const filteredCreators = selectedCategory === 'All'
-    ? mockCreators
-    : mockCreators.filter(creator =>
-        creator.tags.some(tag => tag.toLowerCase() === selectedCategory.toLowerCase())
+    ? creators
+    : creators.filter((creator) =>
+        creator.categories?.some((tag) => tag.toLowerCase() === selectedCategory.toLowerCase())
       );
 
-  const renderCreatorItem = ({ item }: { item: typeof mockCreators[0] }) => {
+  const renderCreatorItem = ({ item }) => {
+    const description = item.categories?.length > 0 ? `${item.categories.join(' & ')} Specialist` : 'Content Creator';
+    const pricePerVideo = item.ratePerVideo || 0;
+    const completedProjects = item.completedProjects || 0;
+    const deliveryTime = item.expectedDelivery ? `${item.expectedDelivery} days` : 'N/A';
+    const tags = item.categories || [];
+    const imageUri = toFullUrl(item.profileImage);
+
     return (
       <Animated.View
         style={{
@@ -153,7 +165,7 @@ export default function PremiumCreators() {
         <TouchableOpacity
           activeOpacity={0.92}
           style={styles.cardWrapper}
-          onPress={() => router.push(`/creator_profile?id=${item.id}`)}
+          onPress={() => router.push(`/premium_creator_hire?id=${item.id}`)}
         >
           <LinearGradient
             colors={['#343434', '#2A2A2A', '#3A1A2A']}
@@ -166,21 +178,21 @@ export default function PremiumCreators() {
               <Text style={styles.premiumRibbonText}>PREMIUM</Text>
             </View>
 
-            <Image source={item.image} style={styles.creatorImage} resizeMode="cover" />
+            <Image source={{ uri: imageUri }} style={styles.creatorImage} resizeMode="cover" />
 
             <View style={styles.creatorInfo}>
               <View style={styles.headerRow}>
                 <Text style={styles.name}>{item.name}</Text>
                 <View style={styles.ratingContainer}>
                   <Ionicons name="star" size={14 * scale} color="#FFD700" />
-                  <Text style={styles.rating}>{item.rating}</Text>
+                  <Text style={styles.rating}>{item.rating.toFixed(1)}</Text>
                 </View>
               </View>
 
-              <Text style={styles.description}>{item.description}</Text>
+              <Text style={styles.description}>{description}</Text>
 
               <View style={styles.tagsContainer}>
-                {item.tags.map((tag, idx) => (
+                {tags.map((tag, idx) => (
                   <View key={idx} style={styles.tag}>
                     <Text style={styles.tagText}>{tag}</Text>
                   </View>
@@ -189,17 +201,17 @@ export default function PremiumCreators() {
 
               <View style={styles.statsRow}>
                 <View style={styles.stat}>
-                  <Text style={styles.statNumber}>{item.completedProjects}</Text>
+                  <Text style={styles.statNumber}>{completedProjects}</Text>
                   <Text style={styles.statLabel}>Projects</Text>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.stat}>
-                  <Text style={styles.statNumber}>{item.deliveryTime}</Text>
+                  <Text style={styles.statNumber}>{deliveryTime}</Text>
                   <Text style={styles.statLabel}>Delivery</Text>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.stat}>
-                  <Text style={styles.price}>${item.pricePerVideo}</Text>
+                  <Text style={styles.price}>${pricePerVideo}</Text>
                   <Text style={styles.statLabel}>/video</Text>
                 </View>
               </View>
@@ -220,6 +232,22 @@ export default function PremiumCreators() {
       </Animated.View>
     );
   };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#FF3366" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>{error}</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.background}>
@@ -298,6 +326,11 @@ export default function PremiumCreators() {
                 </View>
               </View>
             </>
+          )}
+          ListEmptyComponent={() => (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No premium creators available at this time</Text>
+            </View>
           )}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
@@ -552,5 +585,32 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginRight: 10 * scale,
     zIndex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0F0F0F',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0F0F0F',
+    padding: 20 * scale,
+  },
+  errorText: {
+    color: '#FF3366',
+    fontSize: 16 * scale,
+    textAlign: 'center',
+  },
+  emptyContainer: {
+    padding: 40 * scale,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: '#AAAAAA',
+    fontSize: 16 * scale,
+    textAlign: 'center',
   },
 });

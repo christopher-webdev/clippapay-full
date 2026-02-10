@@ -102,8 +102,8 @@ export default function WalletScreen() {
 
   const handleDeposit = async () => {
     const amt = parseInt(depositAmount, 10);
-    if (isNaN(amt) || amt < 5000) {
-      Alert.alert('Invalid Amount', 'Minimum deposit is ₦10,000');
+    if (isNaN(amt) || amt < 20000) {
+      Alert.alert('Invalid Amount', 'Minimum deposit is ₦20,000');
       return;
     }
 
@@ -188,7 +188,7 @@ export default function WalletScreen() {
 
   const submitManualDeposit = async () => {
     const amt = parseInt(depositAmount, 10);
-    if (isNaN(amt) || amt < 5000) {
+    if (isNaN(amt) || amt < 20000) {
       Alert.alert('Error', 'Invalid amount');
       return;
     }
@@ -345,7 +345,7 @@ export default function WalletScreen() {
                 style={styles.input}
                 value={depositAmount}
                 onChangeText={setDepositAmount}
-                placeholder="Minimum ₦5,000"
+                placeholder="Minimum ₦20,000"
                 keyboardType="numeric"
                 autoFocus
               />
@@ -377,10 +377,10 @@ export default function WalletScreen() {
               <TouchableOpacity
                 style={[
                   styles.submitBtn,
-                  (isNaN(amountNum) || amountNum < 5000) && styles.submitDisabled,
+                  (isNaN(amountNum) || amountNum < 20000) && styles.submitDisabled,
                 ]}
                 onPress={handleDeposit}
-                disabled={submitting || isNaN(amountNum) || amountNum < 5000}
+                disabled={submitting || isNaN(amountNum) || amountNum < 20000}
               >
                 {submitting ? (
                   <ActivityIndicator color="#FFF" />
@@ -464,7 +464,7 @@ export default function WalletScreen() {
 
 const styles = StyleSheet.create({
   scrollContent: {
-    paddingTop: 20, // Reduced since header is in layout
+    paddingTop: 120, // Reduced since header is in layout
     paddingHorizontal: 24,
     paddingBottom: 20,
   },

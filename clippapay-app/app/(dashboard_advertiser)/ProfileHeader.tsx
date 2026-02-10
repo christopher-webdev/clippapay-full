@@ -1,29 +1,128 @@
-import React from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+/// app/components/ProfileHeader.tsx
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  View, 
+  Text, 
+  Image, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Dimensions, 
+  Platform, 
+  Alert,
+  ActivityIndicator 
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { useFocusEffect } from '@react-navigation/native'; // ← Add this import
 
 const { width } = Dimensions.get('window');
-const scale = width / 428; // Based on your Figma width
+const scale = width / 428;
+const API_BASE = 'https://clippapay.com/api';
+
+const DEFAULT_PROFILE = require('../../assets/images/user-default.jpg');
 
 export default function ProfileHeader() {
+  const [user, setUser] = useState<any>(null);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
+
+  const getToken = async () => {
+    let token: string | null = null;
+    if (Platform.OS === 'web') {
+      token = await AsyncStorage.getItem('userToken');
+    } else {
+      token = await SecureStore.getItemAsync('userToken');
+      if (!token) token = await AsyncStorage.getItem('userToken');
+    }
+    return token;
+  };
+
+  const fetchData = async () => {
+    const storedToken = await getToken();
+    if (!storedToken) {
+      Alert.alert('Authentication Error', 'No auth token found.');
+      return;
+    }
+    setToken(storedToken);
+    setLoading(true);
+
+    try {
+      // Fetch user basic info
+      const { data: userData } = await axios.get(`${API_BASE}/user/me`, {
+        headers: { Authorization: `Bearer ${storedToken}` },
+      });
+      setUser(userData);
+
+      // Fetch profile (image + video)
+      const { data: profileData } = await axios.get(`${API_BASE}/user/me`, {
+        headers: { Authorization: `Bearer ${storedToken}` },
+      });
+      const imageUrl = profileData.profileImage;
+      if (imageUrl) {
+        const fullUrl = imageUrl.startsWith('http') 
+          ? imageUrl 
+          : `https://clippapay.com${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+        console.log('Resolved profile image URL:', fullUrl);
+        setProfileImage(fullUrl);
+      } else {
+        setProfileImage(null);
+      }
+    } catch (err: any) {
+      console.error('Fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Re-fetch every time the screen is focused (after coming back from edit)
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [])
+  );
+
+  const handleImageError = () => {
+    console.log('Failed to load profile image:', profileImage);
+    setImageError(true);
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="small" color="#000" />
+      </View>
+    );
+  }
+
+  const displayName = user?.company
+    ? `${user.company || ''}`.trim()
+    : 'Hello, Advertiser!';
+
+  const imageSource = imageError || !profileImage
+    ? DEFAULT_PROFILE
+    : { uri: profileImage };
+
   return (
     <View style={styles.container}>
-      {/* Profile Image */}
       <Image
-        source={require('../../assets/images/default_profile.png')} // Replace with your asset
+        source={imageSource}
         style={styles.profileImage}
+        onError={handleImageError}
+        defaultSource={DEFAULT_PROFILE}
       />
 
-      {/* Texts */}
       <View style={styles.textContainer}>
         <Text style={styles.greeting}>Good Evening!</Text>
-        <Text style={styles.name}>Amanda Waller</Text>
+        <Text style={styles.name}>{displayName}</Text>
         <View style={styles.advertiserBadge}>
           <Text style={styles.advertiserText}>Advertiser</Text>
         </View>
       </View>
 
-      {/* Notification Bell */}
       <TouchableOpacity style={styles.notificationContainer}>
         <Ionicons name="notifications-outline" size={21 * scale} color="#000" />
         <View style={styles.notificationDot} />
@@ -32,19 +131,18 @@ export default function ProfileHeader() {
   );
 }
 
+// Styles remain exactly the same as before
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 0,
     top: 0 * scale,
     left: 0,
     width: 430 * scale,
     height: 130 * scale,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 28 * scale,
-    // Add shadow if needed for elevation
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -55,12 +153,12 @@ const styles = StyleSheet.create({
     width: 58 * scale,
     height: 58 * scale,
     borderRadius: 30 * scale,
+    backgroundColor: '#f0f0f0',
   },
   textContainer: {
-    marginLeft: 14 * scale, // Adjusted for spacing between image and text
+    marginLeft: 14 * scale,
   },
   greeting: {
-    // fontFamily: 'OpenSans',
     fontWeight: '400',
     fontSize: 12 * scale,
     lineHeight: 12 * scale * 1.4,
@@ -68,7 +166,6 @@ const styles = StyleSheet.create({
     color: '#000',
   },
   name: {
-    // fontFamily: 'OpenSans',
     fontWeight: '700',
     fontSize: 20 * scale,
     lineHeight: 20 * scale * 1.4,
@@ -79,14 +176,14 @@ const styles = StyleSheet.create({
     width: 71 * scale,
     height: 19 * scale,
     borderRadius: 20 * scale,
-    backgroundColor: '#F8312F33', // Semi-transparent red
+    backgroundColor: '#F8312F33',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 4 * scale, // Spacing from name
+    marginTop: 4 * scale,
   },
   advertiserText: {
     fontSize: 12 * scale,
-    color: '#F8312F', // Assuming red text
+    color: '#F8312F',
   },
   notificationContainer: {
     position: 'absolute',
@@ -100,10 +197,10 @@ const styles = StyleSheet.create({
   notificationDot: {
     position: 'absolute',
     top: 3 * scale,
-    right: 4 * scale, // Adjusted to match Figma (left:15px relative to bell)
+    right: 4 * scale,
     width: 8 * scale,
     height: 8 * scale,
     borderRadius: 4 * scale,
-    backgroundColor: '#F8312F', // Red ellipse
+    backgroundColor: '#F8312F',
   },
 });

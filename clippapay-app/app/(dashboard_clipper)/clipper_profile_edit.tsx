@@ -15,7 +15,6 @@ import {
   Platform,
   Modal,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
@@ -48,7 +47,6 @@ export default function ClipperProfileEdit() {
     country: '',
   });
 
-  // Password change fields
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -60,7 +58,6 @@ export default function ClipperProfileEdit() {
   const [videoUploading, setVideoUploading] = useState(false);
   const [token, setToken] = useState<string | null>(null);
 
-  // Preview states
   const [showImagePreview, setShowImagePreview] = useState(false);
   const [showVideoPreview, setShowVideoPreview] = useState(false);
 
@@ -79,6 +76,21 @@ export default function ClipperProfileEdit() {
       if (!token) token = await AsyncStorage.getItem('userToken');
     }
     return token;
+  };
+
+  const toFullUrl = (path: string | null): string | null => {
+    if (!path) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (path.startsWith('file://') || path.startsWith('ph://')) return path;
+
+    let cleanPath = path;
+    if (cleanPath.startsWith('/api/')) {
+      cleanPath = cleanPath.replace('/api', '');
+    } else if (cleanPath.startsWith('api/')) {
+      cleanPath = cleanPath.replace('api/', '');
+    }
+
+    return `https://clippapay.com${cleanPath.startsWith('/') ? '' : '/'}${cleanPath}`;
   };
 
   const loadTokenAndProfile = async () => {
@@ -117,20 +129,19 @@ export default function ClipperProfileEdit() {
       const newProfile = {
         bio: profileData.bio || '',
         categories: profileData.categories || [],
-        sampleVideo: profileData.sampleVideo || null,
+        sampleVideo: toFullUrl(profileData.sampleVideo),
         ratePerVideo: profileData.ratePerVideo ? profileData.ratePerVideo.toString() : '',
         expectedDelivery: profileData.expectedDelivery || '',
         completedProjects: profileData.completedProjects
           ? profileData.completedProjects.toString()
           : '',
-        profileImage: profileData.profileImage || null,
+        profileImage: toFullUrl(profileData.profileImage),
       };
 
       setProfile(newProfile);
 
-      // Debug URIs
-      console.log('Loaded profile image URI:', newProfile.profileImage);
-      console.log('Loaded sample video URI:', newProfile.sampleVideo);
+      console.log('Resolved profile image URL:', newProfile.profileImage);
+      console.log('Resolved sample video URL:', newProfile.sampleVideo);
     } catch (err: any) {
       console.error('Fetch error:', err.message, err.response?.data);
       Alert.alert('Error', err.response?.data?.error || 'Failed to load your profile');
@@ -193,7 +204,7 @@ export default function ClipperProfileEdit() {
       }
       console.log('Selected video URI:', asset.uri);
       setProfile((prev: any) => ({ ...prev, sampleVideo: asset.uri }));
-      Alert.alert('Success', 'Video attached successfully! Tap to preview.');
+      Alert.alert('Success', 'Video attached! Tap to preview.');
     }
   };
 
@@ -203,7 +214,6 @@ export default function ClipperProfileEdit() {
     try {
       setSaving(true);
 
-      // Update basic info
       await axios.patch(
         `${API_BASE}/user/me`,
         {
@@ -222,7 +232,7 @@ export default function ClipperProfileEdit() {
         formData.append('sampleVideo', {
           uri: profile.sampleVideo,
           type: 'video/mp4',
-          name: 'sample.mp4',
+          name: `sample-${Date.now()}.mp4`,
         } as any);
       }
 
@@ -230,29 +240,37 @@ export default function ClipperProfileEdit() {
         formData.append('profileImage', {
           uri: profile.profileImage,
           type: 'image/jpeg',
-          name: 'profile.jpg',
+          name: `profile-${Date.now()}.jpg`,
         } as any);
       }
 
       if (user?.isPremiumCreator) {
-        formData.append('bio', profile.bio);
-        formData.append('categories', JSON.stringify(profile.categories));
+        formData.append('bio', profile.bio || '');
+        formData.append('categories', JSON.stringify(profile.categories || []));
         formData.append('ratePerVideo', profile.ratePerVideo || '0');
         formData.append('expectedDelivery', profile.expectedDelivery || '');
         formData.append('completedProjects', profile.completedProjects || '0');
       }
 
       if (formData._parts?.length > 0) {
-        await axios.patch(`${API_BASE}/user/clipper-profile/me`, formData, {
+        const response = await axios.patch(`${API_BASE}/user/clipper-profile/me`, formData, {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'multipart/form-data',
           },
         });
+
+        if (response.data) {
+          setProfile((prev: any) => ({
+            ...prev,
+            profileImage: toFullUrl(response.data.profileImage || prev.profileImage),
+            sampleVideo: toFullUrl(response.data.sampleVideo || prev.sampleVideo),
+          }));
+        }
       }
 
       Alert.alert('Success', 'Profile updated successfully!');
-      fetchUserAndProfile(token);
+      await fetchUserAndProfile(token);
     } catch (err: any) {
       console.error('Save error:', err.response?.data || err);
       Alert.alert('Error', err.response?.data?.error || 'Failed to update profile');
@@ -269,7 +287,7 @@ export default function ClipperProfileEdit() {
     setPwMessage('');
 
     if (newPassword.length < 6) {
-      setPwMessage('New password must be at least 6 characters long.');
+      setPwMessage('New password must be at least 6 characters.');
       setPwSaving(false);
       return;
     }
@@ -322,277 +340,281 @@ export default function ClipperProfileEdit() {
 
   if (loading) {
     return (
-      <LinearGradient colors={['#0F0F0F', '#1A1A1A']} style={styles.background}>
-        <SafeAreaView style={styles.container}>
-          <ActivityIndicator size="large" color="#FF3366" />
-        </SafeAreaView>
-      </LinearGradient>
+      <SafeAreaView style={styles.container}>
+        <ActivityIndicator size="large" color="#7C3AED" />
+      </SafeAreaView>
     );
   }
 
   const isPremium = user?.isPremiumCreator;
 
   return (
-    <LinearGradient colors={['#0F0F0F', '#1A1A1A']} style={styles.background}>
-      <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()}>
-              <Ionicons name="arrow-back" size={28 * scale} color="#FFF" />
-            </TouchableOpacity>
-            <Text style={styles.title}>Clipper Settings</Text>
-            <View style={{ width: 28 * scale }} />
+    
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={28 * scale} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Clipper Settings</Text>
+          <View style={{ width: 28 * scale }} />
+        </View>
+
+        {/* Premium Notice */}
+        {!isPremium && (
+          <View style={styles.premiumNotice}>
+            <Ionicons name="star-outline" size={32 * scale} color="#FFD700" />
+            <Text style={styles.premiumTitle}>Become a Premium Creator</Text>
+            <Text style={styles.premiumText}>
+              Unlock advanced features like setting your rate, bio, categories, and more. You need a rating of 4.0 or higher.
+            </Text>
+            <Text style={styles.currentRating}>
+              Your current rating: {user?.rating?.toFixed(1) || '0.0'}/5.0
+            </Text>
           </View>
+        )}
 
-          {/* Premium Notice */}
-          {!isPremium && (
-            <View style={styles.premiumNotice}>
-              <Ionicons name="star-outline" size={32 * scale} color="#FFD700" />
-              <Text style={styles.premiumTitle}>Become a Premium Creator</Text>
-              <Text style={styles.premiumText}>
-                Unlock advanced features like setting your rate, bio, categories, and more. You need a rating of 4.0 or higher.
-              </Text>
-              <Text style={styles.currentRating}>
-                Your current rating: {user?.rating?.toFixed(1) || '0.0'}/5.0
-              </Text>
-            </View>
-          )}
+        {/* Basic Information */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Basic Information</Text>
 
-          {/* Basic Information */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Basic Information</Text>
-            <Text style={styles.label}>First Name</Text>
-            <TextInput
-              style={styles.input}
-              value={basicInfo.firstName}
-              onChangeText={(text) => setBasicInfo((p) => ({ ...p, firstName: text }))}
-            />
+          <Text style={styles.label}>First Name</Text>
+          <TextInput
+            style={styles.input}
+            value={basicInfo.firstName}
+            onChangeText={(text) => setBasicInfo((p) => ({ ...p, firstName: text }))}
+            placeholder="Your first name"
+          />
 
-            <Text style={styles.label}>Last Name</Text>
-            <TextInput
-              style={styles.input}
-              value={basicInfo.lastName}
-              onChangeText={(text) => setBasicInfo((p) => ({ ...p, lastName: text }))}
-            />
+          <Text style={styles.label}>Last Name</Text>
+          <TextInput
+            style={styles.input}
+            value={basicInfo.lastName}
+            onChangeText={(text) => setBasicInfo((p) => ({ ...p, lastName: text }))}
+            placeholder="Your last name"
+          />
 
-            <Text style={styles.label}>Phone Number</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="phone-pad"
-              value={basicInfo.phone}
-              onChangeText={(text) => setBasicInfo((p) => ({ ...p, phone: text }))}
-            />
+          <Text style={styles.label}>Phone Number</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="phone-pad"
+            value={basicInfo.phone}
+            onChangeText={(text) => setBasicInfo((p) => ({ ...p, phone: text }))}
+            placeholder="Your phone number"
+          />
 
-            <Text style={styles.label}>Country</Text>
-            <TextInput
-              style={styles.input}
-              value={basicInfo.country}
-              onChangeText={(text) => setBasicInfo((p) => ({ ...p, country: text }))}
-            />
-          </View>
+          <Text style={styles.label}>Country</Text>
+          <TextInput
+            style={styles.input}
+            value={basicInfo.country}
+            onChangeText={(text) => setBasicInfo((p) => ({ ...p, country: text }))}
+            placeholder="Your country"
+          />
+        </View>
 
-          {/* Visual Profile */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Visual Profile</Text>
+        {/* Visual Profile */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Visual Profile</Text>
 
-            {/* Profile Photo */}
-            <Text style={styles.label}>Profile Photo</Text>
-            <TouchableOpacity
-              style={styles.mediaContainer}
-              onPress={() => profile.profileImage && setShowImagePreview(true)}
-              activeOpacity={0.85}
-            >
-              {profile.profileImage ? (
-                <Image
-                  source={{ uri: profile.profileImage }}
-                  style={styles.currentMedia}
-                  resizeMode="cover"
-                  onError={(e) => console.log('Profile image load error:', e.nativeEvent.error)}
-                />
-              ) : (
-                <View style={styles.placeholder}>
-                  <Ionicons name="person-circle-outline" size={80 * scale} color="#666" />
-                  <Text style={styles.placeholderText}>No photo yet</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.uploadBtn} onPress={pickImage}>
-              <Ionicons name="image-outline" size={20 * scale} color="#FFF" />
-              <Text style={styles.uploadBtnText}>Change Profile Photo</Text>
-            </TouchableOpacity>
-
-            {/* Sample Video */}
-            <Text style={styles.label}>Sample Video (max 20MB)</Text>
-            <TouchableOpacity
-              style={styles.mediaContainer}
-              onPress={() => profile.sampleVideo && setShowVideoPreview(true)}
-              activeOpacity={0.85}
-            >
-              {profile.sampleVideo ? (
-                <Video
-                  ref={videoRef}
-                  source={{ uri: profile.sampleVideo }}
-                  style={styles.currentMedia}
-                  resizeMode={ResizeMode.CONTAIN}
-                  shouldPlay={false}
-                  useNativeControls={false}
-                  isLooping={false}
-                  onError={(err) => console.log('Video preview error:', err)}
-                />
-              ) : (
-                <View style={styles.placeholder}>
-                  <Ionicons name="videocam-off" size={80 * scale} color="#666" />
-                  <Text style={styles.placeholderText}>No video yet</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.uploadBtn} onPress={pickVideo}>
-              <Ionicons name="videocam" size={20 * scale} color="#FFF" />
-              <Text style={styles.uploadBtnText}>Attach / Change Video</Text>
-            </TouchableOpacity>
-
-            {videoUploading && (
-              <Text style={styles.uploadingText}>Uploading video...</Text>
-            )}
-          </View>
-
-          {/* Premium-only fields */}
-          {isPremium && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Premium Creator Details</Text>
-
-              <Text style={styles.label}>Bio / About You</Text>
-              <TextInput
-                style={[styles.input, styles.textarea]}
-                multiline
-                numberOfLines={4}
-                value={profile.bio}
-                onChangeText={(text) => setProfile((p: any) => ({ ...p, bio: text }))}
-                placeholder="Tell brands about your style and experience..."
+          <Text style={styles.label}>Profile Photo</Text>
+          <TouchableOpacity
+            style={styles.mediaContainer}
+            onPress={() => profile.profileImage && setShowImagePreview(true)}
+            activeOpacity={0.85}
+          >
+            {profile.profileImage ? (
+              <Image
+                source={{ uri: profile.profileImage }}
+                style={styles.currentMedia}
+                resizeMode="cover"
+                onError={(e) => console.log('Image load error:', e.nativeEvent.error)}
               />
-
-              <Text style={styles.label}>Specialized Categories</Text>
-              <View style={styles.categoriesContainer}>
-                {CATEGORIES.map((cat) => (
-                  <TouchableOpacity
-                    key={cat}
-                    style={[
-                      styles.categoryChip,
-                      profile.categories.includes(cat) && styles.categoryChipActive,
-                    ]}
-                    onPress={() => toggleCategory(cat)}
-                  >
-                    <Text
-                      style={[
-                        styles.categoryText,
-                        profile.categories.includes(cat) && styles.categoryTextActive,
-                      ]}
-                    >
-                      {cat}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+            ) : (
+              <View style={styles.placeholder}>
+                <Ionicons name="person-circle-outline" size={80 * scale} color="#aaa" />
+                <Text style={styles.placeholderText}>No photo yet</Text>
               </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.uploadBtn} onPress={pickImage}>
+            <Ionicons name="image-outline" size={20 * scale} color="#FFF" />
+            <Text style={styles.uploadBtnText}>Change Profile Photo</Text>
+          </TouchableOpacity>
 
-              <Text style={styles.label}>Rate per Video (₦)</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                value={profile.ratePerVideo}
-                onChangeText={(text) => setProfile((p: any) => ({ ...p, ratePerVideo: text }))}
-                placeholder="e.g. 15000"
+          <Text style={styles.label}>Sample Video (max 20MB)</Text>
+          <TouchableOpacity
+            style={styles.mediaContainer}
+            onPress={() => profile.sampleVideo && setShowVideoPreview(true)}
+            activeOpacity={0.85}
+          >
+            {profile.sampleVideo ? (
+              <Video
+                ref={videoRef}
+                source={{ uri: profile.sampleVideo }}
+                style={styles.currentMedia}
+                resizeMode={ResizeMode.CONTAIN}
+                shouldPlay={false}
+                useNativeControls={false}
+                isLooping={false}
+                onError={(err) => console.log('Video preview error:', err)}
               />
+            ) : (
+              <View style={styles.placeholder}>
+                <Ionicons name="videocam-off" size={80 * scale} color="#aaa" />
+                <Text style={styles.placeholderText}>No video yet</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.uploadBtn} onPress={pickVideo}>
+            <Ionicons name="videocam" size={20 * scale} color="#FFF" />
+            <Text style={styles.uploadBtnText}>Attach / Change Video</Text>
+          </TouchableOpacity>
 
-              <Text style={styles.label}>Expected Delivery Time</Text>
-              <TextInput
-                style={styles.input}
-                value={profile.expectedDelivery}
-                onChangeText={(text) => setProfile((p: any) => ({ ...p, expectedDelivery: text }))}
-                placeholder="e.g. 3-5 days"
-              />
-
-              <Text style={styles.label}>Completed Projects</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                value={profile.completedProjects}
-                onChangeText={(text) => setProfile((p: any) => ({ ...p, completedProjects: text }))}
-                placeholder="e.g. 45"
-              />
-            </View>
+          {videoUploading && (
+            <Text style={styles.uploadingText}>Uploading video...</Text>
           )}
+        </View>
 
-          {/* Change Password */}
+        {/* Premium-only fields */}
+        {isPremium && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Change Password</Text>
+            <Text style={styles.sectionTitle}>Premium Creator Details</Text>
 
-            {pwMessage ? (
-              <Text
-                style={[
-                  styles.message,
-                  pwMessage.includes('success') ? styles.success : styles.error,
-                ]}
-              >
-                {pwMessage}
-              </Text>
-            ) : null}
-
-            <Text style={styles.label}>Current Password</Text>
+            <Text style={styles.label}>Bio / About You</Text>
             <TextInput
-              style={styles.input}
-              secureTextEntry
-              value={currentPassword}
-              onChangeText={setCurrentPassword}
+              style={[styles.input, styles.textarea]}
+              multiline
+              numberOfLines={4}
+              value={profile.bio}
+              onChangeText={(text) => setProfile((p: any) => ({ ...p, bio: text }))}
+              placeholder="Tell brands about your style and experience..."
             />
 
-            <Text style={styles.label}>New Password</Text>
+            <Text style={styles.label}>Specialized Categories</Text>
+            <View style={styles.categoriesContainer}>
+              {CATEGORIES.map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[
+                    styles.categoryChip,
+                    profile.categories.includes(cat) && styles.categoryChipActive,
+                  ]}
+                  onPress={() => toggleCategory(cat)}
+                >
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      profile.categories.includes(cat) && styles.categoryTextActive,
+                    ]}
+                  >
+                    {cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.label}>Rate per Video (₦)</Text>
             <TextInput
               style={styles.input}
-              secureTextEntry
-              value={newPassword}
-              onChangeText={setNewPassword}
+              keyboardType="numeric"
+              value={profile.ratePerVideo}
+              onChangeText={(text) => setProfile((p: any) => ({ ...p, ratePerVideo: text }))}
+              placeholder="e.g. 15000"
             />
 
-            <Text style={styles.label}>Confirm New Password</Text>
+            <Text style={styles.label}>Expected Delivery Time</Text>
             <TextInput
               style={styles.input}
-              secureTextEntry
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
+              value={profile.expectedDelivery}
+              onChangeText={(text) => setProfile((p: any) => ({ ...p, expectedDelivery: text }))}
+              placeholder="e.g. 3-5 days"
+            />
+
+            <Text style={styles.label}>Completed Projects</Text>
+            <TextInput
+              style={styles.input}
+              keyboardType="numeric"
+              value={profile.completedProjects}
+              onChangeText={(text) => setProfile((p: any) => ({ ...p, completedProjects: text }))}
+              placeholder="e.g. 45"
             />
           </View>
+        )}
 
-          {/* Action Buttons */}
-          <View style={styles.buttonsContainer}>
-            <TouchableOpacity
-              style={[styles.saveButton, saving && styles.disabledButton]}
-              onPress={handleSaveProfile}
-              disabled={saving}
+        {/* Change Password */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Change Password</Text>
+
+          {pwMessage ? (
+            <Text
+              style={[
+                styles.message,
+                pwMessage.includes('success') ? styles.success : styles.error,
+              ]}
             >
-              <Text style={styles.buttonText}>
-                {saving ? 'Saving...' : 'Save Profile'}
-              </Text>
-            </TouchableOpacity>
+              {pwMessage}
+            </Text>
+          ) : null}
 
-            <TouchableOpacity
-              style={[styles.passwordButton, pwSaving && styles.disabledButton]}
-              onPress={handleChangePassword}
-              disabled={pwSaving}
-            >
-              <Text style={styles.buttonText}>
-                {pwSaving ? 'Changing...' : 'Change Password'}
-              </Text>
-            </TouchableOpacity>
+          <Text style={styles.label}>Current Password</Text>
+          <TextInput
+            style={styles.input}
+            secureTextEntry
+            value={currentPassword}
+            onChangeText={setCurrentPassword}
+            placeholder="Enter current password"
+          />
 
-            <TouchableOpacity style={styles.dangerButton} onPress={handleDeleteAccount}>
-              <Text style={styles.dangerButtonText}>Delete Account</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.label}>New Password</Text>
+          <TextInput
+            style={styles.input}
+            secureTextEntry
+            value={newPassword}
+            onChangeText={setNewPassword}
+            placeholder="New password (min 6 characters)"
+          />
 
-          <View style={{ height: 60 * scale }} />
-        </ScrollView>
-      </SafeAreaView>
+          <Text style={styles.label}>Confirm New Password</Text>
+          <TextInput
+            style={styles.input}
+            secureTextEntry
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            placeholder="Confirm new password"
+          />
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.buttonsContainer}>
+          <TouchableOpacity
+            style={[styles.saveButton, saving && styles.disabledButton]}
+            onPress={handleSaveProfile}
+            disabled={saving}
+          >
+            <Text style={styles.buttonText}>
+              {saving ? 'Saving...' : 'Save Profile'}
+            </Text>
+           
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.passwordButton, pwSaving && styles.disabledButton]}
+            onPress={handleChangePassword}
+            disabled={pwSaving}
+          >
+            <Text style={styles.buttonText}>
+              {pwSaving ? 'Changing...' : 'Change Password'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.dangerButton} onPress={handleDeleteAccount}>
+            <Text style={styles.dangerButtonText}>Delete Account</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={{ height: 60 * scale }} />
+      </ScrollView>
 
       {/* Image Preview Modal */}
       <Modal visible={showImagePreview} transparent onRequestClose={() => setShowImagePreview(false)}>
@@ -616,7 +638,7 @@ export default function ClipperProfileEdit() {
             style={styles.closeButton}
             onPress={() => setShowVideoPreview(false)}
           >
-            <Ionicons name="close-circle" size={40} color="#FFF" />
+            <Ionicons name="close-circle" size={40} color="#333" />
           </TouchableOpacity>
 
           <Video
@@ -629,57 +651,78 @@ export default function ClipperProfileEdit() {
           />
         </View>
       </Modal>
-    </LinearGradient>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  background: { flex: 1 },
-  container: { flex: 1 },
-  scrollContent: { padding: 20 * scale, paddingBottom: 100 * scale, paddingTop: 120 * scale },
+  container: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  scrollContent: {
+    padding: 20 * scale,
+    paddingBottom: 100 * scale,
+    paddingTop: 120 * scale,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 24 * scale,
   },
-  title: { fontSize: 26 * scale, fontWeight: '800', color: '#FFF' },
+  title: {
+    fontSize: 26 * scale,
+    fontWeight: '800',
+    color: '#111827',
+  },
   section: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: '#FFFFFF',
     borderRadius: 16 * scale,
     padding: 20 * scale,
     marginBottom: 20 * scale,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
   },
   sectionTitle: {
     fontSize: 18 * scale,
     fontWeight: '700',
-    color: '#FF3366',
+    color: '#7C3AED',
     marginBottom: 16 * scale,
   },
   label: {
     fontSize: 14 * scale,
-    color: '#DDD',
+    color: '#374151',
+    fontWeight: '600',
     marginBottom: 6 * scale,
     marginTop: 12 * scale,
   },
   input: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#F9FAFB',
     borderRadius: 12 * scale,
     padding: 14 * scale,
-    color: '#FFF',
+    color: '#111827',
     fontSize: 16 * scale,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: '#D1D5DB',
   },
-  textarea: { height: 100 * scale, textAlignVertical: 'top' },
+  textarea: {
+    height: 100 * scale,
+    textAlignVertical: 'top',
+  },
   mediaContainer: {
     height: 220 * scale,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: '#F3F4F6',
     borderRadius: 12 * scale,
     overflow: 'hidden',
     marginVertical: 12 * scale,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   currentMedia: {
     width: '100%',
@@ -689,10 +732,10 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#F9FAFB',
   },
   placeholderText: {
-    color: '#888',
+    color: '#9CA3AF',
     marginTop: 12 * scale,
     fontSize: 14 * scale,
   },
@@ -700,19 +743,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FF3366',
+    backgroundColor: '#7C3AED',
     paddingVertical: 14 * scale,
     borderRadius: 12 * scale,
     marginTop: 12 * scale,
     gap: 8 * scale,
   },
   uploadBtnText: {
-    color: '#FFF',
+    color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 15 * scale,
   },
   uploadingText: {
-    color: '#FF3366',
+    color: '#7C3AED',
     textAlign: 'center',
     marginTop: 12 * scale,
     fontWeight: '600',
@@ -727,40 +770,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16 * scale,
     paddingVertical: 8 * scale,
     borderRadius: 20 * scale,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#F3F4F6',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: '#D1D5DB',
   },
   categoryChipActive: {
-    backgroundColor: 'rgba(255,51,102,0.25)',
-    borderColor: '#FF3366',
+    backgroundColor: '#F3E8FF',
+    borderColor: '#7C3AED',
   },
-  categoryText: { color: '#CCC', fontSize: 14 * scale, fontWeight: '600' },
-  categoryTextActive: { color: '#FFF', fontWeight: '700' },
+  categoryText: {
+    color: '#4B5563',
+    fontSize: 14 * scale,
+    fontWeight: '600',
+  },
+  categoryTextActive: {
+    color: '#7C3AED',
+    fontWeight: '700',
+  },
   premiumNotice: {
-    backgroundColor: 'rgba(255,215,0,0.12)',
+    backgroundColor: '#FEF3C7',
     borderRadius: 16 * scale,
     padding: 20 * scale,
     alignItems: 'center',
     marginBottom: 24 * scale,
     borderWidth: 1,
-    borderColor: 'rgba(255,215,0,0.3)',
+    borderColor: '#FBBF24',
   },
   premiumTitle: {
     fontSize: 18 * scale,
     fontWeight: '700',
-    color: '#FFD700',
+    color: '#D97706',
     marginTop: 12 * scale,
   },
   premiumText: {
     fontSize: 15 * scale,
-    color: '#EEE',
+    color: '#4B5563',
     textAlign: 'center',
     marginVertical: 8 * scale,
   },
   currentRating: {
     fontSize: 14 * scale,
-    color: '#BBB',
+    color: '#6B7280',
     fontWeight: '500',
   },
   message: {
@@ -770,14 +820,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '600',
   },
-  success: { backgroundColor: 'rgba(0,255,0,0.15)', color: '#0F0' },
-  error: { backgroundColor: 'rgba(255,0,0,0.15)', color: '#F33' },
+  success: {
+    backgroundColor: '#DCFCE7',
+    color: '#166534',
+  },
+  error: {
+    backgroundColor: '#FEE2E2',
+    color: '#991B1B',
+  },
   buttonsContainer: {
     marginTop: 24 * scale,
     gap: 12 * scale,
   },
   saveButton: {
-    backgroundColor: '#FF3366',
+    backgroundColor: '#7C3AED',
     padding: 16 * scale,
     borderRadius: 12 * scale,
     alignItems: 'center',
@@ -789,19 +845,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   dangerButton: {
-    backgroundColor: '#DC2626',
+    backgroundColor: '#EF4444',
     padding: 16 * scale,
     borderRadius: 12 * scale,
     alignItems: 'center',
   },
-  disabledButton: { opacity: 0.6 },
-  buttonText: { color: '#FFF', fontSize: 16 * scale, fontWeight: '700' },
-  dangerButtonText: { color: '#FFF', fontSize: 16 * scale, fontWeight: '700' },
+  disabledButton: {
+    opacity: 0.6,
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 16 * scale,
+    fontWeight: '700',
+  },
+  dangerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16 * scale,
+    fontWeight: '700',
+  },
 
   // Modal styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.95)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
   },

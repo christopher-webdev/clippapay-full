@@ -135,7 +135,7 @@ export default function OnboardingUGC() {
           <View style={styles.ctaContainer}>
             <TouchableOpacity
               style={styles.ctaButton}
-              onPress={() => router.push('/(dashboard)/CreatePgc')}
+              onPress={() => router.push('/(dashboard_advertiser)/CreatePgc')}
             >
               <Text style={styles.ctaText}>Start Your UGC Campaign Now</Text>
               <Ionicons name="arrow-forward" size={24} color="#FFFFFF" />

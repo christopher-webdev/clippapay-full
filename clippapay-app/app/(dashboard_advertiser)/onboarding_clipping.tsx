@@ -195,7 +195,7 @@ export default function OnboardingClipping() {
             <TouchableOpacity
               style={styles.ctaButton}
               onPress={() =>
-                router.push('/(dashboard)/create_clipping')
+                router.push('/(dashboard_advertiser)/create_clipping')
               }
             >
               <Text style={styles.ctaText}>

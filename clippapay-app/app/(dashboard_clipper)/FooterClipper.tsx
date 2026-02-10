@@ -1,5 +1,5 @@
 
-// app/components/Footer.tsx
+// app/components/FooterClipper.tsx
 import React from 'react';
 import {
   View,
@@ -8,19 +8,23 @@ import {
   StyleSheet,
   Dimensions,
   SafeAreaView,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 const { width } = Dimensions.get('window');
-const scale = width / 428; // consistent with your other components
+const scale = width / 428;
 
 // Define the tab items
 const TAB_ITEMS = [
   {
     name: 'Browse',
     icon: 'grid-outline',
-    route: '/(dashboard_clipper)/clipper_dashboard', // adjust to your actual route
+    route: '/(dashboard_clipper)/clipper_dashboard',
   },
   {
     name: 'Submissions',
@@ -40,7 +44,45 @@ const TAB_ITEMS = [
 ];
 
 export default function FooterClipper() {
-  const pathname = usePathname(); // to highlight active tab
+  const pathname = usePathname();
+
+  const handleLogout = async () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Clear token from storage
+              if (Platform.OS === 'web') {
+                await AsyncStorage.removeItem('userToken');
+              } else {
+                await SecureStore.deleteItemAsync('userToken');
+                await AsyncStorage.removeItem('userToken'); // fallback
+              }
+
+              // Optional: clear any other user-related data
+              // await AsyncStorage.multiRemove(['userData', 'otherKey']);
+
+              // Navigate to login
+              router.replace('/login');
+            } catch (error) {
+              console.error('Logout error:', error);
+              Alert.alert('Error', 'Failed to sign out. Please try again.');
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
@@ -48,7 +90,7 @@ export default function FooterClipper() {
         {/* Main tab bar */}
         <View style={styles.tabBar}>
           {TAB_ITEMS.map((item) => {
-            const isActive = pathname === item.route || pathname.startsWith(item.route);
+            const isActive = pathname === item.route || pathname.startsWith(item.route + '/');
 
             return (
               <TouchableOpacity
@@ -75,16 +117,10 @@ export default function FooterClipper() {
           })}
         </View>
 
-        <TouchableOpacity
-          style={styles.accessButton}
-          onPress={() => {
-            // TODO: navigate to premium creators or upgrade screen
-            router.push('/premium-creators');
-          }}
-        >
-          <Text style={styles.accessText}>
-            Sign out →
-          </Text>
+        {/* Logout Button */}
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <Ionicons name="log-out-outline" size={20 * scale} color="#EF4444" />
+          <Text style={styles.logoutText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -101,7 +137,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
-    // fixed at bottom
     position: 'absolute',
     bottom: 0,
     left: 0,
@@ -130,22 +165,21 @@ const styles = StyleSheet.create({
     lineHeight: 12 * scale * 1.4,
     letterSpacing: 0.2 * scale,
     marginTop: 4 * scale,
-    
   },
-  accessButton: {
+  logoutButton: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8 * scale,
-    backgroundColor: '#F9FAFB',
+    paddingVertical: 10 * scale,
+    backgroundColor: '#FEF2F2', // light red background
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-    
+    borderTopColor: '#FEE2E2',
+    gap: 8 * scale,
   },
-  accessText: {
-
+  logoutText: {
     fontWeight: '600',
-    fontSize: 13 * scale,
-    color: '#7C3AED',
+    fontSize: 14 * scale,
+    color: '#EF4444', // red color for logout
     letterSpacing: 0.2 * scale,
   },
 });

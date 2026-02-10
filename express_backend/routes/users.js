@@ -344,5 +344,46 @@ router.patch('/:id', requireAuth, requireAdmin, async (req, res) => {
   res.json({ success: true, user });
 });
 
+// GET /api/clipper-profile/premium
+// Returns list of premium clippers with basic info + profile
+router.get('/clipper-profile/premium', requireAuth, async (req, res) => {
+  try {
+    // Only allow advertisers or admins to see this list
+    if (req.user.role !== 'advertiser' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const premiumClippers = await User.find({
+      role: 'clipper',
+      isPremiumCreator: true,
+      isBlocked: false,
+    }).select('_id firstName lastName rating isPremiumCreator');
+
+    const profiles = await Promise.all(
+      premiumClippers.map(async (user) => {
+        let profile = await ClipperProfile.findOne({ user: user._id });
+        if (!profile) {
+          profile = { categories: [], ratePerVideo: 0, expectedDelivery: '', completedProjects: 0 };
+        }
+        return {
+          id: user._id,
+          name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Creator',
+          rating: user.rating || 0,
+          ...profile.toObject(),
+          user: {
+            firstName: user.firstName,
+            lastName: user.lastName,
+            rating: user.rating,
+          }
+        };
+      })
+    );
+
+    res.json(profiles);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch premium creators' });
+  }
+});
 
 export default router;
