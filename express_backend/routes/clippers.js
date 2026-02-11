@@ -185,78 +185,37 @@ router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res)
     return res.status(500).json({ error: 'Submission failed.' });
   }
 });
-// router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res) => {
-//   try {
-//     const { submissionUrl, views, platform } = req.body;
-//     const clipper = req.user._id;
-//     const campaignId = req.params.id;
-//     const proofVideo = getRelPath(req.files?.find(f => f.fieldname === 'proofVideo'));
-//     const proofImage = getRelPath(req.files?.find(f => f.fieldname === 'proofImage'));
-//     const viewsNum = Number(views) || 0;
+router.get(
+  '/available-pgc',
+  requireAuth,
+  requireClipper,
+  async (req, res) => {
+    try {
+      const availableCampaigns = await Campaign.find({
+        kind: 'pgc',
+        status: 'active',
+        $expr: { $lt: ['$approvedVideosCount', '$desiredVideos'] }
+      })
+        .select(
+          '_id title brief deliverables assets approvalCriteria ' +
+          'pgcAddons script budget_total clipper_cpm ' +
+          'desiredVideos approvedVideosCount clippersCount ' +
+          'status createdAt advertiser'
+        )
+        .populate('advertiser', 'company contactName email') // optional: show brand/company
+        .sort({ createdAt: -1 })
+        .limit(50);
 
-//     // Fetch campaign to check type
-//     const campaign = await Campaign.findById(campaignId);
-//     if (!campaign) {
-//       return res.status(404).json({ error: 'Campaign not found.' });
-//     }
-//     const isPgc = campaign.kind === 'pgc';
+      res.status(200).json(availableCampaigns);
 
-//     // --- GLOBAL DUPLICATE CHECK ---
-//     if (submissionUrl && !isPgc) {
-//       const existingProof = await ClipSubmission.findOne({
-//         'proofs.submissionUrl': submissionUrl
-//       });
-//       if (existingProof) {
-//         return res.status(409).json({ error: 'This proof link has already been submitted by another clipper.' });
-//       }
-//     }
-
-//     // Find by campaign+clipper
-//     let isNewClipper = false;
-//     let submission = await ClipSubmission.findOne({ campaign: campaignId, clipper });
-
-//     if (!submission) {
-//       isNewClipper = true;
-//       submission = new ClipSubmission({ campaign: campaignId, clipper, proofs: [] });
-//     }
-
-//     // Require proof based on campaign type
-//     if (isPgc) {
-//       if (!proofVideo) {
-//         return res.status(400).json({ error: 'Proof video file is required for PGC campaigns.' });
-//       }
-//     } else {
-//       if (!submissionUrl || !platform) {
-//         return res.status(400).json({ error: 'Submission URL and platform are required for non-PGC campaigns.' });
-//       }
-//     }
-
-//     // Add new proof
-//     submission.proofs.push({
-//       platform: isPgc ? (platform || null) : platform,
-//       submissionUrl: isPgc ? (submissionUrl || null) : submissionUrl,
-//       views: isPgc ? 0 : viewsNum,
-//       proofVideo,
-//       proofImage,
-//       status: 'pending',
-//       adminNote: null,
-//       lastVerified: null,
-//       verifiedViews: 0,
-//       rewardAmount: 0
-//     });
-
-//     await submission.save();
-
-//     if (isNewClipper) {
-//       await Campaign.findByIdAndUpdate(campaignId, { $inc: { clippersCount: 1 } });
-//     }
-
-//     res.status(201).json(submission);
-//   } catch (err) {
-//     console.error('Error in /submit-clip:', err);
-//     res.status(500).json({ error: 'Could not submit.' });
-//   }
-// });
+    } catch (error) {
+      console.error('Error fetching available PGC campaigns:', error);
+      res.status(500).json({ 
+        error: 'Server error while fetching available PGC campaigns' 
+      });
+    }
+  }
+);
 // Generic join route — works for normal, ugc, pgc
 router.post('/:id/join', requireAuth, requireClipper, async (req, res) => {
   try {
@@ -346,40 +305,6 @@ router.patch('/:id/update-proof-pgc/:proofId', requireAuth, uploadProof.any(), a
     res.status(500).json({ error: 'Could not update proof.' });
   }
 });
-
-// PATCH /clippers/:id/update-proof/:proofId
-// router.patch('/:id/update-proof/:proofId', requireAuth, uploadProof.any(), async (req, res) => {
-//   try {
-//     const { views } = req.body;
-//     const { id, proofId } = req.params;
-//     const proofVideo = getRelPath(req.files?.find(f => f.fieldname === 'proofVideo'));
-//     const proofImage = getRelPath(req.files?.find(f => f.fieldname === 'proofImage'));
-
-//     const submission = await ClipSubmission.findById(id);
-//     if (!submission) return res.status(404).json({ error: 'Submission not found.' });
-
-//     const proof = submission.proofs.id(proofId);
-//     if (!proof) return res.status(404).json({ error: 'Proof not found.' });
-
-//     if (!views) return res.status(400).json({ error: 'Views required.' });
-
-//     // For platforms that require proof, at least one file is required
-//     if ((proof.platform === 'TikTok' || proof.platform === 'Facebook') && !proofVideo && !proofImage) {
-//       return res.status(400).json({ error: 'Video or image proof required.' });
-//     }
-
-//     proof.views = Number(views) || proof.views;
-//     if (proofVideo) proof.proofVideo = proofVideo;
-//     if (proofImage) proof.proofImage = proofImage;
-//     proof.status = 'pending'; // re-verification on update
-
-//     await submission.save();
-//     res.json(submission);
-//   } catch (err) {
-//     console.error('Error in /update-proof:', err);
-//     res.status(500).json({ error: 'Could not update proof.' });
-//   }
-// });
 
 router.patch('/:id/update-proof/:proofId', requireAuth, uploadProof.any(), async (req, res) => {
   try {

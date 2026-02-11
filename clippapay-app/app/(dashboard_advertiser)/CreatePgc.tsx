@@ -219,7 +219,6 @@ export default function CreateAssetCreationCampaign() {
       });
 
       setMessage('Campaign created successfully!');
-      setTimeout(() => router.back(), 2000);
     } catch (err) {
       console.error('Submit error:', err);
       setError(err.response?.data?.error || 'Failed to create campaign. Please try again.');

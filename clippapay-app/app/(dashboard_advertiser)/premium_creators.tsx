@@ -223,7 +223,7 @@ export default function PremiumCreators() {
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.stat}>
-                  <Text style={styles.price}>₦{pricePerVideo}</Text>
+                  <Text style={styles.price}>{pricePerVideo}</Text>
                   <Text style={styles.statLabel}>/video</Text>
                 </View>
               </View>

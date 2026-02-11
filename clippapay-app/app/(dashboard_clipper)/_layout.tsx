@@ -28,7 +28,7 @@ export default function DashboardLayout() {
           }}
         >
           <Stack.Screen name="clipper_dashboard" />
-           <Stack.Screen name="Campaigns" />
+          <Stack.Screen name="Campaigns" />
           {/* <Stack.Screen name="advertiser_dashboard" />
           <Stack.Screen name="Campaigns" />
           <Stack.Screen name="WalletScreen" />

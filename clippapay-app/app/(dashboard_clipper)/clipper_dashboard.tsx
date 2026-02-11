@@ -9,15 +9,11 @@ import {
   StatusBar,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import ProfileHeader from '../(dashboard_advertiser)/ProfileHeaderClipper';
-import ReadyLaunchText from '../(dashboard_advertiser)/ReadyLaunchText_clipper';
-import CreateUGCsCard from '../(dashboard_advertiser)/CreateUGCsCard';
-import CreateUGCsCard_2 from '../(dashboard_advertiser)/CreateUGCsCard_2';
-import CreateUGCsCard_3 from '../(dashboard_advertiser)/CreateUGCsCard_3';
-import FooterClipper from './FooterClipper';
-// Import the next cards when you create them
-// import ShareClipCard from '../../components/ShareClipCard';
-// import PremiumCreatorsCard from '../../components/PremiumCreatorsCard';
+import ReadyLaunchText from  '../(dashboard_clipper)/ReadyLaunchText_clipper';
+import CreateUGCsCard from   '../(dashboard_clipper)/CreateUGCsCard';
+import CreateUGCsCard_2 from '../(dashboard_clipper)/CreateUGCsCard_2';
+import CreateUGCsCard_3 from '../(dashboard_clipper)/CreateUGCsCard_3';
+
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;           // ≈ iPhone 14 Pro Max / Figma 428px base

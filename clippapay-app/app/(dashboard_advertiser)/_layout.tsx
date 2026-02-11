@@ -27,7 +27,6 @@ export default function DashboardLayout() {
             contentStyle: styles.stackContent
           }}
         >
-          <Stack.Screen name="clipper_dashboard" />
           <Stack.Screen name="advertiser_dashboard" />
           <Stack.Screen name="Campaigns" />
           <Stack.Screen name="WalletScreen" />

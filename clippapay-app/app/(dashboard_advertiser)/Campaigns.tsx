@@ -1,5 +1,5 @@
 // app/(dashboard)/campaigns.tsx
-import React, { useEffect, useState } from 'react';
+import { React, useEffect, useState } from 'react';
 import {
   View,
   ScrollView,
@@ -19,13 +19,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { useRouter } from 'expo-router';
-import { Video, Download, X, Film } from 'lucide-react-native';
+import { Video, Download, X, Film, Clock, DollarSign, Users, Target, CheckCircle, AlertCircle, Eye, TrendingUp, Calendar } from 'lucide-react-native';
+import { BlurView } from 'expo-blur';
 
 import ProfileHeader from './ProfileHeader';
-import Footer from './Footer';
+
 
 const API_BASE = 'https://api.clippapay.com/api';
-
 const { width } = Dimensions.get('window');
 const scale = width / 428;
 
@@ -42,7 +42,7 @@ interface Campaign {
   views_purchased: number;
   views_left: number;
   numClipsSuggested: number;
-  kind?: 'normal' | 'ugc' | 'pgc';
+  kind?: 'normal' | 'ugc' | 'pgc' | 'premium';
   clippersCount?: number;
   desiredVideos?: number;
   approvedVideosCount?: number;
@@ -82,11 +82,12 @@ export default function AdvertiserDashboard() {
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [campaignDetails, setCampaignDetails] = useState<any>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Pagination
   const [activePage, setActivePage] = useState(1);
   const [completedPage, setCompletedPage] = useState(1);
-  const PER_PAGE = 10;
+  const PER_PAGE = 5;
 
   useEffect(() => {
     loadCampaigns();
@@ -123,6 +124,7 @@ export default function AdvertiserDashboard() {
       setError(e.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -156,45 +158,50 @@ export default function AdvertiserDashboard() {
     setModalVisible(true);
   };
 
-  // const handleViewClips = (campaignId: string) => {
-  //   router.push(`/campaign/${campaignId}/clips`);
-  // };
-
   const handleViewClips = (campaignId: string) => {
     router.push(`/(dashboard)/CampaignAnalyticsScreen`);
   };
-  
 
-  // Split campaigns into active and completed
-  const now = Date.now();
-  const activeCampaigns = campaigns.filter(
-    c => c.views_left > 0 || c.adWorkerStatus !== 'ready' || c.kind === 'pgc'
-  );
-  const completedCampaigns = campaigns.filter(
-    c =>
-      (c.views_left <= 0 && c.adWorkerStatus === 'ready' && c.kind !== 'pgc') ||
-      (c.kind === 'pgc' && (c.approvedVideosCount || 0) >= (c.desiredVideos || 0))
-  );
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadCampaigns();
+  };
 
-  // ================= FILTER LOGIC (STATUS BASED) =================
+  const getCampaignStats = () => {
+    const total = campaigns.length;
+    const active = campaigns.filter(c => 
+      c.views_left > 0 || c.adWorkerStatus === 'processing' || c.adWorkerStatus === 'ready'
+    ).length;
+    const completed = campaigns.filter(c => 
+      c.views_left <= 0 || (c.kind === 'pgc' && (c.approvedVideosCount || 0) >= (c.desiredVideos || 0))
+    ).length;
+    const totalSpent = campaigns.reduce((sum, c) => sum + (c.budget_total - c.budget_remaining), 0);
+    
+    return { total, active, completed, totalSpent };
+  };
+
+  // Filter campaigns by status
   const filteredCampaigns = campaigns.filter((c) => {
     if (activeFilter === 'all') return true;
-
     if (activeFilter === 'active') {
-      return ['live', 'active'].includes(c.status?.toLowerCase());
+      return c.views_left > 0 || c.adWorkerStatus === 'processing' || c.adWorkerStatus === 'ready';
     }
-
     if (activeFilter === 'pending') {
-      return c.status?.toLowerCase() === 'pending';
+      return c.adWorkerStatus === 'pending';
     }
-
     if (activeFilter === 'completed') {
-      return c.status?.toLowerCase() === 'completed';
+      return c.views_left <= 0 || (c.kind === 'pgc' && (c.approvedVideosCount || 0) >= (c.desiredVideos || 0));
     }
-
     return true;
   });
 
+  // Split into active and completed for sections
+  const activeCampaigns = filteredCampaigns.filter(c => 
+    c.views_left > 0 || c.adWorkerStatus === 'processing' || c.adWorkerStatus === 'ready'
+  );
+  const completedCampaigns = filteredCampaigns.filter(c => 
+    c.views_left <= 0 || (c.kind === 'pgc' && (c.approvedVideosCount || 0) >= (c.desiredVideos || 0))
+  );
 
   // Get progress for a campaign
   const getProgress = (c: Campaign) => {
@@ -209,165 +216,226 @@ export default function AdvertiserDashboard() {
     }
   };
 
-  // Get status color
-  const getStatusColor = (c: Campaign) => {
-    const isPGC = c.kind === 'pgc';
+  // Get status with proper formatting
+  const getStatus = (c: Campaign) => {
+    const isCompleted = (c.views_left <= 0 && c.kind !== 'pgc') || 
+      (c.kind === 'pgc' && (c.approvedVideosCount || 0) >= (c.desiredVideos || 0));
     
-    if (isPGC && (c.approvedVideosCount || 0) >= (c.desiredVideos || 0)) {
-      return { bg: '#F3F4F6', text: '#6B7280', border: '#D1D5DB' };
-    } else if (c.views_left <= 0 && !isPGC) {
-      return { bg: '#F3F4F6', text: '#6B7280', border: '#D1D5DB' };
-    } else if (c.adWorkerStatus === 'ready') {
-      return { bg: '#DCFCE7', text: '#16A34A', border: '#86EFAC' };
-    } else if (c.adWorkerStatus === 'processing') {
-      return { bg: '#DBEAFE', text: '#2563EB', border: '#93C5FD' };
-    } else if (c.adWorkerStatus === 'rejected') {
-      return { bg: '#FEE2E2', text: '#DC2626', border: '#FCA5A5' };
-    } else {
-      return { bg: '#FEF3C7', text: '#D97706', border: '#FBBF24' };
-    }
+    if (isCompleted) return 'completed';
+    if (c.adWorkerStatus === 'ready') return 'live';
+    if (c.adWorkerStatus === 'processing') return 'active';
+    if (c.adWorkerStatus === 'pending') return 'pending';
+    if (c.adWorkerStatus === 'rejected') return 'rejected';
+    return 'draft';
+  };
+
+  // Get status color and icon
+  const getStatusConfig = (status: string) => {
+    const configs = {
+      live: { bg: '#DCFCE7', text: '#16A34A', border: '#86EFAC', icon: CheckCircle },
+      active: { bg: '#DBEAFE', text: '#2563EB', border: '#93C5FD', icon: TrendingUp },
+      completed: { bg: '#F3F4F6', text: '#6B7280', border: '#D1D5DB', icon: CheckCircle },
+      pending: { bg: '#FEF3C7', text: '#D97706', border: '#FBBF24', icon: Clock },
+      rejected: { bg: '#FEE2E2', text: '#DC2626', border: '#FCA5A5', icon: AlertCircle },
+      draft: { bg: '#F3F4F6', text: '#6B7280', border: '#D1D5DB', icon: Film },
+    };
+    return configs[status as keyof typeof configs] || configs.draft;
   };
 
   // Format currency
   const formatCurrency = (amount: number) => `₦${amount.toLocaleString()}`;
-  const formatDate = (dateString: string) => new Date(dateString).toLocaleDateString();
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const stats = getCampaignStats();
 
   return (
-  <SafeAreaView style={styles.safeArea}>
-    <StatusBar barStyle="dark-content" backgroundColor="#FFF" />
-
-    <LinearGradient
-      colors={['#34D3991A', '#D6CF8D80', '#d8d8d8b2']}
-      style={{ flex: 1 }}
-    >
-      {/* Fixed Header */}
-  
-
-      {/* Scrollable Content - starts below header */}
-      <ScrollView 
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.container}>
-          {/* HEADER */}
-          <View style={styles.topRow}>
+    <View style={styles.container}>
+      <LinearGradient
+        colors={['#F9FAFB', '#F3F4F6', '#E5E7EB']}
+        style={StyleSheet.absoluteFill}
+      />
+      
+      <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
             <View>
+              <Text style={styles.greeting}>Welcome back,</Text>
               <Text style={styles.title}>Your Campaigns</Text>
-              <Text style={styles.subText}>
-                You have {campaigns.length} campaigns
-              </Text>
             </View>
-
-            <View style={styles.buttonGroup}>
-            </View>
+            <TouchableOpacity style={styles.refreshButton} onPress={handleRefresh}>
+              <TrendingUp size={20} color="#4F46E5" />
+            </TouchableOpacity>
           </View>
 
-          {/* FILTERS */}
-          <View style={styles.filterRow}>
-            {['all', 'active', 'pending', 'completed'].map((f) => (
-              <TouchableOpacity
-                key={f}
-                onPress={() => setActiveFilter(f)}
-                style={
-                  activeFilter === f
-                    ? styles.allBtn
-                    : styles.outlineBtn
-                }
-              >
-                <Text
-                  style={
-                    activeFilter === f
-                      ? styles.allBtnText
-                      : styles.outlineBtnText
-                  }
-                >
-                  {f.charAt(0).toUpperCase() + f.slice(1)}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* LOADING & ERROR */}
-          {loading && <ActivityIndicator style={{ marginTop: 40 }} size="large" color="#203A43" />}
-          {error && <Text style={styles.errorText}>{error}</Text>}
-
-          {/* ACTIVE CAMPAIGNS SECTION */}
-          {!loading && !error && (
-            <>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionDivider} />
-                <Text style={styles.sectionTitle}>Live/Active Campaigns</Text>
-                <View style={styles.sectionDivider} />
+          {/* Stats Cards */}
+          <View style={styles.statsGrid}>
+            <View style={styles.statCard}>
+              <View style={[styles.statIconContainer, { backgroundColor: '#EEF2FF' }]}>
+                <Target size={20} color="#4F46E5" />
               </View>
+              <Text style={styles.statValue}>{stats.total}</Text>
+              <Text style={styles.statLabel}>Total Campaigns</Text>
+            </View>
+            <View style={styles.statCard}>
+              <View style={[styles.statIconContainer, { backgroundColor: '#DCFCE7' }]}>
+                <TrendingUp size={20} color="#16A34A" />
+              </View>
+              <Text style={styles.statValue}>{stats.active}</Text>
+              <Text style={styles.statLabel}>Active</Text>
+            </View>
+            <View style={styles.statCard}>
+              <View style={[styles.statIconContainer, { backgroundColor: '#F3F4F6' }]}>
+                <CheckCircle size={20} color="#6B7280" />
+              </View>
+              <Text style={styles.statValue}>{stats.completed}</Text>
+              <Text style={styles.statLabel}>Completed</Text>
+            </View>
+            <View style={styles.statCard}>
+              <View style={[styles.statIconContainer, { backgroundColor: '#FEF3C7' }]}>
+                <DollarSign size={20} color="#D97706" />
+              </View>
+              <Text style={styles.statValue}>{formatCurrency(stats.totalSpent)}</Text>
+              <Text style={styles.statLabel}>Total Spent</Text>
+            </View>
+          </View>
 
-              {filteredCampaigns.length === 0 ? (
-                <View style={styles.emptyCampaignWrapper}>
-                  <Image
-                    source={require('../../assets/images/no_campaign.png')}
-                    style={styles.emptyCampaignImage}
-                    resizeMode="contain"
-                  />
-
-                  <Text style={styles.emptyCampaignTitle}>
-                    No active campaigns yet
-                  </Text>
-
-                  <Text style={styles.emptyCampaignDesc}>
-                    Create your first campaign to start reaching clippers and growing your brand visibility.
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  {filteredCampaigns.slice((activePage - 1) * PER_PAGE, activePage * PER_PAGE).map((c) => (
-                    <CampaignCard
-                      key={c._id}
-                      campaign={c}
-                      onPress={() => handleCampaignPress(c)}
-                      onViewClips={() => handleViewClips(c._id)}
-                      getProgress={getProgress}
-                      getStatusColor={getStatusColor}
-                      formatCurrency={formatCurrency}
-                      formatDate={formatDate}
+          {/* Filters */}
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterScroll}
+          >
+            <View style={styles.filterRow}>
+              {[
+                { id: 'all', label: 'All Campaigns', icon: Film },
+                { id: 'active', label: 'Active', icon: TrendingUp },
+                { id: 'pending', label: 'Pending', icon: Clock },
+                { id: 'completed', label: 'Completed', icon: CheckCircle },
+              ].map((filter) => {
+                const isActive = activeFilter === filter.id;
+                const Icon = filter.icon;
+                
+                return (
+                  <TouchableOpacity
+                    key={filter.id}
+                    onPress={() => setActiveFilter(filter.id)}
+                    style={[
+                      styles.filterChip,
+                      isActive && styles.filterChipActive
+                    ]}
+                  >
+                    <Icon 
+                      size={16} 
+                      color={isActive ? '#4F46E5' : '#6B7280'} 
                     />
-                  ))}
+                    <Text
+                      style={[
+                        styles.filterText,
+                        isActive && styles.filterTextActive
+                      ]}
+                    >
+                      {filter.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </View>
+
+        {/* Content */}
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
+        >
+          {loading && !refreshing ? (
+            <View style={styles.loaderContainer}>
+              <ActivityIndicator size="large" color="#4F46E5" />
+              <Text style={styles.loaderText}>Loading your campaigns...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.errorContainer}>
+              <AlertCircle size={48} color="#DC2626" />
+              <Text style={styles.errorTitle}>Oops! Something went wrong</Text>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={loadCampaigns}>
+                <Text style={styles.retryButtonText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {/* Active Campaigns Section */}
+              {activeCampaigns.length > 0 && (
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionTitleContainer}>
+                      <TrendingUp size={20} color="#4F46E5" />
+                      <Text style={styles.sectionTitle}>Active Campaigns</Text>
+                    </View>
+                    <Text style={styles.sectionCount}>{activeCampaigns.length}</Text>
+                  </View>
+
+                  {activeCampaigns
+                    .slice((activePage - 1) * PER_PAGE, activePage * PER_PAGE)
+                    .map((campaign) => (
+                      <CampaignCard
+                        key={campaign._id}
+                        campaign={campaign}
+                        onPress={() => handleCampaignPress(campaign)}
+                        onViewClips={() => handleViewClips(campaign._id)}
+                        getProgress={getProgress}
+                        getStatus={getStatus}
+                        getStatusConfig={getStatusConfig}
+                        formatCurrency={formatCurrency}
+                        formatDate={formatDate}
+                      />
+                    ))}
                   
-                  {Math.ceil(filteredCampaigns.length / PER_PAGE) > 1 && (
+                  {Math.ceil(activeCampaigns.length / PER_PAGE) > 1 && (
                     <Pagination
                       currentPage={activePage}
-                      totalPages={Math.ceil(filteredCampaigns.length / PER_PAGE)}
+                      totalPages={Math.ceil(activeCampaigns.length / PER_PAGE)}
                       onPageChange={setActivePage}
                     />
                   )}
-                </>
+                </View>
               )}
 
-              {/* COMPLETED CAMPAIGNS SECTION */}
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionDivider} />
-                <Text style={[styles.sectionTitle, styles.completedSectionTitle]}>
-                  Recently Completed (Last 30 Days)
-                </Text>
-                <View style={styles.sectionDivider} />
-              </View>
+              {/* Completed Campaigns Section */}
+              {completedCampaigns.length > 0 && (
+                <View style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <View style={styles.sectionTitleContainer}>
+                      <CheckCircle size={20} color="#6B7280" />
+                      <Text style={[styles.sectionTitle, styles.completedTitle]}>
+                        Completed Campaigns
+                      </Text>
+                    </View>
+                    <Text style={styles.sectionCount}>{completedCampaigns.length}</Text>
+                  </View>
 
-              {completedCampaigns.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyStateText}>No completed campaigns in last 30 days.</Text>
-                </View>
-              ) : (
-                <>
-                  {completedCampaigns.slice((completedPage - 1) * PER_PAGE, completedPage * PER_PAGE).map((c) => (
-                    <CampaignCard
-                      key={c._id}
-                      campaign={c}
-                      onPress={() => handleCampaignPress(c)}
-                      onViewClips={() => handleViewClips(c._id)}
-                      getProgress={getProgress}
-                      getStatusColor={getStatusColor}
-                      formatCurrency={formatCurrency}
-                      formatDate={formatDate}
-                    />
-                  ))}
+                  {completedCampaigns
+                    .slice((completedPage - 1) * PER_PAGE, completedPage * PER_PAGE)
+                    .map((campaign) => (
+                      <CampaignCard
+                        key={campaign._id}
+                        campaign={campaign}
+                        onPress={() => handleCampaignPress(campaign)}
+                        onViewClips={() => handleViewClips(campaign._id)}
+                        getProgress={getProgress}
+                        getStatus={getStatus}
+                        getStatusConfig={getStatusConfig}
+                        formatCurrency={formatCurrency}
+                        formatDate={formatDate}
+                      />
+                    ))}
                   
                   {Math.ceil(completedCampaigns.length / PER_PAGE) > 1 && (
                     <Pagination
@@ -376,43 +444,68 @@ export default function AdvertiserDashboard() {
                       onPageChange={setCompletedPage}
                     />
                   )}
-                </>
+                </View>
+              )}
+
+              {/* Empty State */}
+              {campaigns.length === 0 && !loading && (
+                <View style={styles.emptyState}>
+                  <Image
+                    source={require('../../assets/images/no_campaign.png')}
+                    style={styles.emptyImage}
+                    resizeMode="contain"
+                  />
+                  <Text style={styles.emptyTitle}>No campaigns yet</Text>
+                  <Text style={styles.emptyDescription}>
+                    Create your first campaign to start reaching creators and growing your brand.
+                  </Text>
+                  <TouchableOpacity style={styles.createButton}>
+                    <LinearGradient
+                      colors={['#4F46E5', '#6366F1']}
+                      style={styles.createButtonGradient}
+                    >
+                      <Text style={styles.createButtonText}>Create Campaign</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
               )}
             </>
           )}
-        </View>
-      </ScrollView>
+        </ScrollView>
 
-      {/* CAMPAIGN DETAILS MODAL */}
-      <Modal
-        visible={modalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <CampaignDetailsModal
+        {/* Campaign Details Modal */}
+        <Modal
           visible={modalVisible}
-          campaign={selectedCampaign}
-          details={campaignDetails}
-          loading={detailsLoading}
-          onClose={() => setModalVisible(false)}
-          getProgress={getProgress}
-          getStatusColor={getStatusColor}
-          formatCurrency={formatCurrency}
-          formatDate={formatDate}
-        />
-      </Modal>
-    </LinearGradient>
-  </SafeAreaView>
-);
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <CampaignDetailsModal
+            visible={modalVisible}
+            campaign={selectedCampaign}
+            details={campaignDetails}
+            loading={detailsLoading}
+            onClose={() => setModalVisible(false)}
+            getProgress={getProgress}
+            getStatus={getStatus}
+            getStatusConfig={getStatusConfig}
+            formatCurrency={formatCurrency}
+            formatDate={formatDate}
+          />
+        </Modal>
+      </SafeAreaView>
+    </View>
+  );
 }
+
 // Campaign Card Component
 function CampaignCard({ 
   campaign, 
   onPress,
   onViewClips,
   getProgress,
-  getStatusColor,
+  getStatus,
+  getStatusConfig,
   formatCurrency,
   formatDate 
 }: {
@@ -420,136 +513,165 @@ function CampaignCard({
   onPress: () => void;
   onViewClips: () => void;
   getProgress: (c: Campaign) => number;
-  getStatusColor: (c: Campaign) => any;
+  getStatus: (c: Campaign) => string;
+  getStatusConfig: (status: string) => any;
   formatCurrency: (amount: number) => string;
   formatDate: (date: string) => string;
 }) {
   const progress = getProgress(campaign);
-  const statusColor = getStatusColor(campaign);
+  const status = getStatus(campaign);
+  const statusConfig = getStatusConfig(status);
+  const StatusIcon = statusConfig.icon;
   const isPGC = campaign.kind === 'pgc';
+  const isCompleted = status === 'completed';
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress}>
-      {/* TITLE + STATUS */}
-      <View style={styles.cardTop}>
-        <View style={styles.titleContainer}>
-          {campaign.thumb_url ? (
-            <Image 
-              source={{ uri: `https://api.clippapay.com${campaign.thumb_url}` }}
-              style={styles.thumbnail}
-            />
-          ) : (
-            <View style={[styles.thumbnail, styles.thumbnailPlaceholder]}>
-              <Film size={20} color="#9CA3AF" />
+    <TouchableOpacity 
+      style={[styles.campaignCard, isCompleted && styles.completedCard]} 
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      {/* Card Header */}
+      <View style={styles.cardHeader}>
+        <View style={styles.cardHeaderLeft}>
+          <View style={styles.thumbnailContainer}>
+            {campaign.thumb_url ? (
+              <Image 
+                source={{ uri: `https://api.clippapay.com${campaign.thumb_url}` }}
+                style={styles.cardThumbnail}
+              />
+            ) : (
+              <View style={styles.thumbnailPlaceholder}>
+                <Film size={24} color="#9CA3AF" />
+              </View>
+            )}
+          </View>
+          <View style={styles.cardTitleContainer}>
+            <Text style={styles.cardTitle} numberOfLines={2}>
+              {campaign.title}
+            </Text>
+            <View style={styles.cardMeta}>
+              <View style={styles.cardType}>
+                <Text style={styles.cardTypeText}>
+                  {campaign.kind === 'premium' ? 'Premium' : 
+                   campaign.kind === 'pgc' ? 'UGC' : 
+                   campaign.kind === 'normal' ? 'Clipping' : 'Campaign'}
+                </Text>
+              </View>
+              <View style={styles.cardDate}>
+                <Calendar size={12} color="#6B7280" />
+                <Text style={styles.cardDateText}>{formatDate(campaign.createdAt)}</Text>
+              </View>
             </View>
-          )}
-          <Text style={styles.cardTitle} numberOfLines={2}>{campaign.title}</Text>
+          </View>
         </View>
+        
         <View style={[styles.statusBadge, { 
-          backgroundColor: statusColor.bg,
-          borderColor: statusColor.border
+          backgroundColor: statusConfig.bg,
+          borderColor: statusConfig.border
         }]}>
-          <Text style={[styles.statusText, { color: statusColor.text }]}>
-            {campaign.adWorkerStatus === 'ready' && (campaign.views_left > 0 || isPGC) 
-              ? (isPGC ? 'Active' : 'Live') 
-              : campaign.adWorkerStatus}
+          <StatusIcon size={12} color={statusConfig.text} />
+          <Text style={[styles.statusText, { color: statusConfig.text }]}>
+            {status.toUpperCase()}
           </Text>
         </View>
       </View>
 
-      {/* TYPE BADGE */}
-      <View style={styles.typeBadge}>
-        <Text style={styles.typeBadgeText}>
-          {campaign.kind === 'pgc' ? 'PGC' : campaign.kind === 'ugc' ? 'UGC' : 'Normal'}
-        </Text>
-      </View>
-
-      {/* PROGRESS */}
-      <View style={styles.progressRow}>
-        <Text style={styles.progressLabel}>Progress</Text>
-        <Text style={styles.progressPercent}>{progress}%</Text>
-      </View>
-      <View style={styles.progressBarBg}>
-        <View
-          style={[
-            styles.progressBarFill,
-            { 
-              width: `${progress}%`,
-              backgroundColor: progress >= 100 
-                ? '#A3A3A3' 
-                : progress > 80 
-                  ? '#16A34A'
-                  : '#4F46E5'
-            }
-          ]}
-        />
-      </View>
-
-      {/* STATS - Updated to match web */}
-      <View style={styles.statsGrid}>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Budget</Text>
-          <Text style={styles.statValue}>{formatCurrency(campaign.budget_total)}</Text>
+      {/* Progress Bar */}
+      <View style={styles.progressSection}>
+        <View style={styles.progressHeader}>
+          <Text style={styles.progressLabel}>Progress</Text>
+          <Text style={styles.progressPercentage}>{progress}%</Text>
         </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Budget Rem.</Text>
-          <Text style={styles.statValue}>{formatCurrency(campaign.budget_remaining)}</Text>
+        <View style={styles.progressBar}>
+          <View
+            style={[
+              styles.progressFill,
+              { 
+                width: `${progress}%`,
+                backgroundColor: progress >= 100 
+                  ? '#10B981' 
+                  : progress > 60 
+                    ? '#4F46E5'
+                    : '#F59E0B'
+              }
+            ]}
+          />
+        </View>
+      </View>
+
+      {/* Stats Grid */}
+      <View style={styles.cardStatsGrid}>
+        <View style={styles.cardStat}>
+          <DollarSign size={16} color="#6B7280" />
+          <Text style={styles.cardStatLabel}>Budget</Text>
+          <Text style={styles.cardStatValue}>{formatCurrency(campaign.budget_total)}</Text>
         </View>
         
         {isPGC ? (
           <>
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Videos Desired</Text>
-              <Text style={styles.statValue}>{campaign.desiredVideos?.toLocaleString()}</Text>
+            <View style={styles.cardStat}>
+              <Target size={16} color="#6B7280" />
+              <Text style={styles.cardStatLabel}>Desired</Text>
+              <Text style={styles.cardStatValue}>{campaign.desiredVideos || 0}</Text>
             </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Videos Approved</Text>
-              <Text style={styles.statValue}>{campaign.approvedVideosCount?.toLocaleString() || '0'}</Text>
+            <View style={styles.cardStat}>
+              <CheckCircle size={16} color="#6B7280" />
+              <Text style={styles.cardStatLabel}>Approved</Text>
+              <Text style={styles.cardStatValue}>{campaign.approvedVideosCount || 0}</Text>
             </View>
           </>
         ) : (
           <>
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Views Purchased</Text>
-              <Text style={styles.statValue}>{campaign.views_purchased?.toLocaleString()}</Text>
+            <View style={styles.cardStat}>
+              <Eye size={16} color="#6B7280" />
+              <Text style={styles.cardStatLabel}>Views</Text>
+              <Text style={styles.cardStatValue}>
+                {((campaign.views_purchased - campaign.views_left) || 0).toLocaleString()}
+              </Text>
             </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Views Left</Text>
-              <Text style={styles.statValue}>{campaign.views_left?.toLocaleString()}</Text>
+            <View style={styles.cardStat}>
+              <TrendingUp size={16} color="#6B7280" />
+              <Text style={styles.cardStatLabel}>Left</Text>
+              <Text style={styles.cardStatValue}>{campaign.views_left?.toLocaleString() || 0}</Text>
             </View>
           </>
         )}
         
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Created</Text>
-          <Text style={styles.statValue}>{formatDate(campaign.createdAt)}</Text>
-        </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Clippers Engaged</Text>
-          <Text style={styles.statValue}>{campaign.clippersCount?.toLocaleString() || '0'}</Text>
+        <View style={styles.cardStat}>
+          <Users size={16} color="#6B7280" />
+          <Text style={styles.cardStatLabel}>Creators</Text>
+          <Text style={styles.cardStatValue}>{campaign.clippersCount || 0}</Text>
         </View>
       </View>
 
-      {/* ACTIONS */}
-      <View style={styles.actionRow}>
-        <TouchableOpacity
-          style={styles.viewBtn}
-          onPress={onPress}
-        >
-          <Text style={styles.viewBtnText}>View Details</Text>
-        </TouchableOpacity>
-
-        {campaign.adWorkerStatus === 'ready' && (campaign.views_left > 0 || isPGC) && (
+      {/* Action Buttons */}
+      {!isCompleted && (
+        <View style={styles.cardActions}>
           <TouchableOpacity
-            style={styles.clipBtn}
-            onPress={onViewClips}
+            style={styles.viewDetailsButton}
+            onPress={onPress}
           >
-            <Text style={styles.clipBtnText}>
-              {isPGC ? "View Videos" : "View Clips Analytics"}
-            </Text>
+            <Text style={styles.viewDetailsText}>View Details</Text>
           </TouchableOpacity>
-        )}
-      </View>
+
+          {campaign.adWorkerStatus === 'ready' && (campaign.views_left > 0 || isPGC) && (
+            <TouchableOpacity
+              style={styles.viewClipsButton}
+              onPress={onViewClips}
+            >
+              <LinearGradient
+                colors={['#4F46E5', '#6366F1']}
+                style={styles.viewClipsGradient}
+              >
+                <Text style={styles.viewClipsText}>
+                  {isPGC ? "Select Creator" : "View Clips"}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -567,25 +689,27 @@ function Pagination({
   if (totalPages <= 1) return null;
 
   return (
-    <View style={styles.pagination}>
+    <View style={styles.paginationContainer}>
       <TouchableOpacity
-        style={[styles.paginationBtn, currentPage <= 1 && styles.paginationBtnDisabled]}
+        style={[styles.paginationButton, currentPage <= 1 && styles.paginationButtonDisabled]}
         onPress={() => onPageChange(currentPage - 1)}
         disabled={currentPage <= 1}
       >
-        <Text style={styles.paginationText}>Prev</Text>
+        <Text style={styles.paginationButtonText}>Previous</Text>
       </TouchableOpacity>
       
-      <Text style={styles.pageNumber}>
-        Page {currentPage} of {totalPages}
-      </Text>
+      <View style={styles.paginationInfo}>
+        <Text style={styles.paginationText}>
+          Page {currentPage} of {totalPages}
+        </Text>
+      </View>
       
       <TouchableOpacity
-        style={[styles.paginationBtn, currentPage >= totalPages && styles.paginationBtnDisabled]}
+        style={[styles.paginationButton, currentPage >= totalPages && styles.paginationButtonDisabled]}
         onPress={() => onPageChange(currentPage + 1)}
         disabled={currentPage >= totalPages}
       >
-        <Text style={styles.paginationText}>Next</Text>
+        <Text style={styles.paginationButtonText}>Next</Text>
       </TouchableOpacity>
     </View>
   );
@@ -599,7 +723,8 @@ function CampaignDetailsModal({
   loading,
   onClose,
   getProgress,
-  getStatusColor,
+  getStatus,
+  getStatusConfig,
   formatCurrency,
   formatDate
 }: {
@@ -609,185 +734,278 @@ function CampaignDetailsModal({
   loading: boolean;
   onClose: () => void;
   getProgress: (c: Campaign) => number;
-  getStatusColor: (c: Campaign) => any;
+  getStatus: (c: Campaign) => string;
+  getStatusConfig: (status: string) => any;
   formatCurrency: (amount: number) => string;
   formatDate: (date: string) => string;
 }) {
   if (!campaign || !visible) return null;
 
   const progress = getProgress(campaign);
-  const statusColor = getStatusColor(campaign);
+  const status = getStatus(campaign);
+  const statusConfig = getStatusConfig(status);
+  const StatusIcon = statusConfig.icon;
   const isPGC = campaign.kind === 'pgc';
   const clips = details?.clips || [];
 
   return (
     <View style={styles.modalOverlay}>
+      <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+      
       <View style={styles.modalContent}>
         {/* Modal Header */}
         <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>Campaign Details</Text>
-          <TouchableOpacity onPress={onClose}>
+          <View style={styles.modalHeaderLeft}>
+            <View style={[styles.modalStatusBadge, { 
+              backgroundColor: statusConfig.bg,
+              borderColor: statusConfig.border
+            }]}>
+              <StatusIcon size={14} color={statusConfig.text} />
+              <Text style={[styles.modalStatusText, { color: statusConfig.text }]}>
+                {status.toUpperCase()}
+              </Text>
+            </View>
+            <Text style={styles.modalTitle}>{campaign.title}</Text>
+          </View>
+          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
             <X size={24} color="#6B7280" />
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.modalBody}>
+        <ScrollView 
+          style={styles.modalBody}
+          showsVerticalScrollIndicator={false}
+        >
           {loading ? (
             <View style={styles.modalLoading}>
               <ActivityIndicator size="large" color="#4F46E5" />
-              <Text style={styles.modalLoadingText}>Loading details...</Text>
+              <Text style={styles.modalLoadingText}>Loading campaign details...</Text>
             </View>
           ) : (
             <>
-              {/* Campaign Header */}
-              <View style={styles.modalCampaignHeader}>
-                <View style={styles.modalCampaignTitleRow}>
-                  {campaign.thumb_url ? (
-                    <Image 
-                      source={{ uri: `https://api.clippapay.com${campaign.thumb_url}` }}
-                      style={styles.modalThumbnail}
-                    />
-                  ) : (
-                    <View style={[styles.modalThumbnail, styles.modalThumbnailPlaceholder]}>
-                      <Film size={24} color="#9CA3AF" />
-                    </View>
-                  )}
-                  <View style={styles.modalTitleContainer}>
-                    <Text style={styles.modalCampaignTitle}>{campaign.title}</Text>
-                    <Text style={styles.modalCreatedDate}>
-                      Created: {new Date(campaign.createdAt).toLocaleString()}
+              {/* Campaign Overview */}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Campaign Overview</Text>
+                
+                <View style={styles.modalOverviewGrid}>
+                  <View style={styles.modalOverviewItem}>
+                    <Text style={styles.modalOverviewLabel}>Created</Text>
+                    <Text style={styles.modalOverviewValue}>
+                      {formatDate(campaign.createdAt)}
                     </Text>
                   </View>
+                  <View style={styles.modalOverviewItem}>
+                    <Text style={styles.modalOverviewLabel}>Campaign ID</Text>
+                    <Text style={styles.modalOverviewValue}>
+                      {campaign._id.slice(-8).toUpperCase()}
+                    </Text>
+                  </View>
+                  {/* <View style={styles.modalOverviewItem}>
+                    <Text style={styles.modalOverviewLabel}>Type</Text>
+                    <Text style={styles.modalOverviewValue}>
+                      {campaign.kind?.toUpperCase() || 'STANDARD'}
+                    </Text>
+                  </View> */}
+                  {/* <View style={styles.modalOverviewItem}>
+                    <Text style={styles.modalOverviewLabel}>Progress</Text>
+                    <Text style={styles.modalOverviewValue}>{progress}%</Text>
+                  </View> */}
                 </View>
-                
-                <View style={[styles.modalStatusBadge, { 
-                  backgroundColor: statusColor.bg,
-                  borderColor: statusColor.border
-                }]}>
-                  <Text style={[styles.modalStatusText, { color: statusColor.text }]}>
-                    {(campaign.views_left <= 0 && !isPGC) || 
-                     (isPGC && (campaign.approvedVideosCount || 0) >= (campaign.desiredVideos || 0))
-                      ? "COMPLETED"
-                      : campaign.adWorkerStatus.toUpperCase()}
-                  </Text>
+
+                {/* Progress Bar */}
+                <View style={styles.modalProgressContainer}>
+                  <View style={styles.modalProgressBar}>
+                    <View
+                      style={[
+                        styles.modalProgressFill,
+                        { width: `${progress}%` }
+                      ]}
+                    />
+                  </View>
                 </View>
               </View>
 
-              {/* Progress Bar */}
-              <View style={styles.modalProgressContainer}>
-                <View style={styles.modalProgressHeader}>
-                  <Text style={styles.modalProgressLabel}>Progress</Text>
-                  <Text style={styles.modalProgressPercent}>{progress}%</Text>
-                </View>
-                <View style={styles.modalProgressBar}>
-                  <View
-                    style={[
-                      styles.modalProgressFill,
-                      { 
-                        width: `${progress}%`,
-                        backgroundColor: progress >= 100 
-                          ? '#A3A3A3' 
-                          : progress > 80 
-                            ? '#16A34A'
-                            : '#4F46E5'
-                      }
-                    ]}
+              {/* Budget & Performance */}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Budget & Performance</Text>
+                
+                <View style={styles.modalInfoGrid}>
+                  <InfoCard
+                    icon={DollarSign}
+                    label="Total Budget"
+                    value={formatCurrency(campaign.budget_total)}
+                    color="#4F46E5"
+                  />
+                  <InfoCard
+                    icon={TrendingUp}
+                    label="Remaining"
+                    value={formatCurrency(campaign.budget_remaining)}
+                    color="#F59E0B"
+                  />
+                  {isPGC ? (
+                    <>
+                      <InfoCard
+                        icon={Target}
+                        label="Videos Desired"
+                        value={campaign.desiredVideos?.toLocaleString() || '0'}
+                        color="#2563EB"
+                      />
+                      <InfoCard
+                        icon={CheckCircle}
+                        label="Videos Approved"
+                        value={campaign.approvedVideosCount?.toLocaleString() || '0'}
+                        color="#10B981"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <InfoCard
+                        icon={Eye}
+                        label="Views Purchased"
+                        value={campaign.views_purchased?.toLocaleString() || '0'}
+                        color="#2563EB"
+                      />
+                      <InfoCard
+                        icon={TrendingUp}
+                        label="Views Left"
+                        value={campaign.views_left?.toLocaleString() || '0'}
+                        color="#F59E0B"
+                      />
+                      <InfoCard
+                        icon={DollarSign}
+                        label="Rate per View"
+                        value={`₦${campaign.rate_per_view}`}
+                        color="#8B5CF6"
+                      />
+                    </>
+                  )}
+                  <InfoCard
+                    icon={Users}
+                    label="Creators Engaged"
+                    value={campaign.clippersCount?.toLocaleString() || '0'}
+                    color="#EC4899"
                   />
                 </View>
               </View>
 
-              {/* Info Grid */}
-              <View style={styles.infoGrid}>
-                <InfoRow label="Total Budget (₦)" value={formatCurrency(campaign.budget_total)} />
-                <InfoRow label="Budget Remaining (₦)" value={formatCurrency(campaign.budget_remaining)} />
-                
-                {isPGC ? (
-                  <>
-                    <InfoRow label="Videos Desired" value={campaign.desiredVideos?.toLocaleString()} />
-                    <InfoRow label="Videos Approved" value={(campaign.approvedVideosCount || 0).toLocaleString()} />
-                  </>
-                ) : (
-                  <>
-                    <InfoRow label="Views Purchased" value={campaign.views_purchased?.toLocaleString()} />
-                    <InfoRow label="Views Left" value={campaign.views_left?.toLocaleString()} />
-                    <InfoRow label="Rate per View" value={`₦${campaign.rate_per_view}`} />
-                  </>
-                )}
-                
-                <InfoRow label="Clippers Engaged" value={(campaign.clippersCount || 0).toString()} />
-                
-                {campaign.platforms && campaign.platforms.length > 0 && (
-                  <InfoRow label="Platforms" value={campaign.platforms.join(', ')} />
-                )}
-                
-                {campaign.countries && campaign.countries.length > 0 && (
-                  <InfoRow label="Countries" value={campaign.countries.join(', ')} />
-                )}
-                
-                {campaign.hashtags && campaign.hashtags.length > 0 && (
-                  <InfoRow label="Hashtags" value={campaign.hashtags.join(', ')} />
-                )}
-                
-                {campaign.categories && campaign.categories.length > 0 && (
-                  <InfoRow label="Categories" value={campaign.categories.join(', ')} />
-                )}
-                
-                {campaign.directions && campaign.directions.length > 0 && (
-                  <InfoRow label="Directions" value={campaign.directions.join(' | ')} />
-                )}
-                
-                {campaign.cta_url && (
-                  <InfoRow label="CTA URL" value={campaign.cta_url} />
-                )}
-                
-                {/* UGC/PGC Specific Fields */}
-                {campaign.ugc?.brief && (
-                  <InfoRow label="Brief" value={campaign.ugc.brief} />
-                )}
-                
-                {campaign.ugc?.deliverables && campaign.ugc.deliverables.length > 0 && (
-                  <InfoRow label="Deliverables" value={campaign.ugc.deliverables.join(', ')} />
-                )}
-                
-                {campaign.ugc?.captionTemplate && (
-                  <InfoRow label="Caption Template" value={campaign.ugc.captionTemplate} />
-                )}
-                
-                {campaign.ugc?.usageRights && (
-                  <InfoRow label="Usage Rights" value={campaign.ugc.usageRights} />
-                )}
-                
-                {campaign.ugc?.approvalCriteria && (
-                  <InfoRow label="Approval Criteria" value={campaign.ugc.approvalCriteria} />
-                )}
-              </View>
+              {/* Campaign Details */}
+              {(campaign.platforms?.length > 0 || 
+                campaign.countries?.length > 0 || 
+                campaign.hashtags?.length > 0 ||
+                campaign.categories?.length > 0 ||
+                campaign.directions?.length > 0 ||
+                campaign.cta_url ||
+                campaign.ugc?.brief) && (
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionTitle}>Campaign Details</Text>
+                  
+                  <View style={styles.modalDetailsList}>
+                    {campaign.platforms && campaign.platforms.length > 0 && (
+                      <DetailRow 
+                        label="Platforms" 
+                        value={campaign.platforms.join(' • ')} 
+                      />
+                    )}
+                    
+                    {campaign.countries && campaign.countries.length > 0 && (
+                      <DetailRow 
+                        label="Target Countries" 
+                        value={campaign.countries.join(' • ')} 
+                      />
+                    )}
+                    
+                    {campaign.categories && campaign.categories.length > 0 && (
+                      <DetailRow 
+                        label="Categories" 
+                        value={campaign.categories.join(' • ')} 
+                      />
+                    )}
+                    
+                    {campaign.hashtags && campaign.hashtags.length > 0 && (
+                      <DetailRow 
+                        label="Hashtags" 
+                        value={campaign.hashtags.map(tag => `#${tag}`).join(' ')} 
+                      />
+                    )}
+                    
+                    {campaign.directions && campaign.directions.length > 0 && (
+                      <View style={styles.detailBlock}>
+                        <Text style={styles.detailBlockLabel}>Creative Directions</Text>
+                        {campaign.directions.map((direction, idx) => (
+                          <View key={idx} style={styles.bulletPoint}>
+                            <Text style={styles.bulletDot}>•</Text>
+                            <Text style={styles.bulletText}>{direction}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    
+                    {campaign.ugc?.brief && (
+                      <DetailRow 
+                        label="Creative Brief" 
+                        value={campaign.ugc.brief} 
+                        multiline
+                      />
+                    )}
+                    
+                    {campaign.ugc?.deliverables && campaign.ugc.deliverables.length > 0 && (
+                      <DetailRow 
+                        label="Deliverables" 
+                        value={campaign.ugc.deliverables.join(' • ')} 
+                      />
+                    )}
+                    
+                    {campaign.ugc?.approvalCriteria && (
+                      <DetailRow 
+                        label="Approval Criteria" 
+                        value={campaign.ugc.approvalCriteria} 
+                        multiline
+                      />
+                    )}
+                    
+                    {campaign.cta_url && (
+                      <DetailRow 
+                        label="Call to Action URL" 
+                        value={campaign.cta_url} 
+                      />
+                    )}
+                  </View>
+                </View>
+              )}
 
-              {/* Clips Section */}
-              <View style={styles.clipsSection}>
-                <Text style={styles.clipsTitle}>
-                  {isPGC ? 'Submitted Videos' : 'Processed Clips'}
-                </Text>
-                
-                {clips.length > 0 ? (
+              {/* Submitted Clips/Videos */}
+              {clips.length > 0 && (
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionTitle}>
+                    {isPGC ? 'Submitted Videos' : 'Processed Clips'}
+                  </Text>
+                  
                   <FlatList
                     data={clips}
                     horizontal
                     showsHorizontalScrollIndicator={false}
                     renderItem={({ item: clip }) => (
                       <View style={styles.clipCard}>
-                        <View style={styles.clipThumbnail}>
-                          <Video size={24} color="#4F46E5" />
+                        <View style={styles.clipPreview}>
+                          <Film size={32} color="#4F46E5" />
                         </View>
                         <View style={styles.clipInfo}>
-                          <Text style={styles.clipDate}>
-                            {new Date(clip.createdAt).toLocaleDateString()}
+                          <Text style={styles.clipCreator}>
+                            {clip.adWorker?.contactName || 'Creator'}
                           </Text>
-                          {isPGC ? (
-                            <Text style={styles.clipStatus}>
-                              Status: {clip.status || 'Pending'}
-                            </Text>
-                          ) : (
-                            <Text style={styles.clipIndex}>Clip {clip.index}</Text>
+                          <Text style={styles.clipDate}>
+                            {formatDate(clip.createdAt)}
+                          </Text>
+                          {isPGC && (
+                            <View style={[
+                              styles.clipStatusBadge,
+                              clip.status === 'approved' && styles.clipStatusApproved,
+                              clip.status === 'rejected' && styles.clipStatusRejected,
+                            ]}>
+                              <Text style={styles.clipStatusText}>
+                                {clip.status || 'Pending'}
+                              </Text>
+                            </View>
                           )}
                         </View>
                       </View>
@@ -795,12 +1013,8 @@ function CampaignDetailsModal({
                     keyExtractor={(item) => item._id}
                     contentContainerStyle={styles.clipsList}
                   />
-                ) : (
-                  <Text style={styles.noClipsText}>
-                    {isPGC ? 'No videos submitted yet.' : 'No clips uploaded yet.'}
-                  </Text>
-                )}
-              </View>
+                </View>
+              )}
             </>
           )}
         </ScrollView>
@@ -809,608 +1023,739 @@ function CampaignDetailsModal({
   );
 }
 
-// Info Row Component for Modal
-function InfoRow({ label, value }: { label: string; value: string }) {
+// Helper Components
+function InfoCard({ icon: Icon, label, value, color }: any) {
   return (
-    <View style={styles.infoRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value}</Text>
+    <View style={styles.infoCard}>
+      <View style={[styles.infoCardIcon, { backgroundColor: `${color}10` }]}>
+        <Icon size={20} color={color} />
+      </View>
+      <Text style={styles.infoCardLabel}>{label}</Text>
+      <Text style={styles.infoCardValue}>{value}</Text>
     </View>
   );
 }
 
-/* ================= STYLES ================= */
+function DetailRow({ label, value, multiline }: { label: string; value: string; multiline?: boolean }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={[styles.detailValue, multiline && styles.detailValueMultiline]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+// Add RefreshControl import
+const RefreshControl = require('react-native').RefreshControl;
 
 const styles = StyleSheet.create({
-  safeArea: { 
+  container: {
     flex: 1,
-    backgroundColor: '#FFF' 
   },
-  headerContainer: { 
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-    backgroundColor: '#FFF',
-    paddingTop: Platform.OS === 'ios' ? 0 : StatusBar.currentHeight,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+  safeArea: {
+    flex: 1,
   },
-  footerContainer: { 
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-    backgroundColor: '#FFF',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+  header: {
+    paddingTop: Platform.OS === 'ios' ? 60 : StatusBar.currentHeight ? StatusBar.currentHeight + 20 : 40,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    backgroundColor: 'transparent',
   },
-
-  // Update scrollContent to account for fixed header and footer
-  scrollContent: {
-    paddingTop: 120 * scale, // Space for fixed header
-    paddingHorizontal: 16,
-    paddingBottom: 120, // Space for fixed footer
-    minHeight: '100%',
-  },
-
-  container: { marginTop: 10 },
-
-  topRow: {
+  headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 20,
   },
-
-  title: { fontSize: 24, fontWeight: '700', color: '#111827' },
-  subText: { color: '#6B7280', marginTop: 4 },
-
-  buttonGroup: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-
-  newBtn: {
-    backgroundColor: '#4F46E5',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 30,
-  },
-
-  newBtnText: { color: '#FFF', fontWeight: '600' },
-
-  filterRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 20,
-  },
-
-  allBtn: {
-    backgroundColor: '#203A43',
-    padding: 8,
-    borderRadius: 6,
-  },
-
-  allBtnText: { color: '#FFF', fontWeight: '700' },
-
-  outlineBtn: {
-    borderWidth: 1,
-    borderColor: '#203A434D',
-    padding: 8,
-    borderRadius: 6,
-  },
-
-  outlineBtnText: { color: '#203A43', fontWeight: '700' },
-
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 24,
-  },
-
-  sectionDivider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E5E7EB',
-  },
-
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(79, 70, 229, 0.1)',
-    borderRadius: 20,
-    paddingVertical: 4,
-  },
-
-  completedSectionTitle: {
-    backgroundColor: '#E5E7EB',
-    color: '#374151',
-  },
-
-  errorText: {
-    color: '#DC2626',
-    textAlign: 'center',
-    marginTop: 20,
+  greeting: {
     fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '500',
   },
-
-  emptyState: {
+  title: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#111827',
+    letterSpacing: -0.5,
+  },
+  refreshButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
-
-  emptyStateText: {
-    color: '#9CA3AF',
-    fontSize: 14,
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 20,
   },
-
-  card: {
-    marginTop: 16,
+  statCard: {
+    flex: 1,
+    minWidth: (width - 52) / 2,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     padding: 16,
-    borderRadius: 20,
-    borderWidth: 0.5,
-    borderColor: '#0000001A',
-    backgroundColor: '#FFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
-
-  cardTop: {
+  statIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  filterScroll: {
+    marginBottom: 8,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 24,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.02,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  filterChipActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#4F46E5',
+  },
+  filterText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  filterTextActive: {
+    color: '#4F46E5',
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 120,
+  },
+  loaderContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  loaderText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  errorContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  retryButton: {
+    backgroundColor: '#4F46E5',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  section: {
+    marginBottom: 32,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  completedTitle: {
+    color: '#6B7280',
+  },
+  sectionCount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6B7280',
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  campaignCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+  },
+  completedCard: {
+    opacity: 0.9,
+    backgroundColor: '#F9FAFB',
+  },
+  cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: 16,
   },
-
-  titleContainer: {
+  cardHeaderLeft: {
     flexDirection: 'row',
-    alignItems: 'center',
     flex: 1,
-  },
-
-  thumbnail: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
     marginRight: 12,
   },
-
+  thumbnailContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  cardThumbnail: {
+    width: '100%',
+    height: '100%',
+  },
   thumbnailPlaceholder: {
+    width: '100%',
+    height: '100%',
     backgroundColor: '#F3F4F6',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
-
+  cardTitleContainer: {
+    flex: 1,
+  },
   cardTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#111827',
-    flex: 1,
+    marginBottom: 6,
+    lineHeight: 24,
   },
-
-  statusBadge: {
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 12,
+  cardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  cardType: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 10,
     paddingVertical: 4,
+    borderRadius: 6,
   },
-
+  cardTypeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
+  cardDate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  cardDateText: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 6,
+  },
   statusText: {
     fontSize: 12,
     fontWeight: '700',
   },
-
-  typeBadge: {
-    marginTop: 8,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#F9FAFB',
+  progressSection: {
+    marginBottom: 20,
   },
-
-  typeBadgeText: {
-    fontSize: 12,
-    color: '#374151',
-  },
-
-  progressRow: {
+  progressHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 16,
+    alignItems: 'center',
+    marginBottom: 8,
   },
-
   progressLabel: {
     fontSize: 14,
+    fontWeight: '600',
     color: '#374151',
   },
-
-  progressPercent: {
+  progressPercentage: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: '#4F46E5',
   },
-
-  progressBarBg: {
+  progressBar: {
     height: 8,
     backgroundColor: '#F3F4F6',
-    borderRadius: 10,
-    marginTop: 6,
+    borderRadius: 4,
+    overflow: 'hidden',
   },
-
-  progressBarFill: {
-    height: 8,
-    borderRadius: 10,
+  progressFill: {
+    height: '100%',
+    borderRadius: 4,
   },
-
-  statsGrid: {
+  cardStatsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginTop: 16,
-    gap: 8,
+    gap: 16,
+    marginBottom: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
   },
-
-  statBox: {
-    width: '48%',
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: '#F9FAFB',
+  cardStat: {
+    flex: 1,
+    minWidth: (width - 80) / 3,
   },
-
-  statLabel: {
-    fontSize: 12,
+  cardStatLabel: {
+    fontSize: 11,
     color: '#6B7280',
-    fontWeight: '600',
+    fontWeight: '500',
+    marginTop: 4,
+    marginBottom: 2,
   },
-
-  statValue: {
-    fontWeight: '700',
+  cardStatValue: {
     fontSize: 16,
+    fontWeight: '700',
     color: '#111827',
   },
-
-  actionRow: {
+  cardActions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 16,
+    gap: 12,
   },
-
-  viewBtn: {
-    width: '48%',
+  viewDetailsButton: {
+    flex: 1,
     height: 44,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E5E7EB',
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
   },
-
-  viewBtnText: {
+  viewDetailsText: {
     fontSize: 14,
+    fontWeight: '600',
     color: '#374151',
   },
-
-  clipBtn: {
-    width: '48%',
+  viewClipsButton: {
+    flex: 1,
     height: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#16A34A',
-    backgroundColor: 'rgba(22, 163, 74, 0.1)',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  viewClipsGradient: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-
-  clipBtnText: {
+  viewClipsText: {
     fontSize: 14,
-    color: '#16A34A',
     fontWeight: '600',
+    color: '#FFFFFF',
   },
-
-  pagination: {
+  paginationContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 24,
-    paddingHorizontal: 8,
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 8,
   },
-
-  paginationBtn: {
+  paginationButton: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 6,
+    paddingVertical: 10,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
-
-  paginationBtnDisabled: {
+  paginationButtonDisabled: {
     opacity: 0.5,
   },
-
-  paginationText: {
-    color: '#374151',
+  paginationButtonText: {
     fontSize: 14,
+    fontWeight: '600',
+    color: '#4B5563',
   },
-
-  pageNumber: {
+  paginationInfo: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  paginationText: {
+    fontSize: 14,
+    color: '#4B5563',
+    fontWeight: '500',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+  },
+  emptyImage: {
+    width: 200,
+    height: 180,
+    marginBottom: 24,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  emptyDescription: {
     fontSize: 14,
     color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+    paddingHorizontal: 20,
   },
-
+  createButton: {
+    width: 200,
+    height: 48,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  createButtonGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  createButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  
   // Modal Styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
-
   modalContent: {
-    backgroundColor: '#FFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
     maxHeight: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 20,
   },
-
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
+    alignItems: 'flex-start',
+    padding: 24,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#F3F4F6',
   },
-
-  modalTitle: {
-    fontSize: 20,
+  modalHeaderLeft: {
+    flex: 1,
+  },
+  modalStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 6,
+    marginBottom: 12,
+  },
+  modalStatusText: {
+    fontSize: 12,
     fontWeight: '700',
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '800',
     color: '#111827',
+    letterSpacing: -0.5,
   },
-
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   modalBody: {
-    padding: 20,
+    padding: 24,
   },
-
   modalLoading: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 60,
   },
-
   modalLoadingText: {
-    marginTop: 12,
+    marginTop: 16,
+    fontSize: 16,
     color: '#6B7280',
-    fontSize: 14,
+    fontWeight: '500',
   },
-
-  modalCampaignHeader: {
-    marginBottom: 20,
+  modalSection: {
+    marginBottom: 32,
   },
-
-  modalCampaignTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-
-  modalThumbnail: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
-    marginRight: 12,
-  },
-
-  modalThumbnailPlaceholder: {
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-
-  modalTitleContainer: {
-    flex: 1,
-  },
-
-  modalCampaignTitle: {
-    fontSize: 20,
+  modalSectionTitle: {
+    fontSize: 18,
     fontWeight: '700',
     color: '#111827',
+    marginBottom: 16,
+  },
+  modalOverviewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    gap: 16,
+  },
+  modalOverviewItem: {
+    flex: 1,
+    minWidth: (width - 80) / 2,
+  },
+  modalOverviewLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
     marginBottom: 4,
   },
-
-  modalCreatedDate: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-
-  modalStatusBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-
-  modalStatusText: {
-    fontSize: 14,
+  modalOverviewValue: {
+    fontSize: 16,
     fontWeight: '700',
-  },
-
-  modalProgressContainer: {
-    marginBottom: 24,
-  },
-
-  modalProgressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-
-  modalProgressLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    fontWeight: '600',
-  },
-
-  modalProgressPercent: {
-    fontSize: 12,
     color: '#111827',
-    fontWeight: '600',
   },
-
+  modalProgressContainer: {
+    marginTop: 8,
+  },
   modalProgressBar: {
     height: 8,
     backgroundColor: '#F3F4F6',
     borderRadius: 4,
     overflow: 'hidden',
   },
-
   modalProgressFill: {
     height: '100%',
+    backgroundColor: '#4F46E5',
     borderRadius: 4,
   },
-
-  infoGrid: {
-    gap: 16,
-    marginBottom: 24,
+  modalInfoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
   },
-
-  infoRow: {
+  infoCard: {
+    width: (width - 72) / 2,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 16,
+  },
+  infoCardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
   },
-
-  infoLabel: {
+  infoCardLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  infoCardValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  modalDetailsList: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 16,
+    gap: 16,
+  },
+  detailRow: {
+    gap: 4,
+  },
+  detailLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  detailValue: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '500',
+  },
+  detailValueMultiline: {
+    lineHeight: 20,
+  },
+  detailBlock: {
+    gap: 8,
+  },
+  detailBlockLabel: {
     fontSize: 12,
     color: '#6B7280',
     fontWeight: '600',
     textTransform: 'uppercase',
     marginBottom: 4,
   },
-
-  infoValue: {
+  bulletPoint: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  bulletDot: {
     fontSize: 16,
-    color: '#111827',
-    fontWeight: '500',
+    color: '#4F46E5',
+    lineHeight: 20,
   },
-
+  bulletText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#111827',
+    lineHeight: 20,
+  },
   clipsSection: {
-    marginBottom: 20,
+    marginTop: 8,
   },
-
-  clipsTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 16,
-  },
-
   clipsList: {
+    paddingRight: 20,
     gap: 12,
   },
-
   clipCard: {
+    width: 200,
     flexDirection: 'row',
     backgroundColor: '#F9FAFB',
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 12,
     marginRight: 12,
-    width: 200,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
   },
-
-  clipThumbnail: {
+  clipPreview: {
     width: 60,
     height: 60,
-    borderRadius: 8,
-    backgroundColor: '#E5E7EB',
+    borderRadius: 10,
+    backgroundColor: '#EEF2FF',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-
   clipInfo: {
     flex: 1,
     justifyContent: 'center',
   },
-
+  clipCreator: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
+  },
   clipDate: {
     fontSize: 12,
     color: '#6B7280',
     marginBottom: 4,
   },
-
-  clipStatus: {
-    fontSize: 14,
-    color: '#111827',
-    fontWeight: '500',
+  clipStatusBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: '#FEF3C7',
   },
-
-  clipIndex: {
-    fontSize: 14,
-    color: '#111827',
+  clipStatusApproved: {
+    backgroundColor: '#DCFCE7',
+  },
+  clipStatusRejected: {
+    backgroundColor: '#FEE2E2',
+  },
+  clipStatusText: {
+    fontSize: 10,
     fontWeight: '600',
+    color: '#D97706',
   },
-
-  noClipsText: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontStyle: 'italic',
-  },
-  emptyCampaignWrapper: {
-  alignItems: 'center',
-  justifyContent: 'center',
-  paddingTop: 40,
-  paddingBottom: 20,
-},
-
-emptyCampaignImage: {
-  width: 210 * scale,
-  height: 190 * scale,
-  marginBottom: 20,
-},
-
-emptyCampaignTitle: {
-  fontSize: 16,
-  fontWeight: '600',
-  color: '#111827',
-  marginBottom: 6,
-  textAlign: 'center',
-},
-
-emptyCampaignDesc: {
-  fontSize: 12,
-  color: '#6B7280',
-  textAlign: 'center',
-  paddingHorizontal: 40,
-  lineHeight: 18,
-  marginBottom: 20,
-},
-
-emptyCampaignBtn: {
-  backgroundColor: '#203A43',
-  height: 52,
-  paddingHorizontal: 24,
-  borderRadius: 10,
-  justifyContent: 'center',
-  alignItems: 'center',
-},
-
-emptyCampaignBtnText: {
-  color: '#FFF',
-  fontWeight: '600',
-  fontSize: 15,
-},
-
 });

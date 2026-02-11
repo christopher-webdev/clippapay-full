@@ -1,5 +1,4 @@
 // app/(dashboard)/wallet.tsx
-
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -20,8 +19,10 @@ import axios from 'axios';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 
 const { width } = Dimensions.get('window');
+const scale = width / 428;
 const API_BASE = 'https://clippapay.com/api';
 
 interface Deposit {
@@ -37,6 +38,7 @@ export default function WalletScreen() {
   const [escrow, setEscrow] = useState<number>(0);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Deposit flow
   const [modalVisible, setModalVisible] = useState(false);
@@ -97,12 +99,18 @@ export default function WalletScreen() {
       Alert.alert('Error', 'Failed to load wallet data');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchWalletData();
+  };
+
   const handleDeposit = async () => {
-    const amt = parseInt(depositAmount, 10);
-    if (isNaN(amt) || amt < 20000) {
+    const amount = parseInt(depositAmount, 10);
+    if (isNaN(amount) || amount < 20000) {
       Alert.alert('Invalid Amount', 'Minimum deposit is ₦20,000');
       return;
     }
@@ -120,80 +128,57 @@ export default function WalletScreen() {
         const token = await getToken();
         const initRes = await axios.post(
           `${API_BASE}/wallet/init-paystack`,
-          { amount: amt, email },
+          { amount, email },
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
         const { reference, authorization_url } = initRes.data;
-
-        Alert.alert(
-          'Paystack Payment',
-          `Reference: ${reference}\n\nComplete payment in the opened browser.`,
-          [
-            { text: 'OK', onPress: () => {
-              // In real app → use expo-web-browser.openBrowserAsync(authorization_url)
-              console.log('Would open:', authorization_url);
-            }},
-          ]
-        );
+        Alert.alert('Paystack Payment', `Reference: ${reference}`);
+        setModalVisible(false);
+        setDepositAmount('');
       } catch (err: any) {
         Alert.alert('Error', err.response?.data?.error || 'Failed to start payment');
       }
     } else {
-      // Switch to receipt upload
       setModalVisible(false);
       setReceiptModalVisible(true);
     }
 
     setSubmitting(false);
-    fetchWalletData();
   };
 
   const pickReceipt = async () => {
     try {
-      // Request permission
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert(
-          'Permission Required',
-          'We need access to your photo library to upload a receipt.'
-        );
+        Alert.alert('Permission Required', 'We need access to your photo library to upload a receipt.');
         return;
       }
 
-      // Launch picker - use string literals instead of enum to avoid undefined crash
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'Images',                  // ← string 'Images' (safe fallback)
-        // Alternative if enum works in your version: [ImagePicker.MediaType.Images]
+        mediaTypes: 'Images',
         allowsEditing: false,
         quality: 0.85,
         base64: false,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        console.log('Selected asset:', asset); // ← debug: check uri, mimeType, fileName
-        setSelectedReceipt(asset);
-      } else {
-        console.log('Picker cancelled');
+        setSelectedReceipt(result.assets[0]);
       }
     } catch (err: any) {
       console.error('ImagePicker error:', err);
-      Alert.alert(
-        'Picker Failed',
-        err.message || 'Could not open image picker. Try restarting the app.'
-      );
+      Alert.alert('Picker Failed', 'Could not open image picker. Please try again.');
     }
   };
 
   const submitManualDeposit = async () => {
-    const amt = parseInt(depositAmount, 10);
-    if (isNaN(amt) || amt < 20000) {
+    const amount = parseInt(depositAmount, 10);
+    if (isNaN(amount) || amount < 20000) {
       Alert.alert('Error', 'Invalid amount');
       return;
     }
     if (!selectedReceipt) {
-      Alert.alert('Missing Receipt', 'Please select a receipt image first');
+      Alert.alert('Missing Receipt', 'Please select a receipt image');
       return;
     }
 
@@ -204,33 +189,27 @@ export default function WalletScreen() {
       if (!token) throw new Error('No auth token');
 
       const formData = new FormData();
-      formData.append('amount', amt.toString());
+      formData.append('amount', amount.toString());
       formData.append('paymentMethod', 'bank');
-
-      // Important: match what your backend expects for the file field name
       formData.append('receipt', {
         uri: selectedReceipt.uri,
         name: selectedReceipt.fileName || `receipt-${Date.now()}.jpg`,
         type: selectedReceipt.mimeType || 'image/jpeg',
       } as any);
 
-      const response = await axios.post(`${API_BASE}/wallet/deposits`, formData, {
+      await axios.post(`${API_BASE}/wallet/deposits`, formData, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 30000, // 30 seconds timeout
+        timeout: 30000,
       });
 
-      if (response.status === 200 || response.status === 201) {
-        Alert.alert('Success', 'Receipt uploaded! Your deposit is pending approval.');
-        setReceiptModalVisible(false);
-        setSelectedReceipt(null);
-        setDepositAmount('');
-        fetchWalletData();
-      } else {
-        Alert.alert('Upload Failed', 'Server responded with error');
-      }
+      Alert.alert('Success', 'Receipt uploaded! Your deposit is pending approval.');
+      setReceiptModalVisible(false);
+      setSelectedReceipt(null);
+      setDepositAmount('');
+      fetchWalletData();
     } catch (err: any) {
       console.error('Upload error:', err);
       const msg = err.response?.data?.error || err.message || 'Failed to upload receipt';
@@ -241,87 +220,146 @@ export default function WalletScreen() {
   };
 
   const formatNaira = (num: number) => `₦${num.toLocaleString()}`;
-
   const amountNum = parseInt(depositAmount, 10);
   const displayAmount = isNaN(amountNum) ? '0' : amountNum.toLocaleString();
 
+  const getStatusConfig = (status: string) => {
+    switch (status) {
+      case 'approved':
+        return { bg: '#DCFCE7', text: '#16A34A', icon: 'checkmark-circle' };
+      case 'rejected':
+        return { bg: '#FEE2E2', text: '#DC2626', icon: 'close-circle' };
+      default:
+        return { bg: '#FEF3C7', text: '#D97706', icon: 'time' };
+    }
+  };
+
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7C3AED" />
+      <View style={styles.centerContainer}>
+        <LinearGradient
+          colors={['#F9FAFB', '#F3F4F6']}
+          style={StyleSheet.absoluteFill}
+        />
+        <ActivityIndicator size="large" color="#4F46E5" />
+        <Text style={styles.loadingText}>Loading wallet...</Text>
       </View>
     );
   }
 
   return (
+    <View style={styles.container}>
+      <LinearGradient
+        colors={['#F9FAFB', '#F3F4F6', '#E5E7EB']}
+        style={StyleSheet.absoluteFill}
+      />
 
-    <LinearGradient
-      colors={['#34D3991A', '#D6CF8D80', '#ffffffb2']} // very light – adjust to match design
-      style={styles.background}
-    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>Wallet</Text>
+          <Text style={styles.subtitle}>Manage your funds and transactions</Text>
+        </View>
 
-    <ScrollView
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-      <Text style={styles.pageTitle}>Wallet</Text>
-      <Text style={styles.pageSubtitle}>Manage your funds</Text>
-
-      <View style={styles.balanceCard}>
-        <Text style={styles.cardLabel}>Available Balance</Text>
-        <Text style={styles.bigAmount}>{formatNaira(balance)}</Text>
-        <Text style={styles.cardSubLabel}>Available Funds</Text>
-
-        <TouchableOpacity
-          style={styles.depositBtn}
-          onPress={() => setModalVisible(true)}
-        >
-          <Text style={styles.depositBtnText}>Deposit Funds</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.escrowCard}>
-        <Text style={styles.cardLabel}>Escrow Balance</Text>
-        <Text style={[styles.bigAmount, { color: '#DC2626' }]}>
-          {formatNaira(escrow)}
-        </Text>
-        <Text style={styles.cardSubLabel}>Locked in active campaigns</Text>
-      </View>
-
-      <View style={styles.recentSection}>
-        <Text style={styles.sectionTitle}>Recent Deposits</Text>
-
-        {deposits.length === 0 ? (
-          <Text style={styles.emptyText}>No recent deposits</Text>
-        ) : (
-          deposits.slice(0, 10).map((dep) => (
-            <View key={dep._id} style={styles.depositItem}>
-              <View>
-                <Text style={styles.depositAmount}>
-                  {formatNaira(dep.amount)}
-                </Text>
-                <Text style={styles.depositDate}>
-                  {new Date(dep.createdAt).toLocaleDateString()}
-                </Text>
+        {/* Balance Cards */}
+        <View style={styles.cardsContainer}>
+          <View style={styles.balanceCard}>
+            <View style={styles.cardHeader}>
+              <View style={[styles.cardIconContainer, { backgroundColor: '#EEF2FF' }]}>
+                <Ionicons name="wallet-outline" size={20} color="#4F46E5" />
               </View>
-              <View
-                style={[
-                  styles.statusBadge,
-                  dep.status === 'approved'
-                    ? styles.statusApproved
-                    : dep.status === 'rejected'
-                    ? styles.statusRejected
-                    : styles.statusPending,
-                ]}
-              >
-                <Text style={styles.statusText}>
-                  {dep.status.charAt(0).toUpperCase() + dep.status.slice(1)}
-                </Text>
-              </View>
+              <Text style={styles.cardLabel}>Available Balance</Text>
             </View>
-          ))
-        )}
-      </View>
+            <Text style={styles.balanceAmount}>{formatNaira(balance)}</Text>
+            <TouchableOpacity
+              style={styles.depositButton}
+              onPress={() => setModalVisible(true)}
+            >
+              <LinearGradient
+                colors={['#4F46E5', '#6366F1']}
+                style={styles.depositGradient}
+              >
+                <Text style={styles.depositButtonText}>Deposit Funds</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.escrowCard}>
+            <View style={styles.cardHeader}>
+              <View style={[styles.cardIconContainer, { backgroundColor: '#FEF3C7' }]}>
+                <Ionicons name="lock-closed-outline" size={20} color="#D97706" />
+              </View>
+              <Text style={styles.cardLabel}>Escrow Balance</Text>
+            </View>
+            <Text style={[styles.balanceAmount, { color: '#D97706' }]}>
+              {formatNaira(escrow)}
+            </Text>
+            <Text style={styles.escrowHint}>Locked in active campaigns</Text>
+          </View>
+        </View>
+
+        {/* Recent Deposits */}
+        <View style={styles.recentSection}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleContainer}>
+              <Ionicons name="time-outline" size={20} color="#4F46E5" />
+              <Text style={styles.sectionTitle}>Recent Deposits</Text>
+            </View>
+            <TouchableOpacity onPress={handleRefresh}>
+              <Ionicons name="refresh-outline" size={20} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+
+          {deposits.length === 0 ? (
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconContainer}>
+                <Ionicons name="wallet-outline" size={32} color="#9CA3AF" />
+              </View>
+              <Text style={styles.emptyTitle}>No deposits yet</Text>
+              <Text style={styles.emptyText}>
+                Your deposit history will appear here
+              </Text>
+            </View>
+          ) : (
+            deposits.slice(0, 10).map((deposit) => {
+              const config = getStatusConfig(deposit.status);
+              return (
+                <View key={deposit._id} style={styles.depositItem}>
+                  <View style={styles.depositInfo}>
+                    <View style={styles.depositIconContainer}>
+                      <Ionicons name="arrow-down-circle" size={24} color="#4F46E5" />
+                    </View>
+                    <View>
+                      <Text style={styles.depositAmount}>
+                        {formatNaira(deposit.amount)}
+                      </Text>
+                      <Text style={styles.depositDate}>
+                        {new Date(deposit.createdAt).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={[styles.depositStatus, { backgroundColor: config.bg }]}>
+                    <Ionicons name={config.icon as any} size={14} color={config.text} />
+                    <Text style={[styles.statusText, { color: config.text }]}>
+                      {deposit.status}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </View>
+
+        {/* Bottom Padding */}
+        <View style={styles.bottomPadding} />
+      </ScrollView>
 
       {/* Deposit Method Modal */}
       <Modal
@@ -330,67 +368,105 @@ export default function WalletScreen() {
         transparent={true}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <BlurView intensity={20} tint="dark" style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Deposit Funds</Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <Ionicons name="close" size={28} color="#374151" />
+              <TouchableOpacity 
+                onPress={() => setModalVisible(false)}
+                style={styles.closeButton}
+              >
+                <Ionicons name="close" size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
             <View style={styles.modalBody}>
-              <Text style={styles.label}>Amount (₦)</Text>
-              <TextInput
-                style={styles.input}
-                value={depositAmount}
-                onChangeText={setDepositAmount}
-                placeholder="Minimum ₦20,000"
-                keyboardType="numeric"
-                autoFocus
-              />
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Amount (₦)</Text>
+                <View style={styles.inputContainer}>
+                  <Text style={styles.inputCurrency}>₦</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={depositAmount}
+                    onChangeText={setDepositAmount}
+                    placeholder="20000"
+                    keyboardType="numeric"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                </View>
+                <Text style={styles.inputHint}>Minimum deposit: ₦20,000</Text>
+              </View>
 
-              <Text style={[styles.label, { marginTop: 20 }]}>Payment Method</Text>
+              <Text style={styles.methodLabel}>Payment Method</Text>
 
               <TouchableOpacity
                 style={[
-                  styles.methodBtn,
-                  depositMethod === 'paystack' && styles.methodBtnActive,
+                  styles.methodCard,
+                  depositMethod === 'paystack' && styles.methodCardActive,
                 ]}
                 onPress={() => setDepositMethod('paystack')}
               >
-                <MaterialIcons name="payment" size={20} color="#7C3AED" />
-                <Text style={styles.methodText}>Pay with Paystack</Text>
+                <View style={styles.methodLeft}>
+                  <View style={[styles.methodIcon, { backgroundColor: '#EEF2FF' }]}>
+                    <MaterialIcons name="payment" size={20} color="#4F46E5" />
+                  </View>
+                  <View>
+                    <Text style={styles.methodTitle}>Paystack</Text>
+                    <Text style={styles.methodDescription}>Instant payment with card or bank</Text>
+                  </View>
+                </View>
+                {depositMethod === 'paystack' && (
+                  <View style={styles.methodSelected}>
+                    <Ionicons name="checkmark-circle" size={24} color="#4F46E5" />
+                  </View>
+                )}
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[
-                  styles.methodBtn,
-                  depositMethod === 'manual' && styles.methodBtnActive,
+                  styles.methodCard,
+                  depositMethod === 'manual' && styles.methodCardActive,
                 ]}
                 onPress={() => setDepositMethod('manual')}
               >
-                <Ionicons name="cash-outline" size={20} color="#16A34A" />
-                <Text style={styles.methodText}>Manual Bank Transfer</Text>
+                <View style={styles.methodLeft}>
+                  <View style={[styles.methodIcon, { backgroundColor: '#FEF3C7' }]}>
+                    <Ionicons name="cash-outline" size={20} color="#D97706" />
+                  </View>
+                  <View>
+                    <Text style={styles.methodTitle}>Bank Transfer</Text>
+                    <Text style={styles.methodDescription}>Upload receipt after transfer</Text>
+                  </View>
+                </View>
+                {depositMethod === 'manual' && (
+                  <View style={styles.methodSelected}>
+                    <Ionicons name="checkmark-circle" size={24} color="#4F46E5" />
+                  </View>
+                )}
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[
-                  styles.submitBtn,
-                  (isNaN(amountNum) || amountNum < 20000) && styles.submitDisabled,
+                  styles.submitButton,
+                  (isNaN(amountNum) || amountNum < 20000 || submitting) && styles.submitButtonDisabled,
                 ]}
                 onPress={handleDeposit}
-                disabled={submitting || isNaN(amountNum) || amountNum < 20000}
+                disabled={isNaN(amountNum) || amountNum < 20000 || submitting}
               >
-                {submitting ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <Text style={styles.submitText}>Continue</Text>
-                )}
+                <LinearGradient
+                  colors={['#4F46E5', '#6366F1']}
+                  style={styles.submitGradient}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.submitButtonText}>Continue</Text>
+                  )}
+                </LinearGradient>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </BlurView>
       </Modal>
 
       {/* Receipt Upload Modal */}
@@ -400,197 +476,308 @@ export default function WalletScreen() {
         transparent={true}
         onRequestClose={() => setReceiptModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <BlurView intensity={20} tint="dark" style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Upload Receipt</Text>
-              <TouchableOpacity onPress={() => setReceiptModalVisible(false)}>
-                <Ionicons name="close" size={28} color="#374151" />
+              <TouchableOpacity 
+                onPress={() => {
+                  setReceiptModalVisible(false);
+                  setSelectedReceipt(null);
+                }}
+                style={styles.closeButton}
+              >
+                <Ionicons name="close" size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
             <View style={styles.modalBody}>
-              <Text style={styles.bankDetails}>
-                Transfer ₦{displayAmount} to:{'\n\n'}
-                <Text style={{ fontWeight: 'bold' }}>Bank:</Text> Kuda Microfinance Bank{'\n'}
-                <Text style={{ fontWeight: 'bold' }}>Account:</Text> 3002830057{'\n'}
-                <Text style={{ fontWeight: 'bold' }}>Name:</Text> Clippa Digital Hub LTD
-              </Text>
+              <View style={styles.bankDetailsCard}>
+                <View style={styles.bankHeader}>
+                  <Ionicons name="business" size={20} color="#4F46E5" />
+                  <Text style={styles.bankTitle}>Bank Transfer Details</Text>
+                </View>
+                <View style={styles.bankDetailsRow}>
+                  <Text style={styles.bankDetailLabel}>Amount:</Text>
+                  <Text style={styles.bankDetailValue}>₦{displayAmount}</Text>
+                </View>
+                <View style={styles.bankDetailsRow}>
+                  <Text style={styles.bankDetailLabel}>Bank:</Text>
+                  <Text style={styles.bankDetailValue}>Kuda Microfinance Bank</Text>
+                </View>
+                <View style={styles.bankDetailsRow}>
+                  <Text style={styles.bankDetailLabel}>Account:</Text>
+                  <Text style={styles.bankDetailValue}>3002830057</Text>
+                </View>
+                <View style={styles.bankDetailsRow}>
+                  <Text style={styles.bankDetailLabel}>Account Name:</Text>
+                  <Text style={styles.bankDetailValue}>Clippa Digital Hub LTD</Text>
+                </View>
+              </View>
 
               <TouchableOpacity style={styles.uploadArea} onPress={pickReceipt}>
-                <Ionicons name="cloud-upload-outline" size={40} color="#7C3AED" />
-                <Text style={styles.uploadText}>
-                  Tap to upload receipt{'\n'}
-                  <Text style={{ fontSize: 13, color: '#6B7280' }}>
-                    PNG, JPG or PDF (max 5MB)
-                  </Text>
-                </Text>
+                <View style={styles.uploadIconContainer}>
+                  <Ionicons name="cloud-upload" size={32} color="#4F46E5" />
+                </View>
+                <Text style={styles.uploadTitle}>Tap to upload receipt</Text>
+                <Text style={styles.uploadHint}>PNG, JPG or PDF (max 5MB)</Text>
               </TouchableOpacity>
 
               {selectedReceipt && (
-                <View style={styles.selectedFileContainer}>
-                  <Ionicons name="document-text-outline" size={20} color="#16A34A" />
-                  <Text style={styles.selectedFileText} numberOfLines={1}>
-                    {selectedReceipt.fileName || 'receipt.jpg'}
-                  </Text>
+                <View style={styles.selectedFileCard}>
+                  <View style={styles.fileIconContainer}>
+                    <Ionicons name="document-text" size={24} color="#10B981" />
+                  </View>
+                  <View style={styles.fileInfo}>
+                    <Text style={styles.fileName} numberOfLines={1}>
+                      {selectedReceipt.fileName || 'receipt.jpg'}
+                    </Text>
+                    <Text style={styles.fileSize}>
+                      {Math.round((selectedReceipt.fileSize || 0) / 1024)} KB
+                    </Text>
+                  </View>
+                  <TouchableOpacity 
+                    onPress={() => setSelectedReceipt(null)}
+                    style={styles.fileRemoveButton}
+                  >
+                    <Ionicons name="close-circle" size={20} color="#EF4444" />
+                  </TouchableOpacity>
                 </View>
               )}
 
               <TouchableOpacity
                 style={[
-                  styles.submitBtn,
-                  (!selectedReceipt || submitting) && styles.submitDisabled,
+                  styles.submitButton,
+                  (!selectedReceipt || submitting) && styles.submitButtonDisabled,
                 ]}
                 onPress={submitManualDeposit}
-                disabled={submitting || !selectedReceipt}
+                disabled={!selectedReceipt || submitting}
               >
-                {submitting ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <Text style={styles.submitText}>Submit for Verification</Text>
-                )}
+                <LinearGradient
+                  colors={['#4F46E5', '#6366F1']}
+                  style={styles.submitGradient}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.submitButtonText}>Submit for Verification</Text>
+                  )}
+                </LinearGradient>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </BlurView>
       </Modal>
-
-      {/* Bottom padding */}
-      <View style={{ height: 40 }} />
-    </ScrollView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollContent: {
-    paddingTop: 120, // Reduced since header is in layout
-    paddingHorizontal: 24,
-    paddingBottom: 20,
+  container: {
+    flex: 1,
   },
-
-  pageTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
+  centerContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
     marginTop: 16,
-  },
-  pageSubtitle: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#6B7280',
+    fontWeight: '500',
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 120,
+    paddingBottom: 100,
+  },
+  header: {
     marginBottom: 24,
   },
-
-  balanceCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#45A145',
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-
-  escrowCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    padding: 20,
-    marginBottom: 24,
-  },
-
-  cardLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  bigAmount: {
+  title: {
     fontSize: 32,
     fontWeight: '800',
     color: '#111827',
+    letterSpacing: -0.5,
   },
-  cardSubLabel: {
-    fontSize: 13,
-    color: '#9CA3AF',
+  subtitle: {
+    fontSize: 14,
+    color: '#6B7280',
     marginTop: 4,
-    marginBottom: 20,
   },
-
-  depositBtn: {
-    backgroundColor: '#7C3AED',
-    borderRadius: 12,
-    paddingVertical: 14,
+  cardsContainer: {
+    gap: 16,
+    marginBottom: 32,
+  },
+  balanceCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  escrowCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  cardHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 12,
   },
-  depositBtnText: {
+  cardIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  cardLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  balanceAmount: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 16,
+  },
+  depositButton: {
+    height: 48,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  depositGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  depositButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
   },
-
-  recentSection: {
+  escrowHint: {
+    fontSize: 12,
+    color: '#9CA3AF',
     marginTop: 8,
+  },
+  recentSection: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#111827',
-    marginBottom: 12,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  emptyIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#6B7280',
   },
   depositItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  depositInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  depositIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
   depositAmount: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
     color: '#111827',
+    marginBottom: 4,
   },
   depositDate: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#6B7280',
-    marginTop: 4,
   },
-  statusBadge: {
+  depositStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
+    gap: 6,
   },
-  statusApproved: { backgroundColor: '#DCFCE7' },
-  statusPending: { backgroundColor: '#FEF3C7' },
-  statusRejected: { backgroundColor: '#FEE2E2' },
   statusText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
-  emptyText: {
-    textAlign: 'center',
-    color: '#9CA3AF',
-    fontSize: 15,
-    paddingVertical: 40,
+  bottomPadding: {
+    height: 40,
   },
-
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '80%',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -598,108 +785,222 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#F3F4F6',
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#111827',
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalBody: {
     padding: 24,
   },
-  label: {
-    fontSize: 15,
+  inputGroup: {
+    marginBottom: 24,
+  },
+  inputLabel: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#374151',
     marginBottom: 8,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 17,
-    backgroundColor: '#F9FAFB',
-  },
-  methodBtn: {
+  inputContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 16,
+  },
+  inputCurrency: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#6B7280',
+    marginRight: 8,
+  },
+  input: {
+    flex: 1,
+    paddingVertical: 16,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  inputHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 8,
+  },
+  methodLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 12,
+  },
+  methodCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 12,
+    borderRadius: 16,
     marginBottom: 12,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#FFFFFF',
   },
-  methodBtnActive: {
-    borderColor: '#7C3AED',
-    backgroundColor: '#F3E8FF',
+  methodCardActive: {
+    borderColor: '#4F46E5',
+    backgroundColor: '#EEF2FF',
   },
-  methodText: {
-    fontSize: 15,
-    color: '#111827',
-    marginLeft: 12,
+  methodLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flex: 1,
   },
-  submitBtn: {
-    backgroundColor: '#7C3AED',
+  methodIcon: {
+    width: 48,
+    height: 48,
     borderRadius: 12,
-    paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  methodTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  methodDescription: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  methodSelected: {
+    marginLeft: 12,
+  },
+  submitButton: {
+    height: 56,
+    borderRadius: 16,
+    overflow: 'hidden',
     marginTop: 24,
   },
-  submitDisabled: {
-    backgroundColor: '#9CA3AF',
+  submitGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  submitText: {
+  submitButtonDisabled: {
+    opacity: 0.5,
+  },
+  submitButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
   },
-
-  // Receipt modal styles
-  bankDetails: {
-    fontSize: 15,
+  bankDetailsCard: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  bankHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  bankTitle: {
+    fontSize: 16,
+    fontWeight: '700',
     color: '#111827',
-    lineHeight: 24,
-    marginBottom: 28,
+  },
+  bankDetailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+  bankDetailLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  bankDetailValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
   },
   uploadArea: {
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    borderStyle: 'dashed',
-    borderRadius: 16,
-    padding: 32,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    padding: 32,
     backgroundColor: '#F9FAFB',
     marginBottom: 16,
   },
-  uploadText: {
-    fontSize: 16,
-    color: '#374151',
-    textAlign: 'center',
-    marginTop: 12,
+  uploadIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
   },
-  selectedFileContainer: {
+  uploadTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  uploadHint: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  selectedFileCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F0FDF4',
-    padding: 12,
     borderRadius: 12,
-    marginBottom: 24,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#86EFAC',
   },
-  selectedFileText: {
-    fontSize: 14,
-    color: '#166534',
-    marginLeft: 8,
-    flex: 1,
-  },
-
-  center: {
-    flex: 1,
-    justifyContent: 'center',
+  fileIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#DCFCE7',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  fileInfo: {
+    flex: 1,
+  },
+  fileName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#166534',
+    marginBottom: 2,
+  },
+  fileSize: {
+    fontSize: 12,
+    color: '#16A34A',
+  },
+  fileRemoveButton: {
+    padding: 4,
   },
 });
