@@ -194,28 +194,58 @@ router.get(
       const availableCampaigns = await Campaign.find({
         kind: 'pgc',
         status: 'active',
-        $expr: { $lt: ['$approvedVideosCount', '$desiredVideos'] }
+        $expr: { $lt: ['$approvedVideosCount', '$desiredVideos'] }, // still has open slots
       })
         .select(
           '_id title brief deliverables assets approvalCriteria ' +
           'pgcAddons script budget_total clipper_cpm ' +
           'desiredVideos approvedVideosCount clippersCount ' +
-          'status createdAt advertiser'
+          'status createdAt advertiser ' +
+          // Additional fields clippers need to see:
+          'directions hashtags categories captionTemplate ' +
+          'cta_url usageRights'
         )
-        .populate('advertiser', 'company contactName email') // optional: show brand/company
-        .sort({ createdAt: -1 })
-        .limit(50);
+        .populate('advertiser', 'company contactName email') // Optional: brand/company info
+        .sort({ createdAt: -1 }) // Newest first
+        .limit(50); // Prevent overload – adjust as needed
 
+      // Optional: enrich with application status for current clipper
+      // (uncomment if you already have Application model)
+      /*
+      const clipperId = req.user._id;
+      const applications = await Application.find({
+        clipper: clipperId,
+        campaign: { $in: availableCampaigns.map(c => c._id) }
+      }).select('campaign status');
+
+      const appliedMap = new Map(
+        applications.map(app => [app.campaign.toString(), app.status])
+      );
+
+      const enriched = availableCampaigns.map(campaign => {
+        const campaignIdStr = campaign._id.toString();
+        return {
+          ...campaign.toObject(),
+          myApplicationStatus: appliedMap.get(campaignIdStr) || null, // null | 'pending' | 'approved' | 'rejected'
+        };
+      });
+
+      return res.status(200).json(enriched);
+      */
+
+      // Return raw campaigns (without application status yet)
       res.status(200).json(availableCampaigns);
 
     } catch (error) {
       console.error('Error fetching available PGC campaigns:', error);
-      res.status(500).json({ 
-        error: 'Server error while fetching available PGC campaigns' 
+      res.status(500).json({
+        error: 'Failed to fetch available PGC campaigns',
+        message: error.message,
       });
     }
   }
 );
+
 // Generic join route — works for normal, ugc, pgc
 router.post('/:id/join', requireAuth, requireClipper, async (req, res) => {
   try {
