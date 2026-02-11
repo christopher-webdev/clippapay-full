@@ -5,9 +5,28 @@ import { Briefcase, Film, User, Loader2 } from 'lucide-react';
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const normalizeUrl = (url?: string) => {
-  if (!url) return url;
-  if (/^https?:\/\//i.test(url)) return url;
-  if (url.startsWith('/')) return `${API_BASE}${url}`;
+  if (!url) return undefined;
+
+  // Already a full https/http URL → return as is
+  if (/^https?:\/\//i.test(url)) {
+    return url;
+  }
+
+  // Public asset paths - serve directly from domain root
+  if (
+    url.startsWith('/uploads/') ||
+    url.startsWith('/pgc-assets/') ||
+    url.startsWith('/ugc-assets/')
+  ) {
+    return `https://clippapay.com${url}`;
+  }
+
+  // Other API-relative paths (thumbnails, campaign files, etc.)
+  if (url.startsWith('/')) {
+    return `${API_BASE}${url}`;
+  }
+
+  // Fallback
   return url;
 };
 
