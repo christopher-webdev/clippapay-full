@@ -185,6 +185,72 @@ router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res)
     return res.status(500).json({ error: 'Submission failed.' });
   }
 });
+router.get('/:id', requireAuth, async (req, res) => {
+  try {
+    const campaign = await Campaign.findById(req.params.id)
+      .populate('advertiser', 'contactName email')
+      .lean();
+
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+
+    // Only show to clippers if campaign is active & ready
+    if (campaign.status !== 'active' || campaign.adWorkerStatus !== 'ready') {
+      return res.status(403).json({ error: 'Campaign not available.' });
+    }
+
+    const clips = await Clip.find({ campaign: campaign._id })
+      .sort('index')
+      .select('_id url index createdAt')
+      .lean();
+
+    // Shape the response with proper ugc field mapping
+    res.json({
+      id: campaign._id.toString(),
+      title: campaign.title,
+      advertiser: campaign.advertiser?.contactName || 'Advertiser',
+      description: campaign.description || '',
+      thumbUrl: campaign.thumb_url,
+      payPerView: campaign.clipper_cpm ?? 500,
+      totalViews: campaign.views_purchased,
+      views_left: campaign.views_left,
+      clippersCount: campaign.clippersCount,
+      platforms: campaign.platforms,
+      directions: campaign.directions,
+      hashtags: campaign.hashtags,
+      status: campaign.status,
+      kind: campaign.kind,
+      desiredVideos: campaign.desiredVideos ?? 0,
+      approvedVideosCount: campaign.approvedVideosCount ?? 0,
+      
+      // ⭐ CRITICAL: Make sure ugc field is properly passed through
+      ugc: campaign.ugc || {
+        brief: '',
+        deliverables: [],
+        assets: [],
+        approvalCriteria: '',
+        captionTemplate: '',
+        usageRights: '',
+        hashtags: []
+      },
+      
+      // Also include at root for backward compatibility
+      brief: campaign.ugc?.brief || '',
+      deliverables: campaign.ugc?.deliverables || [],
+      assets: campaign.ugc?.assets || [],
+      approvalCriteria: campaign.ugc?.approvalCriteria || '',
+      
+      clips: clips.map(c => ({
+        id: c._id.toString(),
+        url: c.url,
+        index: c.index,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not fetch campaign details.' });
+  }
+});
+
 router.get(
   '/available-pgc',
   requireAuth,
@@ -194,37 +260,59 @@ router.get(
       const availableCampaigns = await Campaign.find({
         kind: 'pgc',
         status: 'active',
-        $expr: { $lt: ['$approvedVideosCount', '$desiredVideos'] }, // still has open slots
+        $expr: { $lt: ['$approvedVideosCount', '$desiredVideos'] },
       })
-        .select(
-          '_id title kind pgcAddons script budget_total clipper_cpm ' +
-          'desiredVideos approvedVideosCount clippersCount ' +
-          'status createdAt advertiser ' +
-          'directions hashtags categories captionTemplate ' +
-          'cta_url usageRights ' +
-          // UGC subdocument - THIS IS WHERE YOUR PGC DATA IS STORED!
-          'ugc.brief ugc.deliverables ugc.assets ugc.approvalCriteria ' +
-          'ugc.captionTemplate ugc.usageRights ugc.hashtags'
-        )
+        .select({
+          // Root level fields
+          _id: 1,
+          title: 1,
+          kind: 1,
+          pgcAddons: 1,
+          script: 1,
+          budget_total: 1,
+          clipper_cpm: 1,
+          desiredVideos: 1,
+          approvedVideosCount: 1,
+          clippersCount: 1,
+          status: 1,
+          createdAt: 1,
+          directions: 1,
+          hashtags: 1,
+          categories: 1,
+          captionTemplate: 1,
+          cta_url: 1,
+          usageRights: 1,
+          advertiser: 1,
+          // ⭐ CRITICAL: Select ALL ugc fields - THIS IS WHERE YOUR DATA IS
+          ugc: {
+            brief: 1,
+            deliverables: 1,
+            assets: 1,
+            approvalCriteria: 1,
+            captionTemplate: 1,
+            usageRights: 1,
+            hashtags: 1,
+            directions: 1,
+          }
+        })
         .populate('advertiser', 'company contactName email')
         .sort({ createdAt: -1 })
-        .limit(50);
+        .limit(50)
+        .lean(); // Add lean() for better performance
 
-      // Transform the data to make it easier for frontend to consume
+      // Transform the data to include both formats for backward compatibility
       const transformedCampaigns = availableCampaigns.map(campaign => {
-        const camp = campaign.toObject();
-        
-        // Map ugc fields to root level for easier access
-        return {
-          ...camp,
-          // Map ugc fields to root level
-          brief: camp.ugc?.brief || '',
-          deliverables: camp.ugc?.deliverables || [],
-          assets: camp.ugc?.assets || [],
-          approvalCriteria: camp.ugc?.approvalCriteria || '',
-          // Keep ugc field for reference
-          ugc: camp.ugc
+        // Create a new object with all fields
+        const transformed = {
+          ...campaign,
+          // Map ugc fields to root level for easier access
+          brief: campaign.ugc?.brief || '',
+          deliverables: campaign.ugc?.deliverables || [],
+          assets: campaign.ugc?.assets || [],
+          approvalCriteria: campaign.ugc?.approvalCriteria || '',
         };
+        
+        return transformed;
       });
 
       res.status(200).json(transformedCampaigns);
@@ -603,69 +691,69 @@ router.get('/available', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/:id', requireAuth, async (req, res) => {
-  try {
-    const campaign = await Campaign.findById(req.params.id)
-      .populate('advertiser', 'contactName email')
-      .lean(); // Return plain object so we can shape output easily
+// router.get('/:id', requireAuth, async (req, res) => {
+//   try {
+//     const campaign = await Campaign.findById(req.params.id)
+//       .populate('advertiser', 'contactName email')
+//       .lean(); // Return plain object so we can shape output easily
 
-    if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+//     if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
 
-    // Only show to clippers if campaign is active & ready
-    if (campaign.status !== 'active' || campaign.adWorkerStatus !== 'ready') {
-      return res.status(403).json({ error: 'Campaign not available.' });
-    }
+//     // Only show to clippers if campaign is active & ready
+//     if (campaign.status !== 'active' || campaign.adWorkerStatus !== 'ready') {
+//       return res.status(403).json({ error: 'Campaign not available.' });
+//     }
 
-    const clips = await Clip.find({ campaign: campaign._id })
-      .sort('index')
-      .select('_id url index createdAt')
-      .lean();
+//     const clips = await Clip.find({ campaign: campaign._id })
+//       .sort('index')
+//       .select('_id url index createdAt')
+//       .lean();
 
-    // Shape the response the UI expects, plus UGC/PGC when present
-    res.json({
-      id: campaign._id.toString(),
-      title: campaign.title,
-      advertiser: campaign.advertiser?.contactName || 'Advertiser',
-      description: campaign.description || '',
-      thumbUrl: campaign.thumb_url,
-      payPerView: campaign.clipper_cpm ?? 500, // Match frontend fallback
-      totalViews: campaign.views_purchased,
-      views_left: campaign.views_left,
-      clippersCount: campaign.clippersCount,
-      platforms: campaign.platforms,
-      directions: campaign.directions, // Keep exposing top-level if used elsewhere
-      hashtags: campaign.hashtags,
-      status: campaign.status,
-      kind: campaign.kind,
-      desiredVideos: campaign.desiredVideos ?? 0, // PGC-specific
-      approvedVideosCount: campaign.approvedVideosCount ?? 0, // PGC-specific
-      ugc: (campaign.kind === 'ugc' || campaign.kind === 'pgc') ? {
-        assets: campaign.ugc?.assets || [],
-        brief: campaign.ugc?.brief || '',
-        directions: (campaign.ugc?.directions && campaign.ugc.directions.length > 0)
-          ? campaign.ugc.directions
-          : (campaign.directions || []),
-        deliverables: campaign.ugc?.deliverables || [],
-        captionTemplate: campaign.ugc?.captionTemplate || '',
-        usageRights: campaign.ugc?.usageRights || '',
-        ...(campaign.kind === 'pgc' && {
-          approvalCriteria: campaign.ugc?.approvalCriteria || '',
-          draftRequired: campaign.ugc?.draftRequired ?? false,
-          creativeDeadline: campaign.ugc?.creativeDeadline || '',
-          postDeadline: campaign.ugc?.postDeadline || ''
-        })
-      } : undefined,
-      clips: clips.map(c => ({
-        id: c._id.toString(),
-        url: c.url,
-        index: c.index,
-      })),
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Could not fetch campaign details.' });
-  }
-});
+//     // Shape the response the UI expects, plus UGC/PGC when present
+//     res.json({
+//       id: campaign._id.toString(),
+//       title: campaign.title,
+//       advertiser: campaign.advertiser?.contactName || 'Advertiser',
+//       description: campaign.description || '',
+//       thumbUrl: campaign.thumb_url,
+//       payPerView: campaign.clipper_cpm ?? 500, // Match frontend fallback
+//       totalViews: campaign.views_purchased,
+//       views_left: campaign.views_left,
+//       clippersCount: campaign.clippersCount,
+//       platforms: campaign.platforms,
+//       directions: campaign.directions, // Keep exposing top-level if used elsewhere
+//       hashtags: campaign.hashtags,
+//       status: campaign.status,
+//       kind: campaign.kind,
+//       desiredVideos: campaign.desiredVideos ?? 0, // PGC-specific
+//       approvedVideosCount: campaign.approvedVideosCount ?? 0, // PGC-specific
+//       ugc: (campaign.kind === 'ugc' || campaign.kind === 'pgc') ? {
+//         assets: campaign.ugc?.assets || [],
+//         brief: campaign.ugc?.brief || '',
+//         directions: (campaign.ugc?.directions && campaign.ugc.directions.length > 0)
+//           ? campaign.ugc.directions
+//           : (campaign.directions || []),
+//         deliverables: campaign.ugc?.deliverables || [],
+//         captionTemplate: campaign.ugc?.captionTemplate || '',
+//         usageRights: campaign.ugc?.usageRights || '',
+//         ...(campaign.kind === 'pgc' && {
+//           approvalCriteria: campaign.ugc?.approvalCriteria || '',
+//           draftRequired: campaign.ugc?.draftRequired ?? false,
+//           creativeDeadline: campaign.ugc?.creativeDeadline || '',
+//           postDeadline: campaign.ugc?.postDeadline || ''
+//         })
+//       } : undefined,
+//       clips: clips.map(c => ({
+//         id: c._id.toString(),
+//         url: c.url,
+//         index: c.index,
+//       })),
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Could not fetch campaign details.' });
+//   }
+// });
 // ========================= UGC (Clipper) ROUTES ==============================
 
 /**

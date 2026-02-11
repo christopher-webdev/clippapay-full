@@ -29,10 +29,7 @@ interface PGCCampaign {
   _id: string;
   title: string;
   kind: 'pgc';
-  brief: string;
-  deliverables: string[];
-  assets: string[];
-  approvalCriteria: string;
+  // Root level fields
   pgcAddons: string[];
   script: string;
   budget_total: number;
@@ -42,17 +39,35 @@ interface PGCCampaign {
   clippersCount: number;
   status: string;
   createdAt: string;
+  directions?: string[];
+  hashtags?: string[];
+  categories?: string[];
+  captionTemplate?: string;
+  cta_url?: string;
+  usageRights?: string;
   advertiser?: {
     company?: string;
     contactName?: string;
     email?: string;
   };
-  directions?: string;
-  captionTemplate?: string;
-  hashtags?: string[];
-  categories?: string[];
-  cta_url?: string;
-  usageRights?: string;
+  
+  // UGC subdocument - THIS IS WHERE PGC BRIEF DATA IS STORED!
+  ugc?: {
+    brief: string;
+    deliverables: string[];
+    assets: string[];
+    approvalCriteria: string;
+    captionTemplate?: string;
+    usageRights?: string;
+    hashtags?: string[];
+    directions?: string[];
+  };
+  
+  // Mapped fields for easier access (if transformed in backend)
+  brief?: string;
+  deliverables?: string[];
+  assets?: string[];
+  approvalCriteria?: string;
 }
 
 export default function JoinUGC() {
@@ -126,6 +141,56 @@ export default function JoinUGC() {
     setModalVisible(true);
   };
 
+  // Helper function to safely get brief from either root or ugc
+  const getBrief = (campaign: PGCCampaign): string => {
+    return campaign.brief || campaign.ugc?.brief || '';
+  };
+
+  // Helper function to safely get deliverables
+  const getDeliverables = (campaign: PGCCampaign): string[] => {
+    return campaign.deliverables || campaign.ugc?.deliverables || [];
+  };
+
+  // Helper function to safely get assets
+  const getAssets = (campaign: PGCCampaign): string[] => {
+    return campaign.assets || campaign.ugc?.assets || [];
+  };
+
+  // Helper function to safely get approval criteria
+  const getApprovalCriteria = (campaign: PGCCampaign): string => {
+    return campaign.approvalCriteria || campaign.ugc?.approvalCriteria || '';
+  };
+
+  // Helper function to safely get directions
+  const getDirections = (campaign: PGCCampaign): string => {
+    if (campaign.directions) {
+      return Array.isArray(campaign.directions) 
+        ? campaign.directions.join('\n') 
+        : campaign.directions;
+    }
+    if (campaign.ugc?.directions) {
+      return Array.isArray(campaign.ugc.directions)
+        ? campaign.ugc.directions.join('\n')
+        : campaign.ugc.directions;
+    }
+    return '';
+  };
+
+  // Helper function to safely get caption template
+  const getCaptionTemplate = (campaign: PGCCampaign): string => {
+    return campaign.captionTemplate || campaign.ugc?.captionTemplate || '';
+  };
+
+  // Helper function to safely get hashtags
+  const getHashtags = (campaign: PGCCampaign): string[] => {
+    return campaign.hashtags || campaign.ugc?.hashtags || [];
+  };
+
+  // Helper function to safely get usage rights
+  const getUsageRights = (campaign: PGCCampaign): string => {
+    return campaign.usageRights || campaign.ugc?.usageRights || 'Standard usage rights apply';
+  };
+
   const renderCampaignCard = ({ item: c }: { item: PGCCampaign }) => (
     <TouchableOpacity style={styles.card} onPress={() => openDetails(c)}>
       <LinearGradient colors={['#FFFFFF', '#F9FAFB']} style={styles.cardGradient}>
@@ -143,7 +208,7 @@ export default function JoinUGC() {
         <View style={styles.cardStats}>
           <View style={styles.statItem}>
             <Ionicons name="cash-outline" size={16} color="#059669" />
-            <Text style={styles.statValue}>₦{c.clipper_cpm.toLocaleString()} Payout</Text>
+            <Text style={styles.statValue}>₦{c.clipper_cpm?.toLocaleString() || 0} Payout</Text>
           </View>
 
           <View style={styles.statItem}>
@@ -153,12 +218,12 @@ export default function JoinUGC() {
         </View>
 
         <Text style={styles.briefPreview} numberOfLines={3}>
-          {c.brief || 'No brief provided'}
+          {getBrief(c) || 'No brief provided'}
         </Text>
 
         <View style={styles.cardFooter}>
           <Text style={styles.deadline}>
-            Created: {new Date(c.createdAt).toLocaleDateString()}
+            Created: {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}
           </Text>
 
           <TouchableOpacity style={styles.applyButton} onPress={() => handleApply(c._id)}>
@@ -207,9 +272,7 @@ export default function JoinUGC() {
           />
         </ScrollView>
 
-        {/* ──────────────────────────────────────────────── */}
-        {/*                   DETAILED MODAL                   */}
-        {/* ──────────────────────────────────────────────── */}
+        {/* DETAILED MODAL */}
         <Modal
           visible={modalVisible}
           animationType="slide"
@@ -235,7 +298,7 @@ export default function JoinUGC() {
                       <Ionicons name="cash-outline" size={20} color="#059669" />
                       <Text style={styles.modalStatLabel}>Your Payout</Text>
                       <Text style={styles.modalStatValue}>
-                        ₦{selectedCampaign.clipper_cpm.toLocaleString()}
+                        ₦{selectedCampaign.clipper_cpm?.toLocaleString() || 0}
                       </Text>
                     </View>
 
@@ -246,13 +309,29 @@ export default function JoinUGC() {
                         {selectedCampaign.clippersCount || 0}
                       </Text>
                     </View>
+
+                    <View style={styles.modalStat}>
+                      <Ionicons name="videocam-outline" size={20} color="#8B5CF6" />
+                      <Text style={styles.modalStatLabel}>Videos</Text>
+                      <Text style={styles.modalStatValue}>
+                        {selectedCampaign.approvedVideosCount || 0}/{selectedCampaign.desiredVideos || 1}
+                      </Text>
+                    </View>
                   </View>
 
                   {/* Brief */}
                   <View style={styles.modalSection}>
                     <Text style={styles.sectionTitle}>Creative Brief</Text>
                     <Text style={styles.sectionText}>
-                      {selectedCampaign.brief || 'Not provided'}
+                      {getBrief(selectedCampaign) || 'Not provided'}
+                    </Text>
+                  </View>
+
+                  {/* Script */}
+                  <View style={styles.modalSection}>
+                    <Text style={styles.sectionTitle}>Script / Guidelines</Text>
+                    <Text style={styles.sectionText}>
+                      {selectedCampaign.script || 'Creator is expected to provide or develop the script'}
                     </Text>
                   </View>
 
@@ -260,15 +339,15 @@ export default function JoinUGC() {
                   <View style={styles.modalSection}>
                     <Text style={styles.sectionTitle}>Creative Directions</Text>
                     <Text style={styles.sectionText}>
-                      {selectedCampaign.directions || 'No specific directions provided'}
+                      {getDirections(selectedCampaign) || 'No specific directions provided'}
                     </Text>
                   </View>
 
                   {/* Deliverables */}
                   <View style={styles.modalSection}>
                     <Text style={styles.sectionTitle}>Deliverables</Text>
-                    {selectedCampaign.deliverables?.length > 0 ? (
-                      selectedCampaign.deliverables.map((item, index) => (
+                    {getDeliverables(selectedCampaign).length > 0 ? (
+                      getDeliverables(selectedCampaign).map((item, index) => (
                         <View key={index} style={styles.bulletItem}>
                           <Text style={styles.bullet}>•</Text>
                           <Text style={styles.sectionText}>{item}</Text>
@@ -283,7 +362,7 @@ export default function JoinUGC() {
                   <View style={styles.modalSection}>
                     <Text style={styles.sectionTitle}>Approval Criteria</Text>
                     <Text style={styles.sectionText}>
-                      {selectedCampaign.approvalCriteria || 'Standard quality & brand alignment'}
+                      {getApprovalCriteria(selectedCampaign) || 'Standard quality & brand alignment'}
                     </Text>
                   </View>
 
@@ -294,7 +373,7 @@ export default function JoinUGC() {
                       <View style={styles.tagsContainer}>
                         {selectedCampaign.pgcAddons.map((addon, index) => (
                           <View key={index} style={styles.tag}>
-                            <Text style={styles.tagText}>{addon}</Text>
+                            <Text style={styles.tagText}>{getAddonLabel(addon)}</Text>
                           </View>
                         ))}
                       </View>
@@ -303,30 +382,22 @@ export default function JoinUGC() {
                     )}
                   </View>
 
-                  {/* Script / Guidelines */}
-                  <View style={styles.modalSection}>
-                    <Text style={styles.sectionTitle}>Script / Guidelines</Text>
-                    <Text style={styles.sectionText}>
-                      {selectedCampaign.script || 'Creator is expected to provide or develop the script'}
-                    </Text>
-                  </View>
-
                   {/* Caption Template */}
                   <View style={styles.modalSection}>
                     <Text style={styles.sectionTitle}>Caption Template</Text>
                     <Text style={styles.sectionText}>
-                      {selectedCampaign.captionTemplate || 'No caption template provided'}
+                      {getCaptionTemplate(selectedCampaign) || 'No caption template provided'}
                     </Text>
                   </View>
 
                   {/* Hashtags */}
                   <View style={styles.modalSection}>
                     <Text style={styles.sectionTitle}>Required Hashtags</Text>
-                    {selectedCampaign.hashtags?.length > 0 ? (
+                    {getHashtags(selectedCampaign).length > 0 ? (
                       <View style={styles.tagsContainer}>
-                        {selectedCampaign.hashtags.map((hashtag, index) => (
+                        {getHashtags(selectedCampaign).map((hashtag, index) => (
                           <View key={index} style={styles.tag}>
-                            <Text style={styles.tagText}>#{hashtag}</Text>
+                            <Text style={styles.tagText}>#{hashtag.replace('#', '')}</Text>
                           </View>
                         ))}
                       </View>
@@ -363,16 +434,16 @@ export default function JoinUGC() {
                   <View style={styles.modalSection}>
                     <Text style={styles.sectionTitle}>Usage Rights</Text>
                     <Text style={styles.sectionText}>
-                      {selectedCampaign.usageRights || 'Standard usage rights apply'}
+                      {getUsageRights(selectedCampaign)}
                     </Text>
                   </View>
 
                   {/* Assets */}
                   <View style={styles.modalSection}>
                     <Text style={styles.sectionTitle}>Reference Assets</Text>
-                    {selectedCampaign.assets?.length > 0 ? (
+                    {getAssets(selectedCampaign).length > 0 ? (
                       <View style={styles.assetsContainer}>
-                        {selectedCampaign.assets.map((asset, index) => (
+                        {getAssets(selectedCampaign).map((asset, index) => (
                           <View key={index} style={styles.assetItem}>
                             <Ionicons name="document-outline" size={16} color="#6B7280" />
                             <Text style={styles.assetName} numberOfLines={1}>
@@ -406,6 +477,18 @@ export default function JoinUGC() {
       </SafeAreaView>
     </LinearGradient>
   );
+}
+
+// Helper function to get addon display names
+function getAddonLabel(addonId: string): string {
+  const labels: Record<string, string> = {
+    script: 'Creator provides script',
+    whatsapp: 'Creator + Post their WhatsApp',
+    ig: 'Collaborative - Creator Post on their IG',
+    tiktok: 'Creator Post on TikTok',
+    outdoor: 'Creator Outdoor shoot'
+  };
+  return labels[addonId] || addonId;
 }
 
 const styles = StyleSheet.create({
