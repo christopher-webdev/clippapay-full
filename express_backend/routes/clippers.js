@@ -250,20 +250,24 @@ router.get('/:id', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Could not fetch campaign details.' });
   }
 });
-
 router.get(
   '/available-pgc',
   requireAuth,
   requireClipper,
   async (req, res) => {
     try {
-      const availableCampaigns = await Campaign.find({
+      // First, let's log to see what's happening
+      console.log('Fetching available PGC campaigns for user:', req.user?._id);
+
+      // Build query WITHOUT $expr first to avoid ObjectId issues
+      const query = {
         kind: 'pgc',
-        status: 'active',
-        $expr: { $lt: ['$approvedVideosCount', '$desiredVideos'] },
-      })
+        status: 'active'
+      };
+
+      // We'll filter approvedVideosCount < desiredVideos in memory or use a simpler approach
+      const availableCampaigns = await Campaign.find(query)
         .select({
-          // Root level fields
           _id: 1,
           title: 1,
           kind: 1,
@@ -283,7 +287,7 @@ router.get(
           cta_url: 1,
           usageRights: 1,
           advertiser: 1,
-          // ⭐ CRITICAL: Select ALL ugc fields - THIS IS WHERE YOUR DATA IS
+          // CRITICAL: Select ALL ugc fields
           ugc: {
             brief: 1,
             deliverables: 1,
@@ -298,10 +302,17 @@ router.get(
         .populate('advertiser', 'company contactName email')
         .sort({ createdAt: -1 })
         .limit(50)
-        .lean(); // Add lean() for better performance
+        .lean();
+
+      // Filter in JavaScript instead of $expr to avoid the ObjectId casting issue
+      const filteredCampaigns = availableCampaigns.filter(campaign => 
+        (campaign.approvedVideosCount || 0) < (campaign.desiredVideos || 1)
+      );
+
+      console.log(`Found ${filteredCampaigns.length} available PGC campaigns`);
 
       // Transform the data to include both formats for backward compatibility
-      const transformedCampaigns = availableCampaigns.map(campaign => {
+      const transformedCampaigns = filteredCampaigns.map(campaign => {
         // Create a new object with all fields
         const transformed = {
           ...campaign,
@@ -310,6 +321,17 @@ router.get(
           deliverables: campaign.ugc?.deliverables || [],
           assets: campaign.ugc?.assets || [],
           approvalCriteria: campaign.ugc?.approvalCriteria || '',
+          // Ensure ugc exists even if empty
+          ugc: campaign.ugc || {
+            brief: '',
+            deliverables: [],
+            assets: [],
+            approvalCriteria: '',
+            captionTemplate: '',
+            usageRights: '',
+            hashtags: [],
+            directions: []
+          }
         };
         
         return transformed;
