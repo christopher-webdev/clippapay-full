@@ -185,71 +185,7 @@ router.post('/:id/submit-clip', requireAuth, uploadProof.any(), async (req, res)
     return res.status(500).json({ error: 'Submission failed.' });
   }
 });
-router.get('/:id', requireAuth, async (req, res) => {
-  try {
-    const campaign = await Campaign.findById(req.params.id)
-      .populate('advertiser', 'contactName email')
-      .lean();
 
-    if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
-
-    // Only show to clippers if campaign is active & ready
-    if (campaign.status !== 'active' || campaign.adWorkerStatus !== 'ready') {
-      return res.status(403).json({ error: 'Campaign not available.' });
-    }
-
-    const clips = await Clip.find({ campaign: campaign._id })
-      .sort('index')
-      .select('_id url index createdAt')
-      .lean();
-
-    // Shape the response with proper ugc field mapping
-    res.json({
-      id: campaign._id.toString(),
-      title: campaign.title,
-      advertiser: campaign.advertiser?.contactName || 'Advertiser',
-      description: campaign.description || '',
-      thumbUrl: campaign.thumb_url,
-      payPerView: campaign.clipper_cpm ?? 500,
-      totalViews: campaign.views_purchased,
-      views_left: campaign.views_left,
-      clippersCount: campaign.clippersCount,
-      platforms: campaign.platforms,
-      directions: campaign.directions,
-      hashtags: campaign.hashtags,
-      status: campaign.status,
-      kind: campaign.kind,
-      desiredVideos: campaign.desiredVideos ?? 0,
-      approvedVideosCount: campaign.approvedVideosCount ?? 0,
-      
-      // ⭐ CRITICAL: Make sure ugc field is properly passed through
-      ugc: campaign.ugc || {
-        brief: '',
-        deliverables: [],
-        assets: [],
-        approvalCriteria: '',
-        captionTemplate: '',
-        usageRights: '',
-        hashtags: []
-      },
-      
-      // Also include at root for backward compatibility
-      brief: campaign.ugc?.brief || '',
-      deliverables: campaign.ugc?.deliverables || [],
-      assets: campaign.ugc?.assets || [],
-      approvalCriteria: campaign.ugc?.approvalCriteria || '',
-      
-      clips: clips.map(c => ({
-        id: c._id.toString(),
-        url: c.url,
-        index: c.index,
-      })),
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Could not fetch campaign details.' });
-  }
-});
 router.get(
   '/available-pgc',
   requireAuth,
@@ -1056,6 +992,72 @@ router.get('/ugc/earnings', requireAuth, requireClipper, async (req, res) => {
   } catch (err) {
     console.error('UGC earnings error:', err);
     res.status(500).json({ error: 'Could not fetch earnings.' });
+  }
+});
+
+router.get('/:id', requireAuth, async (req, res) => {
+  try {
+    const campaign = await Campaign.findById(req.params.id)
+      .populate('advertiser', 'contactName email')
+      .lean();
+
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+
+    // Only show to clippers if campaign is active & ready
+    if (campaign.status !== 'active' || campaign.adWorkerStatus !== 'ready') {
+      return res.status(403).json({ error: 'Campaign not available.' });
+    }
+
+    const clips = await Clip.find({ campaign: campaign._id })
+      .sort('index')
+      .select('_id url index createdAt')
+      .lean();
+
+    // Shape the response with proper ugc field mapping
+    res.json({
+      id: campaign._id.toString(),
+      title: campaign.title,
+      advertiser: campaign.advertiser?.contactName || 'Advertiser',
+      description: campaign.description || '',
+      thumbUrl: campaign.thumb_url,
+      payPerView: campaign.clipper_cpm ?? 500,
+      totalViews: campaign.views_purchased,
+      views_left: campaign.views_left,
+      clippersCount: campaign.clippersCount,
+      platforms: campaign.platforms,
+      directions: campaign.directions,
+      hashtags: campaign.hashtags,
+      status: campaign.status,
+      kind: campaign.kind,
+      desiredVideos: campaign.desiredVideos ?? 0,
+      approvedVideosCount: campaign.approvedVideosCount ?? 0,
+      
+      // ⭐ CRITICAL: Make sure ugc field is properly passed through
+      ugc: campaign.ugc || {
+        brief: '',
+        deliverables: [],
+        assets: [],
+        approvalCriteria: '',
+        captionTemplate: '',
+        usageRights: '',
+        hashtags: []
+      },
+      
+      // Also include at root for backward compatibility
+      brief: campaign.ugc?.brief || '',
+      deliverables: campaign.ugc?.deliverables || [],
+      assets: campaign.ugc?.assets || [],
+      approvalCriteria: campaign.ugc?.approvalCriteria || '',
+      
+      clips: clips.map(c => ({
+        id: c._id.toString(),
+        url: c.url,
+        index: c.index,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Could not fetch campaign details.' });
   }
 });
 
