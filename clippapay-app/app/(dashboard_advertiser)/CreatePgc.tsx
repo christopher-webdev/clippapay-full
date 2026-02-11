@@ -31,7 +31,7 @@ const ADDON_OPTIONS = [
   { id: 'whatsapp', label: 'Creator + Post their WhatsApp', price: 5000, description: 'Creator will post video on WhatsApp' },
   { id: 'ig', label: 'Collaborative - Creator Post on their IG', price: 10000, description: 'Creator will post on Instagram' },
   { id: 'tiktok', label: 'Creator Post on TikTok', price: 10000, description: 'Creator will post on TikTok' },
-  { id: 'outdoor', label: 'Creator Outdoor shoot', price: 10000, description: 'Outdoor video shoot' },
+  // { id: 'outdoor', label: 'Creator Outdoor shoot', price: 10000, description: 'Outdoor video shoot' },
 ];
 
 const categoryOptions = [
@@ -244,7 +244,7 @@ export default function CreateAssetCreationCampaign() {
         <View style={styles.explanationContainer}>
           <Text style={styles.explanationTitle}>What is Asset Creation Campaign?</Text>
           <Text style={styles.explanationText}>
-            This campaign lets you **order a custom video** from our talented creators. They will create a high-quality video exactly according to your instructions and send it to you for review and approval.
+            This campaign lets you order a custom video from our talented creators. They will create a high-quality video exactly according to your instructions and send it to you for review and approval.
             {'\n\n'}
             How it works:
             • Choose your add-ons to customize your video

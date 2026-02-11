@@ -412,6 +412,105 @@ router.post(
  *   - Creator Post on TikTok: +₦10,000 (Platform: ₦5,000, Creator: ₦5,000)
  *   - Creator Outdoor shoot: +₦10,000 (Platform: ₦5,000, Creator: ₦5,000)
  */
+
+// Add this route to express_backend/routes/campaigns.js
+// ... (existing imports and code)
+
+// Reuse pgcAssetUpload for premium, or define similar if needed
+
+router.post(
+  '/premium',
+  requireAuth,
+  requireAdvertiser,
+  pgcAssetUpload.array('assets', 12), // Reusing PGC upload middleware
+  async (req, res) => {
+    try {
+      const {
+        title,
+        budget: budgetStr,
+        creatorId,
+        script,
+        brief,
+        directions,
+        deliverables,
+        hashtags,
+        approvalCriteria,
+        cta_url,
+      } = req.body;
+
+      // Parse and validate
+      const budget = Number(budgetStr);
+      if (!title || !creatorId || isNaN(budget) || budget <= 0) {
+        return res.status(400).json({ error: 'Missing or invalid required fields: title, creatorId, budget' });
+      }
+
+      // Fetch and validate creator
+      const creator = await User.findById(creatorId).select('role isPremiumCreator ratePerVideo');
+      if (!creator || creator.role !== 'clipper' || !creator.isPremiumCreator) {
+        return res.status(400).json({ error: 'Invalid premium creator' });
+      }
+
+      // Optional: Verify budget matches creator's rate
+      // if (budget !== creator.ratePerVideo) {
+      //   return res.status(400).json({ error: 'Budget must match creator\'s rate per video' });
+      // }
+
+      // Check wallet balance
+      const wallet = await Wallet.findOne({ user: req.user._id });
+      if (!wallet) return res.status(400).json({ error: 'Wallet not found' });
+      if (wallet.balance < budget) {
+        return res.status(400).json({ error: 'Insufficient wallet balance' });
+      }
+
+      // Parse arrays
+      const directionsArr = parseArr(directions);
+      const deliverablesArr = parseArr(deliverables);
+      const hashtagsArr = parseArr(hashtags);
+
+      // Assets paths
+      const assets = (req.files || []).map(f => `/uploads/pgc-assets/${path.basename(f.path)}`);
+
+      // Create campaign
+      const campaign = new Campaign({
+        advertiser: req.user._id,
+        title,
+        kind: 'premium',
+        creator: creatorId,
+        budget_total: budget,
+        budget_remaining: budget,
+        script,
+        hashtags: hashtagsArr,
+        directions: directionsArr,
+        cta_url,
+        generatedContent: {
+          brief,
+          deliverables: deliverablesArr,
+          assets,
+          approvalCriteria,
+        },
+        status: 'pending', // Or 'active' if immediate
+      });
+
+      await campaign.save();
+
+      // Deduct from wallet and lock in escrow
+      await wallet.lockEscrow(budget);
+
+      res.status(201).json(campaign);
+    } catch (err) {
+      console.error('Premium campaign creation error:', err);
+      // Cleanup uploaded files on error
+      for (const file of (req.files || [])) {
+        try { await fs.promises.unlink(file.path); } catch {}
+      }
+      res.status(500).json({ error: err.message || 'Failed to create premium campaign' });
+    }
+  }
+);
+
+
+
+
 router.post(
   '/pgc',
   requireAuth,

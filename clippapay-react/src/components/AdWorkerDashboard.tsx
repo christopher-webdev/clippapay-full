@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Briefcase, Film, User, Loader2 } from 'lucide-react'; // Example icons
+import { Briefcase, Film, User, Loader2 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -11,12 +11,15 @@ const normalizeUrl = (url?: string) => {
   return url;
 };
 
-function CampaignKindBadge({ kind }: { kind?: 'normal' | 'ugc' | 'pgc' }) {
+function CampaignKindBadge({ kind }: { kind?: 'normal' | 'ugc' | 'pgc' | 'premium' }) {
   if (kind === 'ugc') {
     return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200">UGC</span>;
   }
   if (kind === 'pgc') {
     return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-200 text-purple-700 border border-purple-200">PGC</span>;
+  }
+  if (kind === 'premium') {
+    return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-200">PREMIUM</span>;
   }
   return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600 border border-gray-200">Normal</span>;
 }
@@ -87,15 +90,23 @@ function AssetsGrid({ assets }: { assets?: string[] }) {
 interface CampaignSummary {
   _id: string;
   title: string;
-  advertiser: { contactName?: string; firstName?: string; lastName?: string; company?: string; email?: string };
+  advertiser: { 
+    contactName?: string; 
+    firstName?: string; 
+    lastName?: string; 
+    company?: string; 
+    email?: string;
+    creatorTypes?: string[];
+    otherCreatorType?: string;
+  };
   adWorkerStatus: 'pending' | 'processing' | 'ready' | 'rejected';
-  kind?: 'normal' | 'ugc' | 'pgc';
+  kind?: 'normal' | 'ugc' | 'pgc' | 'premium';
 }
 
 interface CampaignDetails {
   campaign: {
     _id: string;
-    kind?: 'normal' | 'ugc' | 'pgc';
+    kind?: 'normal' | 'ugc' | 'pgc' | 'premium';
     advertiser: {
       contactName?: string;
       firstName?: string;
@@ -104,6 +115,11 @@ interface CampaignDetails {
       email?: string;
       creatorTypes?: string[];
       otherCreatorType?: string;
+    };
+    creator?: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
     };
     title: string;
     video_url?: string;
@@ -127,6 +143,12 @@ interface CampaignDetails {
       draftRequired?: boolean;
       creativeDeadline?: string;
       postDeadline?: string;
+      approvalCriteria?: string;
+    };
+    generatedContent?: {
+      brief?: string;
+      deliverables?: string[];
+      assets?: string[];
       approvalCriteria?: string;
     };
   };
@@ -153,7 +175,12 @@ export default function AdWorkerDashboard() {
     setLoading(true);
     try {
       const res = await axios.get<CampaignSummary[]>('/campaigns/assigned');
-      setCampaigns(res.data);
+      // Sort: pending first, then processing, ready, rejected
+      const sorted = res.data.sort((a, b) => {
+        const order = ['pending', 'processing', 'ready', 'rejected'];
+        return order.indexOf(a.adWorkerStatus) - order.indexOf(b.adWorkerStatus);
+      });
+      setCampaigns(sorted);
       setError(null);
     } catch (err) {
       setError('Failed to load assigned campaigns.');
@@ -173,7 +200,7 @@ export default function AdWorkerDashboard() {
       {loading && <div className="flex items-center gap-2 text-gray-500"><Loader2 className="animate-spin" />Loading…</div>}
       {error && <p className="text-center text-red-600">{error}</p>}
 
-      {/* --- Grid of assigned campaigns --- */}
+      {/* Grid of assigned campaigns */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-7">
         {campaigns.map(c => (
           <div
@@ -184,21 +211,19 @@ export default function AdWorkerDashboard() {
             <div className="flex items-center gap-3 mb-4">
               <Briefcase className="w-7 h-7 text-cp-blue/70" />
               <div>
-                <div className="font-semibold text-lg text-gray-900">{c.title} <CampaignKindBadge kind={c.kind} /></div>
+                <div className="font-semibold text-lg text-gray-900">
+                  {c.title} <CampaignKindBadge kind={c.kind} />
+                </div>
                 <div className="text-gray-500 text-sm flex items-center gap-2">
                   <User className="w-4 h-4 inline" />
-                  {
-                    c.advertiser?.contactName ||
-                    c.advertiser?.company ||
-                    `${c.advertiser?.firstName || ''} ${c.advertiser?.lastName || ''}`.trim() ||
-                    "Unknown Advertiser"
-                  }
+                  {c.advertiser?.contactName ||
+                   c.advertiser?.company ||
+                   `${c.advertiser?.firstName || ''} ${c.advertiser?.lastName || ''}`.trim() ||
+                   "Unknown Advertiser"}
                 </div>
                 <div className="text-gray-500 text-sm flex items-center gap-2">
                   <div className="w-4 h-4 inline" />
-                  {
-                    c.advertiser?.creatorTypes?.join(', ') || ''
-                  }
+                  {c.advertiser?.creatorTypes?.join(', ') || ''}
                   {c.advertiser?.otherCreatorType ? `, ${c.advertiser.otherCreatorType}` : ''}
                 </div>
               </div>
@@ -234,7 +259,9 @@ export default function AdWorkerDashboard() {
   );
 }
 
-// -------------- Modal/Details component ---------------
+// ────────────────────────────────────────────────
+//              Campaign Details Modal
+// ────────────────────────────────────────────────
 function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
   campaignId: string;
   onClose: () => void;
@@ -254,7 +281,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
       .finally(() => setLoading(false));
   }, [campaignId]);
 
-  // --- Handlers ---
+  // ─── Status Toggle ───────────────────────────────────────
   const toggleStatus = async () => {
     if (!details) return;
     let nextStatus: CampaignDetails['campaign']['adWorkerStatus'] | undefined;
@@ -263,9 +290,14 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
       case 'processing': nextStatus = 'ready'; break;
       default: return;
     }
+
+    const kindLabel = details.campaign.kind === 'premium' 
+      ? 'Premium' 
+      : details.campaign.kind?.toUpperCase() || 'Campaign';
+
     try {
       await axios.put(`/campaigns/${details.campaign._id}`, { adWorkerStatus: nextStatus });
-      setSuccess('Status updated!');
+      setSuccess(`${kindLabel} status updated!`);
       setTimeout(() => {
         setSuccess(null);
         onStatusChange();
@@ -275,6 +307,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
     }
   };
 
+  // ─── Thumbnail Upload ────────────────────────────────────
   const uploadThumbnail = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setUploading(true);
@@ -306,11 +339,13 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
     }
   };
 
+  // ─── Clip Upload ─────────────────────────────────────────
   const uploadClip = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setUploading(true);
     setError(null);
     setSuccess(null);
+
     const input = (e.currentTarget.elements.namedItem('clips') as HTMLInputElement);
     if (!input.files || input.files.length === 0) {
       setError('Select one or more video files.');
@@ -322,8 +357,10 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
       setUploading(false);
       return;
     }
+
     const formData = new FormData();
     Array.from(input.files).forEach(file => formData.append('clips', file));
+
     try {
       await axios.post(`/clip/${campaignId}/clips`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -337,6 +374,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
     }
   };
 
+  // ─── Delete Original Video ───────────────────────────────
   const deleteOriginalVideo = async () => {
     if (!details) return;
     try {
@@ -350,17 +388,17 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
 
   const clips = details?.clips.filter(
     clip => (new Date().getTime() - new Date(clip.createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000
-  );
+  ) || [];
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg shadow-lg max-h-[80vh] overflow-y-auto p-4 relative">
+    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+      <div className="bg-white rounded-lg shadow-lg max-h-[90vh] w-full max-w-4xl overflow-y-auto p-4 relative">
         <button
           className="absolute top-4 right-4 text-3xl text-gray-400 hover:text-gray-900"
           onClick={onClose}
           aria-label="Close"
         >
-          &times;
+          ×
         </button>
 
         {loading ? (
@@ -374,34 +412,34 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
           </div>
         ) : (
           <div className="p-7">
-            {/* Header Section */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
               <div>
-                <h2 className="text-2xl font-bold mb-1">{details.campaign.title} <CampaignKindBadge kind={details.campaign.kind} /></h2>
+                <h2 className="text-2xl font-bold mb-1">
+                  {details.campaign.title} <CampaignKindBadge kind={details.campaign.kind} />
+                </h2>
                 <div className="text-gray-500 text-sm flex items-center gap-2">
                   <User className="w-4 h-4" />
-                  {details.campaign.advertiser.contactName} &middot; {details.campaign.advertiser.email}
+                  {details.campaign.advertiser.contactName} · {details.campaign.advertiser.email}
                 </div>
               </div>
-              <span
-                className={`
+              <span className={`
                 px-4 py-2 rounded-full text-sm font-semibold tracking-wide border
                 ${details.campaign.adWorkerStatus === 'pending'
-                    ? 'bg-yellow-50 text-yellow-800 border-yellow-200'
-                    : details.campaign.adWorkerStatus === 'processing'
-                      ? 'bg-blue-50 text-blue-800 border-blue-200'
-                      : details.campaign.adWorkerStatus === 'ready'
-                        ? 'bg-green-50 text-green-800 border-green-200'
-                        : 'bg-red-50 text-red-800 border-red-200'
-                  }`}
-              >
+                  ? 'bg-yellow-50 text-yellow-800 border-yellow-200'
+                  : details.campaign.adWorkerStatus === 'processing'
+                    ? 'bg-blue-50 text-blue-800 border-blue-200'
+                    : details.campaign.adWorkerStatus === 'ready'
+                      ? 'bg-green-50 text-green-800 border-green-200'
+                      : 'bg-red-50 text-red-800 border-red-200'
+                }`}>
                 {details.campaign.adWorkerStatus.toUpperCase()}
               </span>
             </div>
 
-            {/* Download and Delete Buttons */}
+            {/* Original Video Actions */}
             {details.campaign.video_url && (
-              <div className="mb-4 flex flex-wrap items-center gap-4">
+              <div className="mb-6 flex flex-wrap items-center gap-4">
                 <a
                   href={details.campaign.video_url}
                   target="_blank"
@@ -420,8 +458,8 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
               </div>
             )}
 
-            {/* Thumbnail Upload Section */}
-            <div className="mb-4">
+            {/* Thumbnail */}
+            <div className="mb-6">
               <h3 className="font-medium mb-2">Campaign Thumbnail</h3>
               {details.campaign.thumb_url ? (
                 <div className="flex items-center gap-4 mb-3">
@@ -469,7 +507,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
             </div>
 
             {/* Campaign Info Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-gray-700 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-gray-700 mb-8">
               <Info label="Platforms" value={details.campaign.platforms.join(', ')} />
               <Info label="Countries" value={details.campaign.countries.join(', ')} />
               <Info label="Hashtags" value={details.campaign.hashtags.join(', ')} />
@@ -497,67 +535,94 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
               />
             </div>
 
-            {/* UGC or PGC Brief & Assets */}
-            {(details.campaign.kind === 'ugc' || details.campaign.kind === 'pgc') && (
+            {/* Premium Creator Info */}
+            {details.campaign.kind === 'premium' && details.campaign.creator && (
+              <div className="mb-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                <h3 className="font-semibold text-amber-800 mb-2">Assigned Premium Creator</h3>
+                <div className="text-sm">
+                  <strong>{details.campaign.creator.firstName} {details.campaign.creator.lastName}</strong>
+                  <span className="text-gray-600 ml-2">({details.campaign.creator.email})</span>
+                </div>
+              </div>
+            )}
+
+            {/* UGC / PGC / Premium Brief & Assets */}
+            {['ugc', 'pgc', 'premium'].includes(details.campaign.kind ?? '') && (
               <div className="mt-6">
-                <h3 className="font-semibold text-gray-900 mb-3">{details.campaign.kind.toUpperCase()} Brief & Assets</h3>
+                <h3 className="font-semibold text-gray-900 mb-3">
+                  {details.campaign.kind?.toUpperCase() || 'Campaign'} Details & Assets
+                </h3>
 
-                {details.campaign.ugc?.brief && (
-                  <div className="mb-3">
-                    <div className="text-gray-500 text-sm">Brief</div>
-                    <div className="text-sm whitespace-pre-wrap">{details.campaign.ugc.brief}</div>
+                {/* Premium specific */}
+                {details.campaign.kind === 'premium' && details.campaign.generatedContent?.brief && (
+                  <div className="mb-4">
+                    <div className="text-gray-500 text-sm">Brief / Instructions</div>
+                    <div className="text-sm whitespace-pre-wrap">{details.campaign.generatedContent.brief}</div>
                   </div>
                 )}
 
-                {details.campaign.ugc?.deliverables?.length ? (
-                  <div className="mb-3">
-                    <div className="text-gray-500 text-sm">Deliverables</div>
-                    <div className="text-sm">{details.campaign.ugc.deliverables.join(', ')}</div>
-                  </div>
-                ) : null}
+                {/* UGC / PGC shared fields */}
+                {(details.campaign.kind === 'ugc' || details.campaign.kind === 'pgc') && details.campaign.ugc && (
+                  <>
+                    {details.campaign.ugc.brief && (
+                      <div className="mb-4">
+                        <div className="text-gray-500 text-sm">Brief</div>
+                        <div className="text-sm whitespace-pre-wrap">{details.campaign.ugc.brief}</div>
+                      </div>
+                    )}
 
-                {details.campaign.ugc?.captionTemplate && (
-                  <div className="mb-3">
-                    <div className="text-gray-500 text-sm">Caption Template</div>
-                    <div className="text-sm whitespace-pre-wrap">{details.campaign.ugc.captionTemplate}</div>
-                  </div>
+                    {details.campaign.ugc.deliverables?.length ? (
+                      <div className="mb-4">
+                        <div className="text-gray-500 text-sm">Deliverables</div>
+                        <div className="text-sm">{details.campaign.ugc.deliverables.join(', ')}</div>
+                      </div>
+                    ) : null}
+
+                    {details.campaign.ugc.captionTemplate && (
+                      <div className="mb-4">
+                        <div className="text-gray-500 text-sm">Caption Template</div>
+                        <div className="text-sm whitespace-pre-wrap">{details.campaign.ugc.captionTemplate}</div>
+                      </div>
+                    )}
+
+                    {details.campaign.ugc.usageRights && (
+                      <div className="mb-4">
+                        <div className="text-gray-500 text-sm">Usage Rights</div>
+                        <div className="text-sm">{details.campaign.ugc.usageRights}</div>
+                      </div>
+                    )}
+
+                    {details.campaign.kind === 'pgc' && details.campaign.ugc.approvalCriteria && (
+                      <div className="mb-4">
+                        <div className="text-gray-500 text-sm">Approval Criteria</div>
+                        <div className="text-sm whitespace-pre-wrap">{details.campaign.ugc.approvalCriteria}</div>
+                      </div>
+                    )}
+
+                    {details.campaign.kind === 'pgc' && details.campaign.ugc.draftRequired !== undefined && (
+                      <div className="mb-4">
+                        <div className="text-gray-500 text-sm">Draft Required</div>
+                        <div className="text-sm">{details.campaign.ugc.draftRequired ? 'Yes' : 'No'}</div>
+                      </div>
+                    )}
+
+                    {details.campaign.kind === 'pgc' && details.campaign.ugc.creativeDeadline && (
+                      <div className="mb-4">
+                        <div className="text-gray-500 text-sm">Creative Deadline</div>
+                        <div className="text-sm">{new Date(details.campaign.ugc.creativeDeadline).toLocaleString()}</div>
+                      </div>
+                    )}
+
+                    {details.campaign.kind === 'pgc' && details.campaign.ugc.postDeadline && (
+                      <div className="mb-4">
+                        <div className="text-gray-500 text-sm">Post Deadline</div>
+                        <div className="text-sm">{new Date(details.campaign.ugc.postDeadline).toLocaleString()}</div>
+                      </div>
+                    )}
+                  </>
                 )}
 
-                {details.campaign.ugc?.usageRights && (
-                  <div className="mb-3">
-                    <div className="text-gray-500 text-sm">Usage Rights</div>
-                    <div className="text-sm">{details.campaign.ugc.usageRights}</div>
-                  </div>
-                )}
-
-                {details.campaign.kind === 'pgc' && details.campaign.ugc?.approvalCriteria && (
-                  <div className="mb-3">
-                    <div className="text-gray-500 text-sm">Approval Criteria</div>
-                    <div className="text-sm whitespace-pre-wrap">{details.campaign.ugc.approvalCriteria}</div>
-                  </div>
-                )}
-
-                {details.campaign.kind === 'pgc' && details.campaign.ugc?.draftRequired !== undefined && (
-                  <div className="mb-3">
-                    <div className="text-gray-500 text-sm">Draft Required</div>
-                    <div className="text-sm">{details.campaign.ugc.draftRequired ? 'Yes' : 'No'}</div>
-                  </div>
-                )}
-
-                {details.campaign.kind === 'pgc' && details.campaign.ugc?.creativeDeadline && (
-                  <div className="mb-3">
-                    <div className="text-gray-500 text-sm">Creative Deadline</div>
-                    <div className="text-sm">{new Date(details.campaign.ugc.creativeDeadline).toLocaleString()}</div>
-                  </div>
-                )}
-
-                {details.campaign.kind === 'pgc' && details.campaign.ugc?.postDeadline && (
-                  <div className="mb-3">
-                    <div className="text-gray-500 text-sm">Post Deadline</div>
-                    <div className="text-sm">{new Date(details.campaign.ugc.postDeadline).toLocaleString()}</div>
-                  </div>
-                )}
-
+                {/* Assets */}
                 <AssetsGrid assets={details.campaign.ugc?.assets} />
               </div>
             )}
@@ -566,7 +631,7 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
             {['pending', 'processing'].includes(details.campaign.adWorkerStatus) && (
               <button
                 onClick={toggleStatus}
-                className="mb-4 px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 transition"
+                className="mb-6 px-6 py-2.5 bg-green-600 text-white rounded-lg shadow hover:bg-green-700 transition font-medium"
               >
                 {details.campaign.adWorkerStatus === 'pending'
                   ? 'Start Processing'
@@ -575,75 +640,72 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
             )}
 
             {/* Upload Clip Form */}
-            {(details.campaign.adWorkerStatus === 'processing' || details.campaign.adWorkerStatus === 'ready') &&
-              (
-                <form
-                  onSubmit={uploadClip}
-                  className="mt-6 flex flex-col sm:flex-row items-center gap-3"
+            {(details.campaign.adWorkerStatus === 'processing' || details.campaign.adWorkerStatus === 'ready') && (
+              <form
+                onSubmit={uploadClip}
+                className="mt-6 flex flex-col sm:flex-row items-center gap-4 mb-8"
+              >
+                <input
+                  type="file"
+                  name="clips"
+                  accept="video/*"
+                  required
+                  multiple
+                  disabled={uploading}
+                  className="block border px-3 py-2 rounded text-sm w-full sm:w-auto"
+                />
+                <button
+                  type="submit"
+                  disabled={uploading}
+                  className="px-6 py-2.5 bg-cp-blue text-white rounded-lg shadow hover:bg-cp-indigo whitespace-nowrap"
                 >
-                  <input
-                    type="file"
-                    name="clips"
-                    accept="video/*"
-                    required
-                    multiple
-                    disabled={uploading}
-                    className="block border px-2 py-1 rounded"
-                  />
-                  <button
-                    type="submit"
-                    disabled={uploading}
-                    className="px-4 py-2 bg-cp-blue text-white rounded shadow hover:bg-cp-indigo"
-                  >
-                    {uploading ? 'Uploading…' : 'Upload Clip(s)'}
-                  </button>
-                  {clips && clips.length >= 6 && (
-                    <div className="text-xs text-gray-500 ml-3">
-                      Maximum 6 clips uploaded.
-                    </div>
-                  )}
-                </form>
-              )}
+                  {uploading ? 'Uploading…' : 'Upload Clip(s)'}
+                </button>
+                {clips.length >= 6 && (
+                  <div className="text-xs text-gray-500">
+                    Maximum 6 clips allowed.
+                  </div>
+                )}
+              </form>
+            )}
 
             {/* Uploaded Clips */}
-            <div className="mt-7">
-              <h3 className="font-semibold mb-2 flex items-center gap-2">
+            <div className="mt-8">
+              <h3 className="font-semibold mb-3 flex items-center gap-2">
                 <Film className="w-5 h-5" />
                 Uploaded Clips (last 30 days)
               </h3>
-              {clips && clips.length > 0 ? (
-                <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
+              {clips.length > 0 ? (
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                   {clips.map((clip) => (
                     <div
                       key={clip._id}
-                      className="p-3 rounded-lg border bg-gray-50"
+                      className="p-4 rounded-lg border bg-gray-50 hover:bg-gray-100 transition"
                     >
                       <video
                         src={clip.url}
                         controls
-                        className="w-36 h-36 rounded mb-2"
+                        className="w-full h-40 rounded mb-3 object-cover"
                       />
                       <div className="text-xs text-gray-500">
                         Uploaded: {new Date(clip.createdAt).toLocaleString()}
                       </div>
-                      <div className="text-xs text-gray-600">
+                      <div className="text-xs text-gray-600 font-medium">
                         Clip {clip.index}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-gray-500 text-sm">
+                <div className="text-gray-500 text-sm py-4">
                   No clips uploaded yet (last 30 days).
                 </div>
               )}
             </div>
 
             {(success || error) && (
-              <div className="mt-4 text-center">
-                {success && (
-                  <p className="text-green-600 font-medium">{success}</p>
-                )}
+              <div className="mt-6 text-center p-4 rounded-lg bg-gray-50">
+                {success && <p className="text-green-600 font-medium">{success}</p>}
                 {error && <p className="text-red-600 font-medium">{error}</p>}
               </div>
             )}
@@ -654,12 +716,11 @@ function CampaignDetailsModal({ campaignId, onClose, onStatusChange }: {
   );
 }
 
-// Reusable info row
 function Info({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <span className="block text-xs text-gray-400 uppercase mb-1">{label}</span>
-      <span className="block font-medium">{value}</span>
+      <span className="block text-xs text-gray-400 uppercase mb-1 tracking-wide">{label}</span>
+      <span className="block font-medium text-gray-800">{value}</span>
     </div>
   );
 }

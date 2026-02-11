@@ -1,5 +1,4 @@
 // app/(dashboard)/campaigns.tsx
-
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -260,12 +259,6 @@ export default function AdvertiserDashboard() {
             </View>
 
             <View style={styles.buttonGroup}>
-              <TouchableOpacity
-                style={[styles.newBtn, { backgroundColor: '#203A43' }]}
-                onPress={() => router.push('/(dashboard)/advertiser/create-campaign')}
-              >
-                <Text style={styles.newBtnText}>+ New Campaign</Text>
-              </TouchableOpacity>
             </View>
           </View>
 
@@ -322,15 +315,6 @@ export default function AdvertiserDashboard() {
                   <Text style={styles.emptyCampaignDesc}>
                     Create your first campaign to start reaching clippers and growing your brand visibility.
                   </Text>
-
-                  <TouchableOpacity
-                    style={styles.emptyCampaignBtn}
-                    onPress={() => router.push('/(dashboard)/advertiser/create-campaign')}
-                  >
-                    <Text style={styles.emptyCampaignBtnText}>
-                      + Create Your First Campaign
-                    </Text>
-                  </TouchableOpacity>
                 </View>
               ) : (
                 <>
@@ -721,7 +705,6 @@ function CampaignDetailsModal({
                   <>
                     <InfoRow label="Videos Desired" value={campaign.desiredVideos?.toLocaleString()} />
                     <InfoRow label="Videos Approved" value={(campaign.approvedVideosCount || 0).toLocaleString()} />
-                    <InfoRow label="Cost per Video" value="₦7,500" />
                   </>
                 ) : (
                   <>

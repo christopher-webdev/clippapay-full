@@ -223,7 +223,7 @@ export default function PremiumCreators() {
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.stat}>
-                  <Text style={styles.price}>${pricePerVideo}</Text>
+                  <Text style={styles.price}>₦{pricePerVideo}</Text>
                   <Text style={styles.statLabel}>/video</Text>
                 </View>
               </View>
@@ -365,8 +365,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24 * scale,
     paddingBottom: 12 * scale,
     zIndex: 100,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    borderBottomWidth: 0.2 * scale,
+    borderBottomColor: 'rgb(255, 255, 255)',
+    marginTop: 100 * scale,
   },
   headerTitle: {
     fontSize: 32 * scale,
@@ -386,6 +387,8 @@ const styles = StyleSheet.create({
   categoriesWrapper: {
     backgroundColor: 'rgba(0,0,0,0.4)',
     paddingVertical: 12 * scale,
+    borderBottomWidth: 0.2 * scale,
+    borderBottomColor: 'rgb(255, 255, 255)',
   },
   categoriesContainer: {
     paddingHorizontal: 20 * scale,
