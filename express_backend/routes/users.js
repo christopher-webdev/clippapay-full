@@ -142,6 +142,29 @@ router.patch(
 );
 
 // GET public profile (for advertisers)
+router.get('/clipper-profile/:id', requireAuth, async (req, res) => {
+  const profile = await ClipperProfile.findById(req.params.id);
+  if (!profile) {
+    return res.status(404).json({ error: 'Profile not found' });
+  }
+
+  const targetUser = await User.findById(profile.user);
+  if (!targetUser || targetUser.role !== 'clipper' || !targetUser.isPremiumCreator) {
+    return res.status(404).json({ error: 'Premium clipper not found' });
+  }
+
+  res.json({
+    ...profile.toObject(),
+    user: {
+      firstName: targetUser.firstName,
+      lastName: targetUser.lastName,
+      rating: targetUser.rating,
+      isPremiumCreator: targetUser.isPremiumCreator,
+    }
+  });
+});
+
+// GET public profile (for advertisers)
 router.get('/clipper-profile/:userId', requireAuth, async (req, res) => {
   const targetUser = await User.findById(req.params.userId);
   if (!targetUser || targetUser.role !== 'clipper' || !targetUser.isPremiumCreator) {

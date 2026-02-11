@@ -1,4 +1,4 @@
-// app/premium_creators.tsx
+// app/(dashboard_advertiser)/premium_creators.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -13,6 +13,7 @@ import {
   Platform,
   FlatList,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -31,9 +32,9 @@ const CATEGORIES = ['All', 'Tech', 'Fitness', 'Travel', 'Food', 'Fashion', 'Busi
 
 export default function PremiumCreators() {
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [creators, setCreators] = useState([]);
+  const [creators, setCreators] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const scrollY = useRef(new Animated.Value(0)).current;
 
   const HEADER_MAX_HEIGHT = 220 * scale;
@@ -63,10 +64,10 @@ export default function PremiumCreators() {
     return token;
   };
 
-  const toFullUrl = (path) => {
+  const toFullUrl = (path: string | null) => {
     if (!path) return 'https://via.placeholder.com/300x200?text=No+Image';
     if (path.startsWith('http')) return path;
-    return `https://clippapay.com${path}`;
+    return `https://clippapay.com${path.startsWith('/') ? '' : '/'}${path}`;
   };
 
   useEffect(() => {
@@ -78,20 +79,24 @@ export default function PremiumCreators() {
         const token = await getToken();
         if (!token) throw new Error('No authentication token found. Please log in.');
 
-        // ✅ NEW SINGLE ENDPOINT CALL
-        const { data } = await axios.get(
-          `${API_BASE}/user/clipper-profile/premium`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        console.log('Fetching premium creators from:', `${API_BASE}/user/clipper-profile/premium`);
+
+        const { data } = await axios.get(`${API_BASE}/user/clipper-profile/premium`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        console.log('Received creators:', data.length, 'items');
+        console.log('First creator sample:', data[0] ? JSON.stringify(data[0], null, 2) : 'empty');
 
         setCreators(data || []);
-      } catch (err) {
-        console.error('Premium creators fetch error:', err);
-        setError(
+      } catch (err: any) {
+        console.error('Failed to fetch premium creators:', err);
+        const errMsg =
           err.response?.data?.error ||
           err.message ||
-          'Failed to load premium creators.'
-        );
+          'Failed to load premium creators. Please try again.';
+        setError(errMsg);
+        Alert.alert('Error', errMsg);
       } finally {
         setLoading(false);
       }
@@ -105,22 +110,47 @@ export default function PremiumCreators() {
       ? creators
       : creators.filter((creator) =>
           creator.categories?.some(
-            (tag) => tag.toLowerCase() === selectedCategory.toLowerCase()
+            (tag: string) => tag.toLowerCase() === selectedCategory.toLowerCase()
           )
         );
 
-  const renderCreatorItem = ({ item }) => {
-    const description =
-      item.categories?.length > 0
-        ? `${item.categories.join(' & ')} Specialist`
-        : 'Content Creator';
+  const handleHirePress = async (item: any) => {
+    const creatorId = item.id || item._id || item.user?._id;
 
+    console.log('───────────────────────────────');
+    console.log('HIRE button clicked');
+    console.log('Item keys:', Object.keys(item));
+    console.log('Selected creator ID:', creatorId);
+    console.log('Full item:', JSON.stringify(item, null, 2));
+    console.log('───────────────────────────────');
+
+    if (!creatorId) {
+      Alert.alert('Error', 'Cannot find creator ID. Please try again later.');
+      return;
+    }
+
+    // Save creator ID to storage
+    try {
+      await AsyncStorage.setItem('selectedCreatorId', creatorId.toString());
+    } catch (storageErr) {
+      console.error('Failed to save creator ID to storage:', storageErr);
+      Alert.alert('Error', 'Failed to select creator. Please try again.');
+      return;
+    }
+
+    // Navigate without params
+    router.push('/(dashboard_advertiser)/premium_creator_hire');
+  };
+
+  const renderCreatorItem = ({ item }: { item: any }) => {
+    const name = item.name || `${item.user?.firstName || ''} ${item.user?.lastName || ''}`.trim() || 'Creator';
+    const rating = item.rating || item.user?.rating || 0;
+    const description = item.categories?.length
+      ? `${item.categories.join(' & ')} Specialist`
+      : 'Content Creator';
     const pricePerVideo = item.ratePerVideo || 0;
     const completedProjects = item.completedProjects || 0;
-    const deliveryTime = item.expectedDelivery
-      ? `${item.expectedDelivery} days`
-      : 'N/A';
-
+    const deliveryTime = item.expectedDelivery ? `${item.expectedDelivery} days` : 'N/A';
     const tags = item.categories || [];
     const imageUri = toFullUrl(item.profileImage);
 
@@ -147,7 +177,7 @@ export default function PremiumCreators() {
         <TouchableOpacity
           activeOpacity={0.92}
           style={styles.cardWrapper}
-          onPress={() => router.push(`/premium_creator_hire?id=${item.id}`)}
+          onPress={() => handleHirePress(item)}
         >
           <LinearGradient
             colors={['#343434', '#2A2A2A', '#3A1A2A']}
@@ -160,27 +190,21 @@ export default function PremiumCreators() {
               <Text style={styles.premiumRibbonText}>PREMIUM</Text>
             </View>
 
-            <Image
-              source={{ uri: imageUri }}
-              style={styles.creatorImage}
-              resizeMode="cover"
-            />
+            <Image source={{ uri: imageUri }} style={styles.creatorImage} resizeMode="cover" />
 
             <View style={styles.creatorInfo}>
               <View style={styles.headerRow}>
-                <Text style={styles.name}>{item.name}</Text>
+                <Text style={styles.name}>{name}</Text>
                 <View style={styles.ratingContainer}>
                   <Ionicons name="star" size={14 * scale} color="#FFD700" />
-                  <Text style={styles.rating}>
-                    {(item.rating || 0).toFixed(1)}
-                  </Text>
+                  <Text style={styles.rating}>{rating.toFixed(1)}</Text>
                 </View>
               </View>
 
               <Text style={styles.description}>{description}</Text>
 
               <View style={styles.tagsContainer}>
-                {tags.map((tag, idx) => (
+                {tags.map((tag: string, idx: number) => (
                   <View key={idx} style={styles.tag}>
                     <Text style={styles.tagText}>{tag}</Text>
                   </View>
@@ -192,23 +216,23 @@ export default function PremiumCreators() {
                   <Text style={styles.statNumber}>{completedProjects}</Text>
                   <Text style={styles.statLabel}>Projects</Text>
                 </View>
-
                 <View style={styles.statDivider} />
-
                 <View style={styles.stat}>
                   <Text style={styles.statNumber}>{deliveryTime}</Text>
                   <Text style={styles.statLabel}>Delivery</Text>
                 </View>
-
                 <View style={styles.statDivider} />
-
                 <View style={styles.stat}>
                   <Text style={styles.price}>${pricePerVideo}</Text>
                   <Text style={styles.statLabel}>/video</Text>
                 </View>
               </View>
 
-              <TouchableOpacity activeOpacity={0.85} style={styles.ctaButton}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                style={styles.ctaButton}
+                onPress={() => handleHirePress(item)}
+              >
                 <LinearGradient
                   colors={['#FF3366', '#FF6B35']}
                   start={{ x: 0, y: 0 }}
@@ -249,16 +273,9 @@ export default function PremiumCreators() {
       />
 
       <SafeAreaView style={styles.container}>
-        <Animated.View
-          style={[
-            styles.header,
-            { transform: [{ translateY: headerTranslate }] },
-          ]}
-        >
+        <Animated.View style={[styles.header, { transform: [{ translateY: headerTranslate }] }]}>
           <Text style={styles.headerTitle}>Premium Creators</Text>
-          <Animated.Text
-            style={[styles.headerSubtitle, { opacity: subtitleOpacity }]}
-          >
+          <Animated.Text style={[styles.headerSubtitle, { opacity: subtitleOpacity }]}>
             Hire top-tier verified professionals
           </Animated.Text>
         </Animated.View>
@@ -266,7 +283,60 @@ export default function PremiumCreators() {
         <AnimatedFlatList
           data={filteredCreators}
           renderItem={renderCreatorItem}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => item.id || item._id || String(Math.random())}
+          ListHeaderComponent={() => (
+            <>
+              <View style={styles.categoriesWrapper}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.categoriesContainer}
+                >
+                  {CATEGORIES.map((category) => (
+                    <TouchableOpacity
+                      key={category}
+                      style={[
+                        styles.categoryChip,
+                        selectedCategory === category && styles.categoryChipActive,
+                      ]}
+                      onPress={() => setSelectedCategory(category)}
+                    >
+                      <Text
+                        style={[
+                          styles.categoryText,
+                          selectedCategory === category && styles.categoryTextActive,
+                        ]}
+                      >
+                        {category}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              <View style={styles.statsBar}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statItemNumber}>{filteredCreators.length}</Text>
+                  <Text style={styles.statItemLabel}>Creators</Text>
+                </View>
+                <View style={styles.statDividerVertical} />
+                <View style={styles.statItem}>
+                  <Text style={styles.statItemNumber}>4.8+</Text>
+                  <Text style={styles.statItemLabel}>Avg Rating</Text>
+                </View>
+                <View style={styles.statDividerVertical} />
+                <View style={styles.statItem}>
+                  <Text style={styles.statItemNumber}>24h</Text>
+                  <Text style={styles.statItemLabel}>Response</Text>
+                </View>
+              </View>
+            </>
+          )}
+          ListEmptyComponent={() => (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No premium creators available at this time</Text>
+            </View>
+          )}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           onScroll={Animated.event(
@@ -280,132 +350,119 @@ export default function PremiumCreators() {
   );
 }
 
+// ────────────────────────────────────────────────
+// Styles (unchanged)
+// ────────────────────────────────────────────────
 const styles = StyleSheet.create({
   background: { flex: 1 },
   container: { flex: 1 },
-
   header: {
     position: 'absolute',
-    top: 100,
+    top: Platform.OS === 'ios' ? 40 : 20,
     left: 0,
     right: 0,
     backgroundColor: '#0F0F0F',
     paddingHorizontal: 24 * scale,
     paddingBottom: 12 * scale,
     zIndex: 100,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
   },
-
   headerTitle: {
     fontSize: 32 * scale,
     fontWeight: '900',
     color: '#FFFFFF',
     letterSpacing: -1,
   },
-
   headerSubtitle: {
     fontSize: 15 * scale,
     color: '#BBBBBB',
     marginTop: 4 * scale,
-    fontWeight: '500',
   },
-
   listContent: {
-    paddingTop: 200 * scale,
+    paddingTop: 190 * scale,
     paddingBottom: 80 * scale,
   },
-
+  categoriesWrapper: {
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    paddingVertical: 12 * scale,
+  },
+  categoriesContainer: {
+    paddingHorizontal: 20 * scale,
+  },
+  categoryChip: {
+    paddingHorizontal: 20 * scale,
+    paddingVertical: 10 * scale,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginRight: 12 * scale,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  categoryChipActive: {
+    backgroundColor: 'rgba(255,51,102,0.25)',
+    borderColor: '#FF3366',
+  },
+  categoryText: {
+    color: '#CCCCCC',
+    fontWeight: '600',
+    fontSize: 14 * scale,
+  },
+  categoryTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  statsBar: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginHorizontal: 20 * scale,
+    marginVertical: 16 * scale,
+    borderRadius: 20 * scale,
+    paddingVertical: 16 * scale,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  statItem: { flex: 1, alignItems: 'center' },
+  statItemNumber: { fontSize: 22 * scale, fontWeight: '800', color: '#FFFFFF' },
+  statItemLabel: { fontSize: 12 * scale, color: '#AAAAAA' },
+  statDividerVertical: { width: 1, backgroundColor: 'rgba(255,255,255,0.12)' },
   cardWrapper: {
     borderRadius: 28 * scale,
     overflow: 'hidden',
     marginHorizontal: 20 * scale,
     marginBottom: 24 * scale,
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
     elevation: Platform.OS === 'android' ? 10 : 0,
   },
-
   card: {
     borderRadius: 28 * scale,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
-
   premiumRibbon: {
     position: 'absolute',
     top: 16 * scale,
     left: 16 * scale,
     flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.75)',
     paddingHorizontal: 12 * scale,
     paddingVertical: 6 * scale,
     borderRadius: 20 * scale,
     zIndex: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,215,0,0.4)',
   },
-
   premiumRibbonText: {
     color: '#FFD700',
     fontSize: 11 * scale,
     fontWeight: '800',
     marginLeft: 6 * scale,
   },
-
-  creatorImage: {
-    width: '100%',
-    height: 200 * scale,
-  },
-
-  creatorInfo: {
-    padding: 20 * scale,
-  },
-
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10 * scale,
-  },
-
-  name: {
-    fontSize: 24 * scale,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    flex: 1,
-  },
-
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,215,0,0.12)',
-    paddingHorizontal: 10 * scale,
-    paddingVertical: 4 * scale,
-    borderRadius: 12 * scale,
-    borderWidth: 1,
-    borderColor: 'rgba(255,215,0,0.3)',
-  },
-
-  rating: {
-    color: '#FFD700',
-    fontSize: 14 * scale,
-    fontWeight: '700',
-    marginLeft: 4 * scale,
-  },
-
-  description: {
-    fontSize: 15 * scale,
-    color: '#CCCCCC',
-    marginBottom: 14 * scale,
-  },
-
-  tagsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 16 * scale,
-  },
-
+  creatorImage: { width: '100%', height: 200 * scale },
+  creatorInfo: { padding: 20 * scale },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 * scale },
+  name: { fontSize: 24 * scale, fontWeight: '800', color: '#FFFFFF', flex: 1 },
+  ratingContainer: { flexDirection: 'row', alignItems: 'center' },
+  rating: { color: '#FFD700', fontSize: 14 * scale, marginLeft: 4 * scale },
+  description: { fontSize: 15 * scale, color: '#CCCCCC', marginBottom: 14 * scale },
+  tagsContainer: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 * scale },
   tag: {
     backgroundColor: 'rgba(255,255,255,0.08)',
     paddingHorizontal: 12 * scale,
@@ -414,61 +471,24 @@ const styles = StyleSheet.create({
     marginRight: 8 * scale,
     marginBottom: 8 * scale,
   },
-
-  tagText: {
-    color: '#DDDDDD',
-    fontSize: 12 * scale,
-    fontWeight: '600',
-  },
-
-  statsRow: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16 * scale,
-    paddingVertical: 12 * scale,
-    marginBottom: 16 * scale,
-  },
-
-  stat: {
-    flex: 1,
-    alignItems: 'center',
-  },
-
-  statNumber: {
-    fontSize: 18 * scale,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-
-  statLabel: {
-    fontSize: 11 * scale,
-    color: '#AAAAAA',
-    marginTop: 2 * scale,
-  },
-
-  price: {
-    fontSize: 20 * scale,
-    fontWeight: '900',
-    color: '#FF8A65',
-  },
-
+  tagText: { color: '#DDDDDD', fontSize: 12 * scale },
+  statsRow: { flexDirection: 'row', marginBottom: 16 * scale },
+  stat: { flex: 1, alignItems: 'center' },
+  statNumber: { fontSize: 18 * scale, fontWeight: '800', color: '#FFFFFF' },
+  statLabel: { fontSize: 11 * scale, color: '#AAAAAA' },
+  price: { fontSize: 20 * scale, fontWeight: '900', color: '#FF8A65' },
   statDivider: {
     width: 1,
-    height: '60%',
     backgroundColor: 'rgba(255,255,255,0.12)',
     alignSelf: 'center',
   },
-
   ctaButton: {
     borderRadius: 20 * scale,
     overflow: 'hidden',
-    marginTop: 8 * scale,
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16 * scale,
   },
-
   ctaButtonText: {
     color: '#FFFFFF',
     fontSize: 16 * scale,
@@ -476,14 +496,12 @@ const styles = StyleSheet.create({
     marginRight: 10 * scale,
     zIndex: 1,
   },
-
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#0F0F0F',
   },
-
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -491,9 +509,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#0F0F0F',
     padding: 20 * scale,
   },
-
   errorText: {
     color: '#FF3366',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  emptyContainer: {
+    padding: 40 * scale,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: '#AAAAAA',
     fontSize: 16 * scale,
     textAlign: 'center',
   },
