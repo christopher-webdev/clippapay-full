@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Smartphone, Apple, Github, Loader2 } from 'lucide-react';
+import { Smartphone, Apple, Github, Loader2, Send } from 'lucide-react';
 
 export default function ClipperCampaignList() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [telegramJoined, setTelegramJoined] = useState(false);
 
   // Simulate loading state for smooth transition
   useEffect(() => {
@@ -12,6 +13,21 @@ export default function ClipperCampaignList() {
       setLoading(false);
     }, 1000);
     return () => clearTimeout(timer);
+  }, []);
+
+  const handleTelegramRedirect = () => {
+    window.open('https://t.me/clippapay', '_blank');
+    setTelegramJoined(true);
+    // Store in localStorage to remember they've been notified
+    localStorage.setItem('telegram_notified', 'true');
+  };
+
+  // Check if user has already been to Telegram
+  useEffect(() => {
+    const notified = localStorage.getItem('telegram_notified');
+    if (notified) {
+      setTelegramJoined(true);
+    }
   }, []);
 
   if (loading) {
@@ -84,6 +100,44 @@ export default function ClipperCampaignList() {
             </div>
           </div>
 
+          {/* Telegram Join Section - Highlighted */}
+          <div className="bg-gradient-to-r from-blue-500 via-blue-600 to-blue-700 rounded-2xl p-8 mb-12 text-white shadow-xl transform hover:scale-105 transition-all duration-300">
+            <div className="flex items-center justify-center mb-4">
+              <div className="bg-white/20 p-3 rounded-full">
+                <Send className="w-8 h-8" />
+              </div>
+            </div>
+            <h2 className="text-2xl font-bold mb-2">📱 Get Notified instantly!</h2>
+            <p className="text-blue-100 mb-6 max-w-lg mx-auto">
+              Join our Telegram channel to be the first to know when we launch on iOS and Android. Get exclusive updates, early access, and special offers!
+            </p>
+            
+            {!telegramJoined ? (
+              <button
+                onClick={handleTelegramRedirect}
+                className="group relative inline-flex items-center gap-3 bg-white text-blue-600 px-8 py-4 rounded-xl font-bold text-lg shadow-lg hover:shadow-2xl transform hover:scale-105 transition-all duration-200 overflow-hidden"
+              >
+                <span className="absolute inset-0 bg-gradient-to-r from-yellow-300 to-yellow-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                <Send className="relative z-10 w-5 h-5" />
+                <span className="relative z-10">Join @clippapay on Telegram</span>
+                <span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-yellow-500"></span>
+                </span>
+              </button>
+            ) : (
+              <div className="bg-green-500/20 backdrop-blur rounded-xl p-4 inline-block">
+                <p className="text-white font-semibold flex items-center gap-2">
+                  <span>✅</span> Thanks for joining! You'll be notified when we launch.
+                </p>
+              </div>
+            )}
+
+            <p className="text-blue-200 text-sm mt-4">
+              👥 Already 1,000+ members staying ahead of the curve
+            </p>
+          </div>
+
           {/* Feature highlights */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-12">
             <div className="bg-white/60 backdrop-blur rounded-xl p-4 shadow-sm">
@@ -103,26 +157,7 @@ export default function ClipperCampaignList() {
             </div>
           </div>
 
-          {/* Action buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <button
-              onClick={() => window.location.href = 'mailto:notify@example.com'}
-              className="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-            >
-              <span>📧</span>
-              Notify Me When Live
-            </button>
-            
-            <button
-              onClick={() => navigate('/dashboard')}
-              className="px-8 py-4 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-            >
-              <span>←</span>
-              Back to Dashboard
-            </button>
-          </div>
-
-          {/* GitHub banner */}
+          {/* GitHub banner
           <div className="mt-8 pt-8 border-t border-gray-200">
             <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
               <Github className="w-4 h-4" />
@@ -137,7 +172,7 @@ export default function ClipperCampaignList() {
               </a>
             </div>
           </div>
-        </div>
+        </div> */}
 
         {/* Countdown or additional info */}
         <div className="mt-8 text-center text-sm text-gray-500">
@@ -146,7 +181,7 @@ export default function ClipperCampaignList() {
       </div>
 
       {/* Animation styles */}
-      <style jsx>{`
+      <style>{`
         @keyframes blob {
           0% { transform: translate(0px, 0px) scale(1); }
           33% { transform: translate(30px, -50px) scale(1.1); }
@@ -166,8 +201,6 @@ export default function ClipperCampaignList() {
     </div>
   );
 }
-
-
 // import React, { useEffect, useState } from 'react';
 // import { useNavigate } from 'react-router-dom';
 // import { HiOutlineFilm } from 'react-icons/hi';
