@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useNotifications } from '../hooks/useNotifications';
+import { useNotifications } from '../../hooks/useNotifications';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function NotificationsScreen() {
@@ -57,11 +57,11 @@ export default function NotificationsScreen() {
         markAsRead(item._id);
         // Navigate based on notification data
         if (item.data?.applicationId) {
-          router.push(`/(dashboard)/applications/${item.data.applicationId}`);
+          router.push(`/(dashboard_advertiser)/applications/${item.data.applicationId}`);
         } else if (item.data?.campaignId) {
-          router.push(`/(dashboard)/campaigns/${item.data.campaignId}`);
+          router.push(`/(dashboard_advertiser)/campaigns/${item.data.campaignId}`);
         } else if (item.data?.transactionId) {
-          router.push(`/(dashboard)/wallet/transactions/${item.data.transactionId}`);
+          router.push(`/(dashboard_advertiser)/wallet/transactions/${item.data.transactionId}`);
         }
       }}
     >

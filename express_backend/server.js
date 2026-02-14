@@ -32,7 +32,7 @@ import adminSubmissionsRouter from './routes/adminSubmissions.js';
 import userRoutes from './routes/users.js';
 import adminCampaignsRouter from './routes/adminCampaigns.js';
 import clipRoutes from './routes/clips.js';
-import applicationsRoutes from '.routes/applications.js'
+import applicationsRoutes from "./routes/applications.js";
 
 
 // Model for seeding
