@@ -106,27 +106,42 @@ export default function ApplicationsList() {
     return token;
   };
 
+  // In the loadApplications function, update the response handling:
+
   const loadApplications = async () => {
     try {
       setError(null);
       const token = await getToken();
       if (!token) throw new Error('No auth token found');
 
-      // Fetch all applications for advertiser's campaigns
-      // You'll need to create this endpoint
       const response = await axios.get(`${API_BASE}/applications/advertiser/all`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      setApplications(response.data);
+      console.log('API Response:', response.data); // Add this to see what's returned
+      
+      // Check if response.data has applications property (paginated)
+      if (response.data && typeof response.data === 'object' && 'applications' in response.data) {
+        console.log('Paginated response with', response.data.applications.length, 'applications');
+        setApplications(Array.isArray(response.data.applications) ? response.data.applications : []);
+      } else if (Array.isArray(response.data)) {
+        console.log('Array response with', response.data.length, 'applications');
+        setApplications(response.data);
+      } else {
+        console.log('Unexpected response format:', response.data);
+        setApplications([]);
+      }
+      
     } catch (err: any) {
       console.error('Error loading applications:', err);
       setError(err.response?.data?.error || 'Failed to load applications');
+      setApplications([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
+
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -213,20 +228,31 @@ export default function ApplicationsList() {
     return labels[addonId as keyof typeof labels] || addonId;
   };
 
-  const formatCurrency = (amount: number) => `₦${amount.toLocaleString()}`;
+  const filteredApplications = React.useMemo(() => {
+    // Safety check - ensure applications is an array
+    if (!applications || !Array.isArray(applications)) {
+      return [];
+    }
+    
+    if (activeFilter === 'all') return applications;
+    return applications.filter(app => app.status === activeFilter);
+  }, [applications, activeFilter]);
 
-  const filteredApplications = applications.filter(app => {
-    if (activeFilter === 'all') return true;
-    return app.status === activeFilter;
-  });
+  // Also update the stats computation (around line 220):
 
-  const stats = {
-    total: applications.length,
-    pending: applications.filter(a => a.status === 'pending').length,
-    offer_sent: applications.filter(a => a.status === 'offer_sent').length,
-    submitted: applications.filter(a => a.status === 'submitted' || a.status === 'revision_requested').length,
-    approved: applications.filter(a => a.status === 'approved' || a.status === 'completed').length,
-  };
+  const stats = React.useMemo(() => {
+    // Safety check - ensure applications is an array
+    const apps = applications && Array.isArray(applications) ? applications : [];
+    
+    return {
+      total: apps.length,
+      pending: apps.filter(a => a.status === 'pending').length,
+      offer_sent: apps.filter(a => a.status === 'offer_sent').length,
+      submitted: apps.filter(a => a.status === 'submitted' || a.status === 'revision_requested').length,
+      approved: apps.filter(a => a.status === 'approved' || a.status === 'completed').length,
+    };
+  }, [applications]);
+
 
   const renderApplicationCard = ({ item }: { item: Application }) => {
     const statusConfig = getStatusConfig(item.status);

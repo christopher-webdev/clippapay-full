@@ -224,7 +224,7 @@ router.post('/:applicationId/reject', requireAuth, requireClipper, async (req, r
     if (!application) return res.status(404).json({ error: 'Application not found' });
     if (!application.clipper.equals(req.user._id)) {
       return res.status(403).json({ error: 'Not your application' });
-    }
+    }z
 
     await application.rejectOffer();
 
@@ -442,9 +442,13 @@ router.post('/:applicationId/script',
  * Get all applications for advertiser's campaigns
  * GET /api/applications/advertiser/all
  */
+/**
+ * Get all applications for advertiser's campaigns
+ * GET /api/applications/advertiser/all
+ */
 router.get('/advertiser/all', requireAuth, requireAdvertiser, async (req, res) => {
   try {
-    const { status, campaignId, page = 1, limit = 20 } = req.query;
+    const { status, campaignId, page, limit } = req.query;
     
     let query = { advertiser: req.user._id };
     
@@ -456,35 +460,48 @@ router.get('/advertiser/all', requireAuth, requireAdvertiser, async (req, res) =
       query.campaign = campaignId;
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    // If page and limit are provided, use pagination
+    if (page && limit) {
+      const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const applications = await Application.find(query)
-      .populate({
-        path: 'campaign',
-        select: 'title kind clipper_cpm desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc.brief thumb_url'
-      })
-      .populate('clipper', 'firstName lastName email rating isPremiumCreator profileImage')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+      const applications = await Application.find(query)
+        .populate({
+          path: 'campaign',
+          select: 'title kind clipper_cpm desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc.brief thumb_url'
+        })
+        .populate('clipper', 'firstName lastName email rating isPremiumCreator profileImage')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
 
-    const total = await Application.countDocuments(query);
+      const total = await Application.countDocuments(query);
 
-    res.json({
-      applications,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
-      }
-    });
+      return res.json({
+        applications,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      });
+    } else {
+      // If no pagination params, return just the array
+      const applications = await Application.find(query)
+        .populate({
+          path: 'campaign',
+          select: 'title kind clipper_cpm desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc.brief thumb_url'
+        })
+        .populate('clipper', 'firstName lastName email rating isPremiumCreator profileImage')
+        .sort({ createdAt: -1 });
+
+      return res.json(applications);
+    }
   } catch (err) {
     console.error('Error fetching advertiser applications:', err);
     res.status(500).json({ error: 'Failed to fetch applications' });
   }
 });
-
 /**
  * Get count of pending applications for advertiser (for badge)
  * GET /api/applications/advertiser/pending-count
