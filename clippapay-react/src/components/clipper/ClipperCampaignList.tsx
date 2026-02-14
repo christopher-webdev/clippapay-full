@@ -157,7 +157,7 @@ export default function ClipperCampaignList() {
             </div>
           </div>
 
-          GitHub banner
+          {/* GitHub banner */}
           <div className="mt-8 pt-8 border-t border-gray-200">
             <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
               <Github className="w-4 h-4" />
