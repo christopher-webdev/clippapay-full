@@ -1,5 +1,5 @@
 // In your application routes
-import { sendNotification, NotificationTemplates } from '../utils/notifications.js';
+import { sendNotification, NotificationTemplates } from './notifications.js';
 
 // When clipper applies
 await sendNotification({
