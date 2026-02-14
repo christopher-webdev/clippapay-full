@@ -1,47 +1,61 @@
-// In your application routes
-import { sendNotification, NotificationTemplates } from './notifications.js';
+import Notification from '../models/Notification.js';
 
-// When clipper applies
-await sendNotification({
-  user: campaign.advertiser,
-  ...NotificationTemplates.newApplication({
-    clipperName: `${req.user.firstName} ${req.user.lastName}`,
-    campaignTitle: campaign.title,
-    campaignId: campaign._id,
-    applicationId: application._id
-  })
-});
+/**
+ * Send notification helper
+ */
+export const sendNotification = async ({
+  user,
+  title,
+  message,
+  type = 'system',
+  priority = 'normal',
+  metadata = {}
+}) => {
+  try {
+    await Notification.create({
+      user,
+      title,
+      message,
+      type,
+      priority,
+      metadata,
+      read: false
+    });
+  } catch (err) {
+    console.error('Notification error:', err.message);
+  }
+};
 
-// When advertiser sends offer
-await sendNotification({
-  user: clipperId,
-  ...NotificationTemplates.offerReceived({
-    campaignTitle: campaign.title,
-    campaignId: campaign._id,
-    applicationId: application._id,
-    amount: campaign.clipper_cpm
-  })
-});
+/**
+ * Notification Templates
+ */
+export const NotificationTemplates = {
+  newApplication: ({ clipperName, campaignTitle, campaignId, applicationId }) => ({
+    title: 'New Application',
+    message: `${clipperName} applied for your campaign "${campaignTitle}"`,
+    type: 'application',
+    metadata: { campaignId, applicationId }
+  }),
 
-// When payment is made
-await sendNotification({
-  user: clipperId,
-  ...NotificationTemplates.paymentReceived({
-    campaignTitle: campaign.title,
-    campaignId: campaign._id,
-    applicationId: application._id,
-    transactionId: transaction._id,
-    amount: payoutAmount
-  })
-});
+  offerReceived: ({ campaignTitle, campaignId, applicationId, amount }) => ({
+    title: 'New Offer Received',
+    message: `You received an offer for "${campaignTitle}" — ₦${amount}`,
+    type: 'offer',
+    metadata: { campaignId, applicationId, amount }
+  }),
 
-// System alert example
-await sendNotification({
-  user: userId,
-  ...NotificationTemplates.systemAlert({
-    title: 'Maintenance Notice',
-    message: 'Scheduled maintenance in 1 hour. Platform may be unavailable for 30 minutes.',
-    priority: 'urgent',
-    metadata: { duration: '30 minutes', startTime: '02:00 UTC' }
+  paymentReceived: ({ campaignTitle, campaignId, applicationId, transactionId, amount }) => ({
+    title: 'Payment Received',
+    message: `Payment of ₦${amount} received for "${campaignTitle}"`,
+    type: 'payment',
+    metadata: { campaignId, applicationId, transactionId, amount }
+  }),
+
+  systemAlert: ({ title, message, priority = 'normal', metadata = {} }) => ({
+    title,
+    message,
+    type: 'system',
+    priority,
+    metadata
   })
-});
+};
