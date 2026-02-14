@@ -9,17 +9,20 @@ import {
   SafeAreaView,
   Alert,
   Platform,
+  AppState,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import axios from 'axios';
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
+const API_BASE = 'https://clippapay.com/api';
 
-// Define the tab items with more precise route matching
+// Define the tab items with Applications tab added
 const TAB_ITEMS = [
   {
     name: 'Browse',
@@ -30,7 +33,22 @@ const TAB_ITEMS = [
       '/(dashboard_advertiser)',
       '/advertiser_dashboard',
       '/dashboard_advertiser',
+      '/(dashboard_advertiser)/index',
+      '/index',
     ],
+  },
+  {
+    name: 'Applications',
+    icon: 'document-text-outline',
+    activeIcon: 'document-text',
+    routes: [
+      '/(dashboard_advertiser)/applications',
+      '/(dashboard_advertiser)/ApplicationsList',
+      '/applications',
+      '/ApplicationsList',
+      '/(dashboard_advertiser)/applications/',
+    ],
+    showBadge: true, // Flag to show badge for this tab
   },
   {
     name: 'My Campaigns',
@@ -41,6 +59,7 @@ const TAB_ITEMS = [
       '/Campaigns',
       '/(dashboard_advertiser)/campaigns',
       '/campaigns',
+      '/(dashboard_advertiser)/campaigns/',
     ],
   },
   {
@@ -73,15 +92,69 @@ export default function Footer() {
   const pathname = usePathname();
   const segments = useSegments();
   const [activeTab, setActiveTab] = useState<string>('Browse');
+  const [pendingApplicationsCount, setPendingApplicationsCount] = useState(0);
+  const [isLoadingCount, setIsLoadingCount] = useState(false);
+  const [appState, setAppState] = useState(AppState.currentState);
 
-  // Debug: Log current path to see what we're getting
+  // Load pending applications count
+  const loadPendingApplicationsCount = async () => {
+    try {
+      setIsLoadingCount(true);
+      const token = await getToken();
+      if (!token) return;
+
+      const response = await axios.get(`${API_BASE}/applications/advertiser/pending-count`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      setPendingApplicationsCount(response.data.count || 0);
+    } catch (error) {
+      console.error('Error loading pending applications count:', error);
+    } finally {
+      setIsLoadingCount(false);
+    }
+  };
+
+  // Get auth token
+  const getToken = async () => {
+    if (Platform.OS === 'web') {
+      return await AsyncStorage.getItem('userToken');
+    }
+    let token = await SecureStore.getItemAsync('userToken');
+    if (!token) token = await AsyncStorage.getItem('userToken');
+    return token;
+  };
+
+  // Handle app state changes (refresh when app comes to foreground)
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (appState.match(/inactive|background/) && nextAppState === 'active') {
+        // App came to foreground - refresh pending count
+        loadPendingApplicationsCount();
+      }
+      setAppState(nextAppState);
+    });
+
+    return () => subscription.remove();
+  }, [appState]);
+
+  // Initial load and periodic refresh
+  useEffect(() => {
+    loadPendingApplicationsCount();
+
+    // Refresh every 30 seconds
+    const interval = setInterval(loadPendingApplicationsCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Debug logging (remove in production)
   useEffect(() => {
     console.log('Current pathname:', pathname);
     console.log('Current segments:', segments);
   }, [pathname, segments]);
 
+  // Check if a route is active
   const isRouteActive = (routes: string[]) => {
-    // Check if current pathname matches any of the routes for this tab
     return routes.some(route => {
       // Exact match
       if (pathname === route) return true;
@@ -103,22 +176,33 @@ export default function Footer() {
       const pathSegments = pathname.split('/').filter(Boolean);
       
       if (routeSegments.length > 0 && pathSegments.length > 0) {
-        return routeSegments[routeSegments.length - 1].toLowerCase() === 
-               pathSegments[pathSegments.length - 1].toLowerCase();
+        const lastRouteSegment = routeSegments[routeSegments.length - 1].toLowerCase();
+        const lastPathSegment = pathSegments[pathSegments.length - 1].toLowerCase();
+        
+        // Check if the last segment matches (for dynamic routes)
+        if (lastRouteSegment === lastPathSegment) return true;
+        
+        // Check if the last segment is a parameter (e.g., [id])
+        if (lastRouteSegment.includes('[') && lastRouteSegment.includes(']')) {
+          return routeSegments.slice(0, -1).every((seg, idx) => 
+            seg.toLowerCase() === pathSegments[idx]?.toLowerCase()
+          );
+        }
       }
       
       return false;
     });
   };
 
+  // Handle navigation
   const handleNavigation = (item: typeof TAB_ITEMS[0]) => {
-    // Use the first route as the primary navigation target
     const targetRoute = item.routes[0];
     console.log('Navigating to:', targetRoute);
     setActiveTab(item.name);
     router.push(targetRoute);
   };
 
+  // Handle logout
   const handleLogout = async () => {
     Alert.alert(
       'Sign Out',
@@ -168,22 +252,40 @@ export default function Footer() {
               >
                 <View style={[
                   styles.iconContainer, 
-                  isActive && styles.activeIconContainer
+                  isActive && styles.activeIconContainer,
+                  item.name === 'Applications' && styles.applicationsIconContainer
                 ]}>
                   <Ionicons
                     name={isActive ? item.activeIcon : item.icon}
                     size={24 * scale}
                     color={isActive ? '#7C3AED' : '#6B7280'}
                   />
+                  
+                  {/* Show badge for Applications tab when there are pending applications */}
+                  {item.showBadge && pendingApplicationsCount > 0 && (
+                    <View style={styles.applicationBadge}>
+                      <Text style={styles.applicationBadgeText}>
+                        {pendingApplicationsCount > 99 ? '99+' : pendingApplicationsCount}
+                      </Text>
+                    </View>
+                  )}
+                  
+                  {/* Small dot for other tabs with activity (optional) */}
+                  {!item.showBadge && isActive && (
+                    <View style={styles.activeDot} />
+                  )}
                 </View>
+                
                 <Text
                   style={[
                     styles.tabLabel,
                     isActive ? styles.activeTabLabel : styles.inactiveTabLabel,
                   ]}
+                  numberOfLines={1}
                 >
                   {item.name}
                 </Text>
+                
                 {isActive && <View style={styles.activeIndicator} />}
               </TouchableOpacity>
             );
@@ -233,7 +335,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
     height: 64 * scale,
-    paddingHorizontal: 8 * scale,
+    paddingHorizontal: 4 * scale,
   },
   tabItem: {
     alignItems: 'center',
@@ -248,17 +350,56 @@ const styles = StyleSheet.create({
   iconContainer: {
     padding: 6 * scale,
     borderRadius: 12 * scale,
+    position: 'relative',
   },
   activeIconContainer: {
     backgroundColor: 'rgba(124, 58, 237, 0.12)',
-    padding: 6 * scale,
-    borderRadius: 12 * scale,
+  },
+  applicationsIconContainer: {
+    // Additional styling for applications icon if needed
+  },
+  applicationBadge: {
+    position: 'absolute',
+    top: -4 * scale,
+    right: -4 * scale,
+    minWidth: 18 * scale,
+    height: 18 * scale,
+    borderRadius: 9 * scale,
+    backgroundColor: '#F8312F',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4 * scale,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  applicationBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10 * scale,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  activeDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 6 * scale,
+    height: 6 * scale,
+    borderRadius: 3 * scale,
+    backgroundColor: '#7C3AED',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
   },
   tabLabel: {
     fontSize: 11 * scale,
-    lineHeight: 11 * scale * 1.4,
+    lineHeight: 14 * scale,
     letterSpacing: 0.3 * scale,
     marginTop: 4 * scale,
+    maxWidth: 70 * scale,
   },
   activeTabLabel: {
     color: '#7C3AED',
@@ -283,6 +424,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     position: 'relative',
     overflow: 'hidden',
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
   },
   logoutGradient: {
     ...StyleSheet.absoluteFillObject,

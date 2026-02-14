@@ -7,7 +7,7 @@ const campaignSchema = new Schema({
   title: { type: String, required: true },
   thumb_url: String,
   video_url: String,
-  kind: { type: String, enum: ['normal', 'ugc', 'pgc', 'premium'], default: 'normal', index: true }, // Added 'premium'
+  kind: { type: String, enum: ['normal', 'ugc', 'pgc', 'premium'], default: 'normal', index: true },
 
   ugc: {
     brief: { type: String },
@@ -40,12 +40,28 @@ const campaignSchema = new Schema({
   // User-provided script (if creator doesn't provide)
   script: { type: String, default: '' },
 
+  // NEW: Track which addons require post URLs
+  postingRequirements: {
+    whatsapp: { type: Boolean, default: false },
+    instagram: { type: Boolean, default: false },
+    tiktok: { type: Boolean, default: false },
+    requiresUrl: { type: Boolean, default: false },
+    requiresScreenshot: { type: Boolean, default: false }
+  },
+
+  // NEW: Store posting instructions for each platform
+  postingInstructions: {
+    whatsapp: { type: String, default: '' },
+    instagram: { type: String, default: '' },
+    tiktok: { type: String, default: '' }
+  },
+
   // Added for premium
   creator: { type: Schema.Types.ObjectId, ref: 'User' },
 
   // FINANCIALS & VIEWS
-  rate_per_1000: { type: Number, default: 1200, required: true }, // Advertiser CPM
-  clipper_cpm: { type: Number, default: 500 },                   // Clipper payout CPM
+  rate_per_1000: { type: Number, default: 1200, required: true },
+  clipper_cpm: { type: Number, default: 500 },
   budget_total: { type: Number, required: true },
   budget_remaining: { type: Number, required: true },
   views_purchased: { type: Number },
@@ -59,10 +75,10 @@ const campaignSchema = new Schema({
   ugcVersion: { type: Number, default: 1 },
 
   // NEW UGC HYBRID MODEL FIELDS (50/50 split)
-  clipperSlots: { type: Number, default: 0 },           // How many fixed clippers this campaign pays for
-  approvedClipperCount: { type: Number, default: 0 },   // How many have been paid ₦2,000 so far
-  fixedClipperPayout: { type: Number, default: 2000 },  // ₦2,000 per approved clipper
-  platformFeePerClipper: { type: Number, default: 500 }, // ₦500 platform fee per clipper
+  clipperSlots: { type: Number, default: 0 },
+  approvedClipperCount: { type: Number, default: 0 },
+  fixedClipperPayout: { type: Number, default: 2000 },
+  platformFeePerClipper: { type: Number, default: 500 },
 
   // Targeting & Settings
   platforms: { type: [String], enum: ['tiktok','instagram','youtube','facebook', 'X', 'whatsapp'] },
@@ -94,15 +110,13 @@ const campaignSchema = new Schema({
 // ────────────────────────────────
 campaignSchema.pre('validate', async function(next) {
   if (this.kind === 'ugc') {
-    // UGC: 50/50 split → we calculate everything on creation
-    if (!this.isModified('rate_per_1000')) this.rate_per_1000 = 5000;     // ₦5 per view (advertiser cost)
-    if (!this.isModified('clipper_cpm'))   this.clipper_cpm   = 2000;     // ₦2 per view (clipper payout)
+    if (!this.isModified('rate_per_1000')) this.rate_per_1000 = 5000;
+    if (!this.isModified('clipper_cpm'))   this.clipper_cpm   = 2000;
   } 
   else if (this.kind === 'pgc') {
-    // PGC: Base price + addons with specific splits
-    const BASE_PRICE = 35000; // Base price for PGC campaign
-    const BASE_PLATFORM_FEE = 15000; // Platform gets ₦15,000 from base
-    const BASE_CREATOR_PAYOUT = 20000; // Creator gets ₦20,000 from base
+    const BASE_PRICE = 35000;
+    const BASE_PLATFORM_FEE = 15000;
+    const BASE_CREATOR_PAYOUT = 20000;
     
     const ADDON_PRICES = {
       script: 1500,
@@ -115,36 +129,62 @@ campaignSchema.pre('validate', async function(next) {
     let totalPrice = BASE_PRICE;
     let addonsTotal = 0;
     
+    // Set posting requirements based on selected addons
+    const postingReqs = {
+      whatsapp: false,
+      instagram: false,
+      tiktok: false,
+      requiresUrl: false,
+      requiresScreenshot: false
+    };
+    
     (this.pgcAddons || []).forEach(addon => {
       if (ADDON_PRICES[addon]) {
         totalPrice += ADDON_PRICES[addon];
         addonsTotal += ADDON_PRICES[addon];
       }
+      
+      // Set posting requirements
+      switch(addon) {
+        case 'whatsapp':
+          postingReqs.whatsapp = true;
+          postingReqs.requiresScreenshot = true;
+          break;
+        case 'ig':
+          postingReqs.instagram = true;
+          postingReqs.requiresUrl = true;
+          break;
+        case 'tiktok':
+          postingReqs.tiktok = true;
+          postingReqs.requiresUrl = true;
+          break;
+      }
     });
     
-    // Calculate creator payout: Base ₦20,000 + 50% of addons
+    this.postingRequirements = postingReqs;
+    
     const addonsCreatorShare = Math.ceil(addonsTotal / 2);
     const totalCreatorPayout = BASE_CREATOR_PAYOUT + addonsCreatorShare;
     
-    this.rate_per_1000 = totalPrice; // Total price
-    this.clipper_cpm = totalCreatorPayout; // Creator gets ₦20,000 base + 50% of addons
+    this.rate_per_1000 = totalPrice;
+    this.clipper_cpm = totalCreatorPayout;
     
     if (!this.desiredVideos) this.desiredVideos = 1;
     if (this.budget_total < totalPrice) {
       next(new Error(`Budget must be at least ₦${totalPrice.toLocaleString()} for PGC video with selected addons.`));
     }
-    this.views_purchased = 1; // PGC always 1 video
+    this.views_purchased = 1;
     this.views_left = 1;
   } else if (this.kind === 'premium') {
     if (!this.creator) {
       return next(new Error('Creator ID required for premium campaigns'));
     }
     this.rate_per_1000 = this.budget_total;
-    this.clipper_cpm = Math.floor(this.budget_total * 0.7); // 70% to clipper, 30% to platform
+    this.clipper_cpm = Math.floor(this.budget_total * 0.7);
     this.views_purchased = 1;
     this.views_left = 1;
     this.desiredVideos = 1;
-    this.pgcAddons = []; // No addons for premium
+    this.pgcAddons = [];
   }
   next();
 });
@@ -167,7 +207,7 @@ campaignSchema.methods.deductViewsAndBudget = async function(views) {
 
 campaignSchema.methods.approveVideo = async function(videoCount = 1) {
   if (this.kind !== 'pgc' && this.kind !== 'premium') throw new Error('approveVideo is for PGC/Premium only');
-  const cost = videoCount * this.rate_per_1000; // Full price per video
+  const cost = videoCount * this.rate_per_1000;
   if (this.budget_remaining < cost) throw new Error('Insufficient remaining budget');
 
   this.approvedVideosCount += videoCount;
@@ -189,7 +229,7 @@ campaignSchema.methods.restoreViewsAndBudget = async function(views) {
   await this.save();
 };
 
-campaignSchema.methods.canClipperJoin = function(clipperId) { // Modified to take clipperId
+campaignSchema.methods.canClipperJoin = function(clipperId) {
   if (this.kind === 'pgc') {
     return this.approvedVideosCount < this.desiredVideos;
   }
@@ -197,14 +237,12 @@ campaignSchema.methods.canClipperJoin = function(clipperId) { // Modified to tak
     return this.creator.equals(clipperId) && this.approvedVideosCount < this.desiredVideos;
   }
   if (this.kind === 'ugc') {
-    // UGC: clippers can join until all fixed slots are paid
     return this.approvedClipperCount < this.clipperSlots;
   }
   const completed = 1 - (this.views_left / this.views_purchased);
   return completed < 0.8;
 };
 
-// NEW METHOD: Approve a UGC clipper (pay ₦2,000 + ₦500 fee)
 campaignSchema.methods.approveUGCClipper = async function() {
   if (this.kind !== 'ugc') throw new Error('Only for UGC campaigns');
   if (this.approvedClipperCount >= this.clipperSlots) {
@@ -219,7 +257,6 @@ campaignSchema.methods.approveUGCClipper = async function() {
   this.approvedClipperCount += 1;
   this.budget_remaining -= totalCost;
 
-  // Auto-complete if all slots + views are done
   if (this.approvedClipperCount >= this.clipperSlots && this.views_left <= 0) {
     this.status = 'completed';
   }
@@ -228,7 +265,6 @@ campaignSchema.methods.approveUGCClipper = async function() {
   return this;
 };
 
-// Helper method to get PGC addon breakdown
 campaignSchema.methods.getPGCAddonBreakdown = function() {
   if (this.kind !== 'pgc') return null;
   
@@ -257,15 +293,25 @@ campaignSchema.methods.getPGCAddonBreakdown = function() {
 campaignSchema.methods.getAddonLabel = function(addonId) {
   const labels = {
     script: 'Creator provides script',
-    whatsapp: 'Creator + Post their WhatsApp',
-    ig: 'Collaborative - Creator Post on their IG',
-    tiktok: 'Creator Post on TikTok',
-    outdoor: 'Creator Outdoor shoot'
+    whatsapp: 'Post on WhatsApp',
+    ig: 'Post on Instagram',
+    tiktok: 'Post on TikTok',
+    outdoor: 'Outdoor shoot'
   };
   return labels[addonId] || addonId;
 };
 
-// Method to get total PGC price calculation
+campaignSchema.methods.getAddonInstructions = function(addonId) {
+  const instructions = {
+    script: 'Creator will write and provide the script',
+    whatsapp: 'Creator will post video on WhatsApp and provide screenshot as proof',
+    ig: 'Creator will post video on Instagram and provide the post URL',
+    tiktok: 'Creator will post video on TikTok and provide the video URL',
+    outdoor: 'Creator will shoot video outdoors at a location of their choice'
+  };
+  return instructions[addonId] || '';
+};
+
 campaignSchema.methods.calculatePGCPrice = function() {
   if (this.kind !== 'pgc') return null;
   
@@ -287,7 +333,6 @@ campaignSchema.methods.calculatePGCPrice = function() {
 };
 
 export default mongoose.model('Campaign', campaignSchema);
-
 // // File: express_backend/models/Campaign.js
 // import mongoose from 'mongoose';
 // const { Schema } = mongoose;

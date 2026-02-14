@@ -24,14 +24,50 @@ import { useRouter } from 'expo-router';
 const { width } = Dimensions.get('window');
 const API_BASE = 'https://clippapay.com/api';
 
-// Base price and add-ons
-const BASE_PGC_PRICE = 35000; // Base price for PGC campaign
+// Base price and add-ons with enhanced info
+const BASE_PGC_PRICE = 35000;
+
 const ADDON_OPTIONS = [
-  { id: 'script', label: 'Creator provides script', price: 1500, description: 'Creator will write the script for the video' },
-  { id: 'whatsapp', label: 'Creator + Post their WhatsApp', price: 5000, description: 'Creator will post video on WhatsApp' },
-  { id: 'ig', label: 'Collaborative - Creator Post on their IG', price: 10000, description: 'Creator will post on Instagram' },
-  { id: 'tiktok', label: 'Creator Post on TikTok', price: 10000, description: 'Creator will post on TikTok' },
-  // { id: 'outdoor', label: 'Creator Outdoor shoot', price: 10000, description: 'Outdoor video shoot' },
+  { 
+    id: 'script', 
+    label: 'Creator provides script', 
+    price: 1500, 
+    description: 'Creator will write the script for the video',
+    instructions: 'The creator will develop a creative script based on your brief. No need to provide a script.'
+  },
+  { 
+    id: 'whatsapp', 
+    label: 'Creator posts on WhatsApp', 
+    price: 5000, 
+    description: 'Creator will post video on WhatsApp and provide screenshot proof',
+    instructions: 'Creator will share the video on WhatsApp Status or groups. Screenshot required as proof.',
+    requiresScreenshot: true
+  },
+  { 
+    id: 'ig', 
+    label: 'Creator posts on Instagram', 
+    price: 10000, 
+    description: 'Creator will post on Instagram (Reel/Post)',
+    instructions: 'Creator will post on their Instagram account. Post URL required for verification.',
+    requiresUrl: true,
+    platform: 'instagram'
+  },
+  { 
+    id: 'tiktok', 
+    label: 'Creator posts on TikTok', 
+    price: 10000, 
+    description: 'Creator will post on TikTok',
+    instructions: 'Creator will post on their TikTok account. Video URL required for verification.',
+    requiresUrl: true,
+    platform: 'tiktok'
+  },
+  { 
+    id: 'outdoor', 
+    label: 'Outdoor/Location shoot', 
+    price: 10000, 
+    description: 'Creator will shoot at an outdoor location',
+    instructions: 'Creator will film at an outdoor location of their choice (park, street, beach, etc.)'
+  },
 ];
 
 const categoryOptions = [
@@ -39,6 +75,36 @@ const categoryOptions = [
   'Sports', 'Education', 'Politics', 'Religion', 'Business & Investment', 'Health & Fitness',
   'News & Media', 'Agriculture', 'Other',
 ];
+
+// Platform-specific instructions
+const platformInstructions = {
+  instagram: {
+    tips: [
+      'Make sure your Instagram account is public during posting',
+      'Use the required hashtags in the caption',
+      'Tag the brand account if provided',
+      'Keep the post up for at least 30 days'
+    ],
+    requirements: 'Instagram post URL (e.g., https://www.instagram.com/p/XXXXX/)'
+  },
+  tiktok: {
+    tips: [
+      'Ensure your TikTok account is public',
+      'Include required hashtags in description',
+      'Keep video public for verification',
+      'Video should be 15-60 seconds as specified'
+    ],
+    requirements: 'TikTok video URL (e.g., https://www.tiktok.com/@user/video/XXXXX)'
+  },
+  whatsapp: {
+    tips: [
+      'Post to WhatsApp Status or relevant groups',
+      'Take a clear screenshot showing the video was posted',
+      'Screenshot should include timestamp if possible'
+    ],
+    requirements: 'Screenshot of WhatsApp post'
+  }
+};
 
 export default function CreateAssetCreationCampaign() {
   const router = useRouter();
@@ -55,8 +121,18 @@ export default function CreateAssetCreationCampaign() {
     approvalCriteria: '',
     assets: [],
     cta_url: '',
-    addons: [], // Selected addon IDs
-    script: '', // User-provided script (if creator doesn't provide)
+    addons: [],
+    script: '',
+    
+    // NEW: Platform-specific fields
+    instagramHandle: '',
+    tiktokHandle: '',
+    brandTag: '', // @username to tag
+    postingInstructions: {
+      instagram: '',
+      tiktok: '',
+      whatsapp: ''
+    }
   });
 
   const [walletBalance, setWalletBalance] = useState(0);
@@ -96,7 +172,6 @@ export default function CreateAssetCreationCampaign() {
     }
   };
 
-  // Calculate total price based on base price and selected addons
   const selectedAddons = useMemo(() => {
     return ADDON_OPTIONS.filter(option => form.addons.includes(option.id));
   }, [form.addons]);
@@ -108,6 +183,11 @@ export default function CreateAssetCreationCampaign() {
     });
     return total;
   }, [selectedAddons]);
+
+  // Check if any posting addons are selected
+  const hasPostingAddons = useMemo(() => {
+    return form.addons.some(addon => ['whatsapp', 'ig', 'tiktok'].includes(addon));
+  }, [form.addons]);
 
   const updateForm = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -157,46 +237,91 @@ export default function CreateAssetCreationCampaign() {
     updateForm('assets', newAssets);
   };
 
-  const handleSubmit = async () => {
-    setError(null);
-    setMessage(null);
-
-    // Validation
-    if (!form.title) return setError('Please provide a campaign title.');
-    if (totalPrice > walletBalance) return setError(`Total price (₦${totalPrice.toLocaleString()}) exceeds wallet balance (₦${walletBalance.toLocaleString()}).`);
-    if (!form.brief) return setError('Please provide a creative brief.');
+  const validateForm = () => {
+    if (!form.title) return 'Please provide a campaign title.';
+    if (totalPrice > walletBalance) return `Total price (₦${totalPrice.toLocaleString()}) exceeds wallet balance (₦${walletBalance.toLocaleString()}).`;
+    if (!form.brief) return 'Please provide a creative brief.';
     
-    // If creator doesn't provide script, user must provide one
+    // Script validation
     if (!form.addons.includes('script') && !form.script.trim()) {
-      return setError('Please provide a script for the creator to follow.');
+      return 'Please provide a script for the creator to follow.';
+    }
+
+    // Platform handle validation if posting addons selected
+    if (form.addons.includes('ig') && !form.instagramHandle) {
+      return 'Please provide your Instagram handle (e.g., @brandname) for tagging';
+    }
+    
+    if (form.addons.includes('tiktok') && !form.tiktokHandle) {
+      return 'Please provide your TikTok handle (e.g., @brandname) for tagging';
+    }
+
+    return null;
+  };
+
+  const handleSubmit = async () => {
+    const validationError = validateForm();
+    if (validationError) {
+      setError(validationError);
+      return;
     }
 
     setLoading(true);
+    setError(null);
+    setMessage(null);
 
     try {
       const token = await getToken();
       if (!token) throw new Error('No auth token');
 
       const fd = new FormData();
+      
+      // Basic campaign info
       fd.append('title', form.title);
       fd.append('budget', totalPrice.toString());
       fd.append('kind', 'pgc');
-      fd.append('desiredVideos', '1'); // Always 1 video for this PGC
+      fd.append('desiredVideos', '1');
 
       // Addons
       fd.append('addons', JSON.stringify(form.addons));
       if (form.script) fd.append('script', form.script);
 
+      // Platform handles for tagging
+      if (form.instagramHandle) {
+        fd.append('instagramHandle', form.instagramHandle);
+      }
+      if (form.tiktokHandle) {
+        fd.append('tiktokHandle', form.tiktokHandle);
+      }
+      if (form.brandTag) {
+        fd.append('brandTag', form.brandTag);
+      }
+
+      // Custom posting instructions
+      if (form.postingInstructions.instagram) {
+        fd.append('postingInstructions[instagram]', form.postingInstructions.instagram);
+      }
+      if (form.postingInstructions.tiktok) {
+        fd.append('postingInstructions[tiktok]', form.postingInstructions.tiktok);
+      }
+      if (form.postingInstructions.whatsapp) {
+        fd.append('postingInstructions[whatsapp]', form.postingInstructions.whatsapp);
+      }
+
       // Guidelines
-      fd.append('hashtags', JSON.stringify(form.hashtags.split(',').map((s) => s.trim()).filter(Boolean)));
-      fd.append('directions', JSON.stringify(form.directions.split('\n').map((s) => s.trim()).filter(Boolean)));
+      fd.append('hashtags', JSON.stringify(
+        form.hashtags.split(',').map(s => s.trim()).filter(Boolean)
+      ));
+      fd.append('directions', JSON.stringify(
+        form.directions.split('\n').map(s => s.trim()).filter(Boolean)
+      ));
       fd.append('categories', JSON.stringify(form.categories));
       if (form.cta_url) fd.append('cta_url', form.cta_url);
 
       // PGC meta
       fd.append('brief', form.brief);
       fd.append('deliverables', JSON.stringify(
-        form.deliverables.split(/\n|,/).map((s) => s.trim()).filter(Boolean)
+        form.deliverables.split(/\n|,/).map(s => s.trim()).filter(Boolean)
       ));
       fd.append('captionTemplate', form.captionTemplate);
       fd.append('approvalCriteria', form.approvalCriteria);
@@ -211,7 +336,7 @@ export default function CreateAssetCreationCampaign() {
         });
       });
 
-      await axios.post(`${API_BASE}/campaigns/pgc`, fd, {
+      const response = await axios.post(`${API_BASE}/campaigns/pgc`, fd, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'multipart/form-data',
@@ -219,6 +344,23 @@ export default function CreateAssetCreationCampaign() {
       });
 
       setMessage('Campaign created successfully!');
+      
+      // Show success alert with next steps
+      Alert.alert(
+        'Success! 🎉',
+        'Your campaign has been created and is now live. Creators can now apply.',
+        [
+          {
+            text: 'View Campaign',
+            onPress: () => router.push(`/(dashboard_advertiser)/campaigns/${response.data.campaign._id}`)
+          },
+          {
+            text: 'OK',
+            onPress: () => router.push('/(dashboard_advertiser)/campaigns')
+          }
+        ]
+      );
+
     } catch (err) {
       console.error('Submit error:', err);
       setError(err.response?.data?.error || 'Failed to create campaign. Please try again.');
@@ -272,7 +414,7 @@ export default function CreateAssetCreationCampaign() {
           <Text style={styles.label}>Video Customization Options</Text>
           <View style={styles.pricingContainer}>
             <View style={styles.basePriceContainer}>
-              <Text style={styles.basePriceLabel}>Base UGC Video:</Text>
+              <Text style={styles.basePriceLabel}>Base Video:</Text>
               <Text style={styles.basePriceValue}>₦{BASE_PGC_PRICE.toLocaleString()}</Text>
             </View>
             
@@ -298,6 +440,9 @@ export default function CreateAssetCreationCampaign() {
                   <View style={styles.addonTextContainer}>
                     <Text style={styles.addonLabel}>{option.label}</Text>
                     <Text style={styles.addonDescription}>{option.description}</Text>
+                    {form.addons.includes(option.id) && (
+                      <Text style={styles.addonInstructions}>{option.instructions}</Text>
+                    )}
                   </View>
                 </View>
                 <Text style={styles.addonPrice}>+ ₦{option.price.toLocaleString()}</Text>
@@ -323,6 +468,104 @@ export default function CreateAssetCreationCampaign() {
             )}
           </View>
         </View>
+
+        {/* Platform-specific fields for posting addons */}
+        {hasPostingAddons && (
+          <View style={styles.platformSection}>
+            <Text style={styles.sectionTitle}>Posting Requirements</Text>
+            
+            {form.addons.includes('ig') && (
+              <View style={styles.platformCard}>
+                <View style={styles.platformHeader}>
+                  <Ionicons name="logo-instagram" size={24} color="#E4405F" />
+                  <Text style={styles.platformTitle}>Instagram Post</Text>
+                </View>
+                
+                <View style={styles.platformInputGroup}>
+                  <Text style={styles.platformLabel}>Your Instagram Handle *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={form.instagramHandle}
+                    onChangeText={(v) => updateForm('instagramHandle', v)}
+                    placeholder="@yourbrand"
+                    autoCapitalize="none"
+                  />
+                  <Text style={styles.helperText}>
+                    Creator will tag this handle in the post
+                  </Text>
+                </View>
+
+                <View style={styles.tipsContainer}>
+                  <Text style={styles.tipsTitle}>📱 Instagram Tips:</Text>
+                  {platformInstructions.instagram.tips.map((tip, idx) => (
+                    <Text key={idx} style={styles.tipText}>• {tip}</Text>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {form.addons.includes('tiktok') && (
+              <View style={styles.platformCard}>
+                <View style={styles.platformHeader}>
+                  <Ionicons name="logo-tiktok" size={24} color="#000000" />
+                  <Text style={styles.platformTitle}>TikTok Post</Text>
+                </View>
+                
+                <View style={styles.platformInputGroup}>
+                  <Text style={styles.platformLabel}>Your TikTok Handle *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={form.tiktokHandle}
+                    onChangeText={(v) => updateForm('tiktokHandle', v)}
+                    placeholder="@yourbrand"
+                    autoCapitalize="none"
+                  />
+                  <Text style={styles.helperText}>
+                    Creator will tag this handle in the video
+                  </Text>
+                </View>
+
+                <View style={styles.tipsContainer}>
+                  <Text style={styles.tipsTitle}>🎵 TikTok Tips:</Text>
+                  {platformInstructions.tiktok.tips.map((tip, idx) => (
+                    <Text key={idx} style={styles.tipText}>• {tip}</Text>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {form.addons.includes('whatsapp') && (
+              <View style={styles.platformCard}>
+                <View style={styles.platformHeader}>
+                  <Ionicons name="logo-whatsapp" size={24} color="#25D366" />
+                  <Text style={styles.platformTitle}>WhatsApp Post</Text>
+                </View>
+                
+                <View style={styles.tipsContainer}>
+                  <Text style={styles.tipsTitle}>💬 WhatsApp Tips:</Text>
+                  {platformInstructions.whatsapp.tips.map((tip, idx) => (
+                    <Text key={idx} style={styles.tipText}>• {tip}</Text>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Brand tag field (optional) */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Brand Tag (Optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={form.brandTag}
+                onChangeText={(v) => updateForm('brandTag', v)}
+                placeholder="@brandname"
+                autoCapitalize="none"
+              />
+              <Text style={styles.helperText}>
+                If you want creators to tag a specific account (e.g., your Instagram/TikTok handle)
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Script Input (Only if creator doesn't provide script) */}
         {!isScriptAddonSelected && (
@@ -417,7 +660,21 @@ export default function CreateAssetCreationCampaign() {
             onChangeText={(v) => updateForm('hashtags', v)}
             placeholder="#productdemo, #brandstory, #nigerianfashion"
           />
-          <Text style={styles.helperText}>Help creators use the right tags in captions</Text>
+          <Text style={styles.helperText}>Required hashtags for posts (if applicable)</Text>
+        </View>
+
+        {/* Caption Template */}
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Caption Template (Optional)</Text>
+          <TextInput
+            style={[styles.input, styles.multilineInput]}
+            value={form.captionTemplate}
+            onChangeText={(v) => updateForm('captionTemplate', v)}
+            placeholder="Provide a template for the caption creators should use..."
+            multiline
+            numberOfLines={4}
+          />
+          <Text style={styles.helperText}>Especially helpful for posting add-ons</Text>
         </View>
 
         {/* Approval Criteria */}
@@ -443,8 +700,9 @@ export default function CreateAssetCreationCampaign() {
             onChangeText={(v) => updateForm('cta_url', v)}
             placeholder="https://yourwebsite.com/shop-now"
             keyboardType="url"
+            autoCapitalize="none"
           />
-          <Text style={styles.helperText}>Link viewers will be directed to</Text>
+          <Text style={styles.helperText}>Link viewers will be directed to (include in caption)</Text>
         </View>
 
         {/* Reference Assets */}
@@ -634,6 +892,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
   },
+  addonInstructions: {
+    fontSize: 11,
+    color: '#4F46E5',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
   addonPrice: {
     fontSize: 14,
     fontWeight: '600',
@@ -658,6 +922,65 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     color: '#059669',
+  },
+  platformSection: {
+    marginBottom: 24,
+    padding: 16,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 16,
+  },
+  platformCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  platformHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  platformTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  platformInputGroup: {
+    marginBottom: 12,
+  },
+  platformLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
+    marginBottom: 4,
+  },
+  tipsContainer: {
+    backgroundColor: '#F3F4F6',
+    padding: 12,
+    borderRadius: 8,
+  },
+  tipsTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 6,
+  },
+  tipText: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 3,
+    lineHeight: 18,
   },
   assetHelpText: {
     fontSize: 14,

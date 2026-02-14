@@ -40,17 +40,42 @@ const applicationSchema = new mongoose.Schema({
   },
 
   // Timestamps for time-sensitive actions
-  offerSentAt: Date,           // When advertiser sent offer
-  offerExpiresAt: Date,        // 2 hours after offer_sent
-  acceptedAt: Date,            // When clipper accepted
-  submissionDeadline: Date,    // 3 days after acceptance
-  submittedAt: Date,           // When clipper submitted video
-  approvedAt: Date,            // When advertiser approved
+  offerSentAt: Date,
+  offerExpiresAt: Date,
+  acceptedAt: Date,
+  submissionDeadline: Date,
+  submittedAt: Date,
+  approvedAt: Date,
 
   // Content tracking
-  submissionUrl: String,
-  submissionVideo: String,     // Path to uploaded video
-  submissionFiles: [String],   // Additional files if needed
+  submissionVideo: String,           // Path to uploaded video
+  submissionFiles: [String],          // Additional files
+  
+  // NEW: Post URLs for different platforms (from add-ons)
+  postUrls: {
+    instagram: { type: String, default: '' },
+    tiktok: { type: String, default: '' },
+    whatsapp: { type: String, default: '' }, // For WhatsApp, this could be a placeholder or chat link
+    other: { type: String, default: '' }
+  },
+  
+  // NEW: Screenshots for platforms that require them (especially WhatsApp)
+  postScreenshots: [{
+    platform: { type: String, enum: ['whatsapp', 'instagram', 'tiktok', 'other'] },
+    url: String,
+    uploadedAt: { type: Date, default: Date.now }
+  }],
+
+  // NEW: Track which posting requirements have been fulfilled
+  postingFulfilled: {
+    whatsapp: { type: Boolean, default: false },
+    instagram: { type: Boolean, default: false },
+    tiktok: { type: Boolean, default: false },
+    script: { type: Boolean, default: false } // For script add-on
+  },
+
+  // NEW: Script provided by creator (if script add-on selected)
+  creatorScript: { type: String, default: '' },
 
   // Revision tracking (3 max)
   revisions: [{
@@ -65,7 +90,7 @@ const applicationSchema = new mongoose.Schema({
   maxRevisions: { type: Number, default: 3 },
 
   // Payment tracking
-  payoutAmount: Number,        // From campaign.clipper_cpm
+  payoutAmount: Number,
   transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
   paidAt: Date,
 
@@ -78,16 +103,16 @@ const applicationSchema = new mongoose.Schema({
   }],
 
   // Metadata
-  notes: String,               // Advertiser notes about the clipper
-  rating: { type: Number, min: 1, max: 5 }, // Final rating
-  review: String,              // Review after completion
+  notes: String,
+  rating: { type: Number, min: 1, max: 5 },
+  review: String,
 
 }, { timestamps: true });
 
 // Indexes for performance
 applicationSchema.index({ campaign: 1, status: 1 });
 applicationSchema.index({ clipper: 1, status: 1 });
-applicationSchema.index({ offerExpiresAt: 1 }, { expireAfterSeconds: 0 }); // TTL index for cleanup
+applicationSchema.index({ offerExpiresAt: 1 }, { expireAfterSeconds: 0 });
 
 // Methods
 applicationSchema.methods.sendOffer = function() {
@@ -118,15 +143,49 @@ applicationSchema.methods.rejectOffer = function() {
   return this.save();
 };
 
-applicationSchema.methods.submitVideo = function(url, files = []) {
+// NEW: Submit video with post URLs and screenshots
+applicationSchema.methods.submitVideo = function(videoPath, postData = {}) {
   if (this.status !== 'accepted' && this.status !== 'revision_requested') {
     throw new Error('Cannot submit: Not in working state');
   }
   
   this.status = 'submitted';
-  this.submissionUrl = url;
-  if (files.length) this.submissionFiles = files;
+  this.submissionVideo = videoPath;
   this.submittedAt = new Date();
+  
+  // Update post URLs if provided
+  if (postData.postUrls) {
+    this.postUrls = { ...this.postUrls, ...postData.postUrls };
+  }
+  
+  // Add screenshots if provided
+  if (postData.screenshots && postData.screenshots.length) {
+    this.postScreenshots = [...(this.postScreenshots || []), ...postData.screenshots];
+  }
+  
+  // Update posting fulfillment based on campaign requirements
+  if (this.campaign) {
+    const campaign = this.campaign;
+    if (campaign.postingRequirements) {
+      if (campaign.postingRequirements.whatsapp && this.postScreenshots?.some(s => s.platform === 'whatsapp')) {
+        this.postingFulfilled.whatsapp = true;
+      }
+      if (campaign.postingRequirements.instagram && this.postUrls?.instagram) {
+        this.postingFulfilled.instagram = true;
+      }
+      if (campaign.postingRequirements.tiktok && this.postUrls?.tiktok) {
+        this.postingFulfilled.tiktok = true;
+      }
+    }
+  }
+  
+  return this.save();
+};
+
+// NEW: Add creator script
+applicationSchema.methods.addCreatorScript = function(script) {
+  this.creatorScript = script;
+  this.postingFulfilled.script = true;
   return this.save();
 };
 
@@ -148,10 +207,34 @@ applicationSchema.methods.requestRevision = function(notes, files = []) {
   return this.save();
 };
 
+// NEW: Check if all posting requirements are fulfilled
+applicationSchema.methods.checkPostingRequirements = function() {
+  if (!this.campaign) return true;
+  
+  const campaign = this.campaign;
+  const requirements = campaign.postingRequirements || {};
+  const fulfilled = this.postingFulfilled || {};
+  
+  if (requirements.whatsapp && !fulfilled.whatsapp) {
+    throw new Error('WhatsApp posting proof (screenshot) is required');
+  }
+  if (requirements.instagram && !fulfilled.instagram) {
+    throw new Error('Instagram post URL is required');
+  }
+  if (requirements.tiktok && !fulfilled.tiktok) {
+    throw new Error('TikTok post URL is required');
+  }
+  
+  return true;
+};
+
 applicationSchema.methods.approve = async function() {
   if (this.status !== 'submitted' && this.status !== 'revision_requested') {
     throw new Error('Cannot approve: No submission to approve');
   }
+  
+  // Check if all posting requirements are met
+  this.checkPostingRequirements();
   
   this.status = 'approved';
   this.approvedAt = new Date();
@@ -168,19 +251,14 @@ applicationSchema.methods.approve = async function() {
 };
 
 applicationSchema.methods.processPayment = async function() {
-  // Get campaign to know payout amount
   const campaign = await mongoose.model('Campaign').findById(this.campaign);
   if (!campaign) throw new Error('Campaign not found');
   
-  const payoutAmount = campaign.clipper_cpm; // Already stored as total payout
+  const payoutAmount = campaign.clipper_cpm;
   
-  // Find wallets
-  const platformWallet = await mongoose.model('Wallet').findOne({ user: process.env.PLATFORM_USER_ID });
   const clipperWallet = await mongoose.model('Wallet').findOne({ user: this.clipper });
-  
   if (!clipperWallet) throw new Error('Clipper wallet not found');
   
-  // Create transaction
   const transaction = await mongoose.model('Transaction').create({
     user: this.clipper,
     type: 'credit',
@@ -190,14 +268,51 @@ applicationSchema.methods.processPayment = async function() {
     reference: `APP_${this._id}_${Date.now()}`
   });
   
-  // Credit clipper
   clipperWallet.balance += payoutAmount;
   await clipperWallet.save();
   
-  // Note: Platform fee already deducted at campaign creation
-  // So full clipper_cpm goes to clipper
-  
   return { success: true, transactionId: transaction._id };
+};
+
+// Helper method to get posting instructions
+applicationSchema.methods.getPendingPostingRequirements = function() {
+  if (!this.campaign) return [];
+  
+  const campaign = this.campaign;
+  const requirements = campaign.postingRequirements || {};
+  const fulfilled = this.postingFulfilled || {};
+  const pending = [];
+  
+  if (requirements.whatsapp && !fulfilled.whatsapp) {
+    pending.push({
+      platform: 'whatsapp',
+      type: 'screenshot',
+      instruction: 'Upload a screenshot of your WhatsApp post'
+    });
+  }
+  if (requirements.instagram && !fulfilled.instagram) {
+    pending.push({
+      platform: 'instagram',
+      type: 'url',
+      instruction: 'Provide the URL of your Instagram post'
+    });
+  }
+  if (requirements.tiktok && !fulfilled.tiktok) {
+    pending.push({
+      platform: 'tiktok',
+      type: 'url',
+      instruction: 'Provide the URL of your TikTok video'
+    });
+  }
+  if (campaign.pgcAddons?.includes('script') && !fulfilled.script) {
+    pending.push({
+      platform: 'script',
+      type: 'text',
+      instruction: 'Write the script for your video'
+    });
+  }
+  
+  return pending;
 };
 
 export default mongoose.model('Application', applicationSchema);
