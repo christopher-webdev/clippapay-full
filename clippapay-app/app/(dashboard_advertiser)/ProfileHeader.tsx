@@ -15,7 +15,11 @@ import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { useFocusEffect } from '@react-navigation/native'; // ← Add this import
+import { useFocusEffect } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
+
+// Import notification hook
+import { useNotifications } from '../hooks/useNotifications';
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
@@ -23,12 +27,20 @@ const API_BASE = 'https://clippapay.com/api';
 
 const DEFAULT_PROFILE = require('../../assets/images/user-default.jpg');
 
-export default function ProfileHeader() {
+interface ProfileHeaderProps {
+  onNotificationPress?: () => void;
+}
+
+export default function ProfileHeader({ onNotificationPress }: ProfileHeaderProps) {
+  const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [imageError, setImageError] = useState(false);
+  
+  // Use notifications hook
+  const { unreadCount, refresh: refreshNotifications } = useNotifications();
 
   const getToken = async () => {
     let token: string | null = null;
@@ -82,12 +94,23 @@ export default function ProfileHeader() {
   useFocusEffect(
     useCallback(() => {
       fetchData();
+      // Also refresh notifications count
+      refreshNotifications();
     }, [])
   );
 
   const handleImageError = () => {
     console.log('Failed to load profile image:', profileImage);
     setImageError(true);
+  };
+
+  const handleNotificationPress = () => {
+    if (onNotificationPress) {
+      onNotificationPress();
+    } else {
+      // Default navigation to notifications screen
+      router.push('/(dashboard)/notifications');
+    }
   };
 
   if (loading) {
@@ -100,7 +123,9 @@ export default function ProfileHeader() {
 
   const displayName = user?.company
     ? `${user.company || ''}`.trim()
-    : 'Hello, Advertiser!';
+    : user?.firstName 
+      ? `Hello, ${user.firstName}!`
+      : 'Hello, Advertiser!';
 
   const imageSource = imageError || !profileImage
     ? DEFAULT_PROFILE
@@ -119,19 +144,32 @@ export default function ProfileHeader() {
         <Text style={styles.greeting}>Good Evening!</Text>
         <Text style={styles.name}>{displayName}</Text>
         <View style={styles.advertiserBadge}>
-          <Text style={styles.advertiserText}>Advertiser</Text>
+          <Text style={styles.advertiserText}>
+            {user?.role === 'advertiser' ? 'Advertiser' : 
+             user?.role === 'clipper' ? 'Creator' : 
+             user?.role?.toUpperCase() || 'User'}
+          </Text>
         </View>
       </View>
 
-      <TouchableOpacity style={styles.notificationContainer}>
+      <TouchableOpacity 
+        style={styles.notificationContainer}
+        onPress={handleNotificationPress}
+        activeOpacity={0.7}
+      >
         <Ionicons name="notifications-outline" size={21 * scale} color="#000" />
-        <View style={styles.notificationDot} />
+        {unreadCount > 0 && (
+          <View style={styles.notificationBadge}>
+            <Text style={styles.notificationCount}>
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </Text>
+          </View>
+        )}
       </TouchableOpacity>
     </View>
   );
 }
 
-// Styles remain exactly the same as before
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
@@ -148,6 +186,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+    zIndex: 1000,
   },
   profileImage: {
     width: 58 * scale,
@@ -157,6 +196,7 @@ const styles = StyleSheet.create({
   },
   textContainer: {
     marginLeft: 14 * scale,
+    flex: 1,
   },
   greeting: {
     fontWeight: '400',
@@ -186,21 +226,29 @@ const styles = StyleSheet.create({
     color: '#F8312F',
   },
   notificationContainer: {
-    position: 'absolute',
-    right: 28 * scale,
-    top: 50 * scale,
-    width: 27 * scale,
-    height: 27 * scale,
+    position: 'relative',
+    width: 40 * scale,
+    height: 40 * scale,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  notificationDot: {
+  notificationBadge: {
     position: 'absolute',
-    top: 3 * scale,
-    right: 4 * scale,
-    width: 8 * scale,
-    height: 8 * scale,
-    borderRadius: 4 * scale,
+    top: 2 * scale,
+    right: 2 * scale,
+    minWidth: 18 * scale,
+    height: 18 * scale,
+    borderRadius: 9 * scale,
     backgroundColor: '#F8312F',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4 * scale,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  notificationCount: {
+    color: '#FFFFFF',
+    fontSize: 10 * scale,
+    fontWeight: '700',
   },
 });

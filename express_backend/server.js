@@ -32,12 +32,16 @@ import adminSubmissionsRouter from './routes/adminSubmissions.js';
 import userRoutes from './routes/users.js';
 import adminCampaignsRouter from './routes/adminCampaigns.js';
 import clipRoutes from './routes/clips.js';
+import applicationsRoutes from '.routes/applications.js'
+
 
 // Model for seeding
-import SubscriptionPlan from './models/SubscriptionPlan.js';
 import seedAdWorkers from './seeds/createAdWorkers.js';
 import cleanupOldVideos from './scripts/cleanupOldVideos.js';
 import telegramRouter from './routes/telegram.js';
+
+import cron from 'node-cron';
+import { checkExpiredOffers } from './jobs/checkExpiredOffers.js';
 
 
 dotenv.config();
@@ -52,6 +56,7 @@ if (!fs.existsSync(uploadsRoot)) {
   fs.mkdirSync(uploadsRoot, { recursive: true });
   console.log('Created uploads directory');
 }
+
 
 // 2. Middleware setup
 app.use(cookieParser());
@@ -170,6 +175,13 @@ app.use('/api/admin/withdrawals', adminWithdrawalsRouter);
 app.use('/api/clip', clipRoutes);
 app.use('/api/user', userRoutes);
 app.use('/telegram', telegramRouter);
+app.use('/api/applications', applicationsRoutes);
+
+
+// Run every 5 minutes
+cron.schedule('*/5 * * * *', async () => {
+  await checkExpiredOffers();
+});
 
 // 6. Error handling middleware (should be last)
 app.use((err, req, res, next) => {
