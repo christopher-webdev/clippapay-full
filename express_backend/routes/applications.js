@@ -1,6 +1,7 @@
 // routes/applications.js
 import express from 'express';
 import Application from '../models/Application.js';
+import ClipperProfile from '../model/ClipperProfile';
 import Campaign from '../models/Campaign.js';
 import User from '../models/User.js';
 import Wallet from '../models/Wallet.js';
@@ -446,62 +447,135 @@ router.post('/:applicationId/script',
  * Get all applications for advertiser's campaigns
  * GET /api/applications/advertiser/all
  */
-router.get('/advertiser/all', requireAuth, requireAdvertiser, async (req, res) => {
-  try {
-    const { status, campaignId, page, limit } = req.query;
-    
-    let query = { advertiser: req.user._id };
-    
-    if (status) {
-      query.status = status;
-    }
-    
-    if (campaignId) {
-      query.campaign = campaignId;
-    }
+router.get(
+  '/advertiser/all',
+  requireAuth,
+  requireAdvertiser,
+  async (req, res) => {
+    try {
+      const { status, campaignId, page, limit } = req.query;
 
-    // If page and limit are provided, use pagination
-    if (page && limit) {
-      const skip = (parseInt(page) - 1) * parseInt(limit);
+      let query = { advertiser: req.user._id };
 
-      const applications = await Application.find(query)
-        .populate({
+      if (status) {
+        query.status = status;
+      }
+
+      if (campaignId) {
+        query.campaign = campaignId;
+      }
+
+      const populateConfig = [
+        {
           path: 'campaign',
-          select: 'title kind clipper_cpm desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc.brief thumb_url'
-        })
-        .populate('clipper', 'firstName lastName email rating isPremiumCreator profileImage')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit));
+          select:
+            'title kind clipper_cpm budget_total desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc.brief thumb_url',
+        },
+        {
+          path: 'clipper',
+          select: 'firstName lastName email rating isPremiumCreator',
+          populate: {
+            path: 'clipperProfile',
+            select:
+              'profileImage bio categories ratePerVideo expectedDelivery completedProjects',
+          },
+        },
+      ];
 
-      const total = await Application.countDocuments(query);
+      // Pagination
+      if (page && limit) {
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const skip = (pageNum - 1) * limitNum;
 
-      return res.json({
-        applications,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          pages: Math.ceil(total / parseInt(limit))
-        }
-      });
-    } else {
-      // If no pagination params, return just the array
+        const applications = await Application.find(query)
+          .populate(populateConfig)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum);
+
+        const total = await Application.countDocuments(query);
+
+        return res.json({
+          applications,
+          pagination: {
+            page: pageNum,
+            limit: limitNum,
+            total,
+            pages: Math.ceil(total / limitNum),
+          },
+        });
+      }
+
+      // No pagination
       const applications = await Application.find(query)
-        .populate({
-          path: 'campaign',
-          select: 'title kind clipper_cpm desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc.brief thumb_url'
-        })
-        .populate('clipper', 'firstName lastName email rating isPremiumCreator profileImage')
+        .populate(populateConfig)
         .sort({ createdAt: -1 });
 
       return res.json(applications);
+    } catch (err) {
+      console.error('Error fetching advertiser applications:', err);
+      res.status(500).json({ error: 'Failed to fetch applications' });
     }
-  } catch (err) {
-    console.error('Error fetching advertiser applications:', err);
-    res.status(500).json({ error: 'Failed to fetch applications' });
   }
-});
+);
+
+// router.get('/advertiser/all', requireAuth, requireAdvertiser, async (req, res) => {
+//   try {
+//     const { status, campaignId, page, limit } = req.query;
+    
+//     let query = { advertiser: req.user._id };
+    
+//     if (status) {
+//       query.status = status;
+//     }
+    
+//     if (campaignId) {
+//       query.campaign = campaignId;
+//     }
+
+//     // If page and limit are provided, use pagination
+//     if (page && limit) {
+//       const skip = (parseInt(page) - 1) * parseInt(limit);
+
+//       const applications = await Application.find(query)
+//         .populate({
+//           path: 'campaign',
+//           select: 'title kind clipper_cpm desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc.brief thumb_url'
+//         })
+//         .populate('clipper', 'firstName lastName email rating isPremiumCreator profileImage')
+//         .sort({ createdAt: -1 })
+//         .skip(skip)
+//         .limit(parseInt(limit));
+
+//       const total = await Application.countDocuments(query);
+
+//       return res.json({
+//         applications,
+//         pagination: {
+//           page: parseInt(page),
+//           limit: parseInt(limit),
+//           total,
+//           pages: Math.ceil(total / parseInt(limit))
+//         }
+//       });
+//     } else {
+//       // If no pagination params, return just the array
+//       const applications = await Application.find(query)
+//         .populate({
+//           path: 'campaign',
+//           select: 'title kind clipper_cpm desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc.brief thumb_url'
+//         })
+//         .populate('clipper', 'firstName lastName email rating isPremiumCreator profileImage')
+//         .sort({ createdAt: -1 });
+
+//       return res.json(applications);
+//     }
+//   } catch (err) {
+//     console.error('Error fetching advertiser applications:', err);
+//     res.status(500).json({ error: 'Failed to fetch applications' });
+//   }
+// });
 /**
  * Get count of pending applications for advertiser (for badge)
  * GET /api/applications/advertiser/pending-count

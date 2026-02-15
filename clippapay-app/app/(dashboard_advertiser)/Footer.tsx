@@ -43,12 +43,8 @@ const TAB_ITEMS = [
     activeIcon: 'document-text',
     routes: [
       '/(dashboard_advertiser)/applications',
-      '/(dashboard_advertiser)/ApplicationsList',
-      '/applications',
-      '/ApplicationsList',
-      '/(dashboard_advertiser)/applications/',
     ],
-    showBadge: true, // Flag to show badge for this tab
+    showBadge: true,
   },
   {
     name: 'My Campaigns',
