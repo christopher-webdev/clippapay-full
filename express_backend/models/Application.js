@@ -1,318 +1,365 @@
 // models/Application.js
 import mongoose from 'mongoose';
 
-const applicationSchema = new mongoose.Schema({
-  // Core references
-  campaign: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Campaign', 
-    required: true 
-  },
-  clipper: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
-  },
-  advertiser: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
-  },
+const { Schema } = mongoose;
 
-  // Application status tracking
+const applicationSchema = new Schema({
+
+  // ─────────────────────────────
+  // CORE REFERENCES
+  // ─────────────────────────────
+  campaign: { type: Schema.Types.ObjectId, ref: 'Campaign', required: true },
+  clipper: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  advertiser: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+
+  // ─────────────────────────────
+  // STATUS MACHINE
+  // ─────────────────────────────
   status: {
     type: String,
     enum: [
-      'pending',           // Initially applied
-      'shortlisted',       // Advertiser wants to work with them
-      'offer_sent',        // Job offer sent to clipper
-      'accepted',          // Clipper accepted the job
-      'rejected',          // Clipper rejected the offer
-      'expired',           // Offer expired (2hrs)
-      'working',           // Actively creating content
-      'submitted',         // Video submitted
-      'revision_requested', // Advertiser asked for changes
-      'approved',          // Advertiser approved (payout sent)
-      'completed',         // Final state
-      'cancelled'          // Cancelled by either party
+      'pending',
+      'shortlisted',
+      'offer_sent',
+      'accepted',
+      'rejected',
+      'expired',
+      'working',
+      'submitted',
+      'revision_requested',
+      'approved',
+      'completed',
+      'cancelled'
     ],
     default: 'pending'
   },
 
-  // Timestamps for time-sensitive actions
+  // ─────────────────────────────
+  // OFFER TIMERS
+  // ─────────────────────────────
   offerSentAt: Date,
   offerExpiresAt: Date,
   acceptedAt: Date,
-  submissionDeadline: Date,
-  submittedAt: Date,
-  approvedAt: Date,
 
-  // Content tracking
-  submissionVideo: String,           // Path to uploaded video
-  submissionFiles: [String],          // Additional files
-  
-  // NEW: Post URLs for different platforms (from add-ons)
+  // ─────────────────────────────
+  // SCRIPT DEVELOPMENT
+  // ─────────────────────────────
+  creatorScript: { type: String, default: '' },
+
+  scriptStatus: {
+    type: String,
+    enum: ['not_required','pending_review','changes_requested','approved'],
+    default: 'not_required'
+  },
+
+  scriptSubmittedAt: Date,
+  scriptApprovedAt: Date,
+  scriptExpiresAt: Date, // 2-hour window
+
+  scriptRevisions: [{
+    submittedAt: Date,
+    content: String,
+    feedback: String,
+    status: { type: String, enum: ['pending_review','changes_requested','approved'] }
+  }],
+
+  // ─────────────────────────────
+  // CONTENT SUBMISSION
+  // ─────────────────────────────
+  submissionVideo: String,
+  submissionFiles: [String],
+  submittedAt: Date,
+  submissionDeadline: Date,
+
+  // Posting URLs
   postUrls: {
     instagram: { type: String, default: '' },
     tiktok: { type: String, default: '' },
-    whatsapp: { type: String, default: '' }, // For WhatsApp, this could be a placeholder or chat link
-    other: { type: String, default: '' }
+    whatsapp: { type: String, default: '' }
   },
-  
-  // NEW: Screenshots for platforms that require them (especially WhatsApp)
+
+  // Screenshots (WhatsApp proof etc.)
   postScreenshots: [{
-    platform: { type: String, enum: ['whatsapp', 'instagram', 'tiktok', 'other'] },
+    platform: { type: String, enum: ['whatsapp','instagram','tiktok'] },
     url: String,
     uploadedAt: { type: Date, default: Date.now }
   }],
 
-  // NEW: Track which posting requirements have been fulfilled
-  postingFulfilled: {
-    whatsapp: { type: Boolean, default: false },
-    instagram: { type: Boolean, default: false },
-    tiktok: { type: Boolean, default: false },
-    script: { type: Boolean, default: false } // For script add-on
-  },
-
-  // NEW: Script provided by creator (if script add-on selected)
-  creatorScript: { type: String, default: '' },
-
-  // Revision tracking (3 max)
+  // Revision tracking (VIDEO only — max 3)
   revisions: [{
     requestedAt: Date,
     notes: String,
-    files: [String],
     respondedAt: Date,
-    responseNotes: String,
-    responseFiles: [String]
+    responseNotes: String
   }],
+
   revisionCount: { type: Number, default: 0 },
   maxRevisions: { type: Number, default: 3 },
 
-  // Payment tracking
+  // ─────────────────────────────
+  // PAYMENT TRACKING
+  // ─────────────────────────────
   payoutAmount: Number,
-  transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+  transactionId: { type: Schema.Types.ObjectId, ref: 'Transaction' },
   paidAt: Date,
 
-  // Messages/comments
-  messages: [{
-    sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    content: String,
-    files: [String],
-    createdAt: { type: Date, default: Date.now }
-  }],
-
-  // Metadata
-  notes: String,
+  // ─────────────────────────────
+  // REVIEW & RATING
+  // ─────────────────────────────
   rating: { type: Number, min: 1, max: 5 },
   review: String,
 
 }, { timestamps: true });
 
-// Indexes for performance
+
+// ─────────────────────────────
+// INDEXES
+// ─────────────────────────────
 applicationSchema.index({ campaign: 1, status: 1 });
 applicationSchema.index({ clipper: 1, status: 1 });
-applicationSchema.index({ offerExpiresAt: 1 }, { expireAfterSeconds: 0 });
+applicationSchema.index({ offerExpiresAt: 1 });
 
-// Methods
-applicationSchema.methods.sendOffer = function() {
+
+// ─────────────────────────────
+// OFFER METHODS
+// ─────────────────────────────
+applicationSchema.methods.sendOffer = function () {
   this.status = 'offer_sent';
   this.offerSentAt = new Date();
   this.offerExpiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours
   return this.save();
 };
 
-applicationSchema.methods.acceptOffer = function() {
+applicationSchema.methods.acceptOffer = async function () {
   if (this.status !== 'offer_sent') {
-    throw new Error('Cannot accept: No active offer');
+    throw new Error('No active offer to accept');
   }
+
   if (new Date() > this.offerExpiresAt) {
     this.status = 'expired';
-    throw new Error('Offer has expired');
+    await this.save();
+    throw new Error('Offer expired');
   }
-  
+
   this.status = 'accepted';
   this.acceptedAt = new Date();
-  this.submissionDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
+
+  const campaign = await mongoose.model('Campaign').findById(this.campaign);
+
+  // If script add-on selected
+  if (campaign.kind === 'pgc' && campaign.pgcAddons.includes('script')) {
+    this.scriptStatus = 'pending_review';
+    this.scriptExpiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  } else {
+    this.scriptStatus = 'not_required';
+    this.status = 'working';
+    this.submissionDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  }
+
   return this.save();
 };
 
-applicationSchema.methods.rejectOffer = function() {
-  if (this.status !== 'offer_sent') return;
+applicationSchema.methods.rejectOffer = function () {
   this.status = 'rejected';
   return this.save();
 };
 
-// NEW: Submit video with post URLs and screenshots
-applicationSchema.methods.submitVideo = function(videoPath, postData = {}) {
-  if (this.status !== 'accepted' && this.status !== 'revision_requested') {
-    throw new Error('Cannot submit: Not in working state');
+
+// ─────────────────────────────
+// SCRIPT METHODS
+// ─────────────────────────────
+applicationSchema.methods.submitScript = function (content) {
+  if (this.scriptStatus === 'approved') {
+    throw new Error('Script already approved');
   }
-  
-  this.status = 'submitted';
+
+  if (this.scriptExpiresAt && new Date() > this.scriptExpiresAt) {
+    this.status = 'expired';
+    throw new Error('Script submission window expired');
+  }
+
+  this.creatorScript = content;
+  this.scriptSubmittedAt = new Date();
+  this.scriptStatus = 'pending_review';
+
+  this.scriptRevisions.push({
+    submittedAt: new Date(),
+    content,
+    status: 'pending_review'
+  });
+
+  return this.save();
+};
+
+applicationSchema.methods.requestScriptChanges = function (feedback) {
+  if (this.scriptStatus !== 'pending_review') {
+    throw new Error('No script to review');
+  }
+
+  this.scriptStatus = 'changes_requested';
+  this.scriptExpiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+  const last = this.scriptRevisions[this.scriptRevisions.length - 1];
+  if (last) {
+    last.feedback = feedback;
+    last.status = 'changes_requested';
+  }
+
+  return this.save();
+};
+
+applicationSchema.methods.approveScript = function () {
+  if (this.scriptStatus !== 'pending_review') {
+    throw new Error('No script pending approval');
+  }
+
+  this.scriptStatus = 'approved';
+  this.scriptApprovedAt = new Date();
+  this.status = 'working';
+  this.submissionDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+
+  const last = this.scriptRevisions[this.scriptRevisions.length - 1];
+  if (last) last.status = 'approved';
+
+  return this.save();
+};
+
+
+// ─────────────────────────────
+// VIDEO SUBMISSION
+// ─────────────────────────────
+applicationSchema.methods.submitVideo = function (videoPath, postData = {}) {
+  if (!['working','revision_requested'].includes(this.status)) {
+    throw new Error('Not allowed to submit');
+  }
+
+  if (new Date() > this.submissionDeadline) {
+    this.status = 'expired';
+    throw new Error('Submission deadline expired');
+  }
+
   this.submissionVideo = videoPath;
   this.submittedAt = new Date();
-  
-  // Update post URLs if provided
+  this.status = 'submitted';
+
   if (postData.postUrls) {
     this.postUrls = { ...this.postUrls, ...postData.postUrls };
   }
-  
-  // Add screenshots if provided
-  if (postData.screenshots && postData.screenshots.length) {
-    this.postScreenshots = [...(this.postScreenshots || []), ...postData.screenshots];
+
+  if (postData.screenshots?.length) {
+    this.postScreenshots.push(...postData.screenshots);
   }
-  
-  // Update posting fulfillment based on campaign requirements
-  if (this.campaign) {
-    const campaign = this.campaign;
-    if (campaign.postingRequirements) {
-      if (campaign.postingRequirements.whatsapp && this.postScreenshots?.some(s => s.platform === 'whatsapp')) {
-        this.postingFulfilled.whatsapp = true;
-      }
-      if (campaign.postingRequirements.instagram && this.postUrls?.instagram) {
-        this.postingFulfilled.instagram = true;
-      }
-      if (campaign.postingRequirements.tiktok && this.postUrls?.tiktok) {
-        this.postingFulfilled.tiktok = true;
-      }
-    }
-  }
-  
+
   return this.save();
 };
 
-// NEW: Add creator script
-applicationSchema.methods.addCreatorScript = function(script) {
-  this.creatorScript = script;
-  this.postingFulfilled.script = true;
-  return this.save();
-};
 
-applicationSchema.methods.requestRevision = function(notes, files = []) {
+// ─────────────────────────────
+// REVISION REQUEST
+// ─────────────────────────────
+applicationSchema.methods.requestRevision = function (notes) {
   if (this.revisionCount >= this.maxRevisions) {
     throw new Error('Maximum revisions reached');
   }
+
   if (this.status !== 'submitted') {
-    throw new Error('Cannot request revision: No submission to review');
+    throw new Error('No submission to revise');
   }
-  
+
   this.revisions.push({
     requestedAt: new Date(),
-    notes,
-    files
+    notes
   });
+
   this.revisionCount += 1;
   this.status = 'revision_requested';
+
   return this.save();
 };
 
-// NEW: Check if all posting requirements are fulfilled
-applicationSchema.methods.checkPostingRequirements = function() {
-  if (!this.campaign) return true;
-  
-  const campaign = this.campaign;
-  const requirements = campaign.postingRequirements || {};
-  const fulfilled = this.postingFulfilled || {};
-  
-  if (requirements.whatsapp && !fulfilled.whatsapp) {
-    throw new Error('WhatsApp posting proof (screenshot) is required');
+
+// ─────────────────────────────
+// POSTING VALIDATION (PGC)
+// ─────────────────────────────
+applicationSchema.methods.validatePostingRequirements = async function () {
+  const campaign = await mongoose.model('Campaign').findById(this.campaign);
+
+  if (!campaign.postingRequirements) return true;
+
+  const reqs = campaign.postingRequirements;
+
+  if (reqs.instagram && !this.postUrls.instagram) {
+    throw new Error('Instagram URL required');
   }
-  if (requirements.instagram && !fulfilled.instagram) {
-    throw new Error('Instagram post URL is required');
+
+  if (reqs.tiktok && !this.postUrls.tiktok) {
+    throw new Error('TikTok URL required');
   }
-  if (requirements.tiktok && !fulfilled.tiktok) {
-    throw new Error('TikTok post URL is required');
+
+  if (reqs.whatsapp) {
+    const hasScreenshot = this.postScreenshots.some(s => s.platform === 'whatsapp');
+    if (!hasScreenshot) {
+      throw new Error('WhatsApp screenshot required');
+    }
   }
-  
+
   return true;
 };
 
-applicationSchema.methods.approve = async function() {
-  if (this.status !== 'submitted' && this.status !== 'revision_requested') {
-    throw new Error('Cannot approve: No submission to approve');
-  }
-  
-  // Check if all posting requirements are met
-  this.checkPostingRequirements();
-  
-  this.status = 'approved';
-  this.approvedAt = new Date();
-  
-  // Trigger payment
-  const result = await this.processPayment();
-  if (result.success) {
-    this.status = 'completed';
-    this.paidAt = new Date();
-    this.transactionId = result.transactionId;
-  }
-  
-  return this.save();
-};
 
-applicationSchema.methods.processPayment = async function() {
-  const campaign = await mongoose.model('Campaign').findById(this.campaign);
-  if (!campaign) throw new Error('Campaign not found');
-  
-  const payoutAmount = campaign.clipper_cpm;
-  
-  const clipperWallet = await mongoose.model('Wallet').findOne({ user: this.clipper });
-  if (!clipperWallet) throw new Error('Clipper wallet not found');
-  
-  const transaction = await mongoose.model('Transaction').create({
+// ─────────────────────────────
+// FINAL APPROVAL + PAYMENT
+// ─────────────────────────────
+applicationSchema.methods.approveAndPay = async function () {
+  if (!['submitted','revision_requested'].includes(this.status)) {
+    throw new Error('No submission to approve');
+  }
+
+  await this.validatePostingRequirements();
+
+  const Campaign = mongoose.model('Campaign');
+  const Wallet = mongoose.model('Wallet');
+  const Transaction = mongoose.model('Transaction');
+  const User = mongoose.model('User');
+
+  const campaign = await Campaign.findById(this.campaign);
+  const advertiserWallet = await Wallet.findOne({ user: campaign.advertiser });
+  const clipperWallet = await Wallet.findOne({ user: this.clipper });
+  const platformUser = await User.findOne({ role: 'platform' });
+  const platformWallet = await Wallet.findOne({ user: platformUser._id });
+
+  const payout = campaign.clipper_cpm;
+  const totalCost = campaign.rate_per_1000;
+  const platformFee = totalCost - payout;
+
+  if (advertiserWallet.escrowLocked < totalCost) {
+    throw new Error('Insufficient escrow');
+  }
+
+  // Release escrow
+  await advertiserWallet.releaseEscrow(totalCost);
+
+  // Split
+  await clipperWallet.credit(payout);
+  if (platformFee > 0) await platformWallet.credit(platformFee);
+
+  // Campaign accounting
+  await campaign.approveVideo(1);
+
+  const tx = await Transaction.create({
     user: this.clipper,
     type: 'credit',
-    amount: payoutAmount,
-    description: `Payment for ${campaign.title}`,
-    status: 'completed',
-    reference: `APP_${this._id}_${Date.now()}`
+    amount: payout,
+    campaign: campaign._id,
+    description: `PGC payment for ${campaign.title}`
   });
-  
-  clipperWallet.balance += payoutAmount;
-  await clipperWallet.save();
-  
-  return { success: true, transactionId: transaction._id };
-};
 
-// Helper method to get posting instructions
-applicationSchema.methods.getPendingPostingRequirements = function() {
-  if (!this.campaign) return [];
-  
-  const campaign = this.campaign;
-  const requirements = campaign.postingRequirements || {};
-  const fulfilled = this.postingFulfilled || {};
-  const pending = [];
-  
-  if (requirements.whatsapp && !fulfilled.whatsapp) {
-    pending.push({
-      platform: 'whatsapp',
-      type: 'screenshot',
-      instruction: 'Upload a screenshot of your WhatsApp post'
-    });
-  }
-  if (requirements.instagram && !fulfilled.instagram) {
-    pending.push({
-      platform: 'instagram',
-      type: 'url',
-      instruction: 'Provide the URL of your Instagram post'
-    });
-  }
-  if (requirements.tiktok && !fulfilled.tiktok) {
-    pending.push({
-      platform: 'tiktok',
-      type: 'url',
-      instruction: 'Provide the URL of your TikTok video'
-    });
-  }
-  if (campaign.pgcAddons?.includes('script') && !fulfilled.script) {
-    pending.push({
-      platform: 'script',
-      type: 'text',
-      instruction: 'Write the script for your video'
-    });
-  }
-  
-  return pending;
+  this.status = 'completed';
+  this.paidAt = new Date();
+  this.transactionId = tx._id;
+  this.payoutAmount = payout;
+
+  return this.save();
 };
 
 export default mongoose.model('Application', applicationSchema);

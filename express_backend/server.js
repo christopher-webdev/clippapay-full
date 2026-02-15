@@ -33,6 +33,9 @@ import userRoutes from './routes/users.js';
 import adminCampaignsRouter from './routes/adminCampaigns.js';
 import clipRoutes from './routes/clips.js';
 import applicationsRoutes from "./routes/applications.js";
+import applicationsScriptRouter from './routes/applicationsScript.js';
+import applicationsVideoRouter from './routes/applicationsVideo.js';
+
 
 
 // Model for seeding
@@ -42,6 +45,7 @@ import telegramRouter from './routes/telegram.js';
 
 import cron from 'node-cron';
 import { checkExpiredOffers } from './jobs/checkExpiredOffers.js';
+
 
 
 dotenv.config();
@@ -176,6 +180,9 @@ app.use('/api/clip', clipRoutes);
 app.use('/api/user', userRoutes);
 app.use('/telegram', telegramRouter);
 app.use('/api/applications', applicationsRoutes);
+app.use('/api/applications', applicationsScriptRouter);
+app.use('/api/applications', applicationsVideoRouter);
+
 
 
 // Run every 5 minutes

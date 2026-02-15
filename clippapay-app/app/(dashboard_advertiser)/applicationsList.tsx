@@ -141,7 +141,10 @@ export default function ApplicationsList() {
       setRefreshing(false);
     }
   };
-
+ 
+  const formatCurrency = (amount: number) => {
+    return `₦${amount.toLocaleString()}`;
+  };
 
   const handleRefresh = () => {
     setRefreshing(true);
