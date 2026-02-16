@@ -164,29 +164,42 @@ router.get('/clipper-profile/:id', requireAuth, async (req, res) => {
   });
 });
 
-// GET public profile (for advertisers)
+// GET public profile (for advertisers) - View any clipper profile
 router.get('/clipper-profile/:userId', requireAuth, async (req, res) => {
-  const targetUser = await User.findById(req.params.userId);
-  if (!targetUser || targetUser.role !== 'clipper' || !targetUser.isPremiumCreator) {
-    return res.status(404).json({ error: 'Premium clipper not found' });
-  }
-
-  const profile = await ClipperProfile.findOne({ user: targetUser._id });
-  if (!profile) {
-    return res.status(404).json({ error: 'Profile not found' });
-  }
-
-  res.json({
-    ...profile.toObject(),
-    user: {
-      firstName: targetUser.firstName,
-      lastName: targetUser.lastName,
-      rating: targetUser.rating,
-      isPremiumCreator: targetUser.isPremiumCreator,
+  try {
+    const targetUser = await User.findById(req.params.userId);
+    
+    // Check if user exists and is a clipper
+    if (!targetUser || targetUser.role !== 'clipper') {
+      return res.status(404).json({ error: 'Clipper not found' });
     }
-  });
-});
 
+    const profile = await ClipperProfile.findOne({ user: targetUser._id });
+    
+    // Return combined profile data
+    res.json({
+      // Profile fields from ClipperProfile (these include sampleVideo, bio, etc.)
+      bio: profile?.bio || '',
+      categories: profile?.categories || [],
+      sampleVideo: profile?.sampleVideo || null,
+      ratePerVideo: profile?.ratePerVideo || 0,
+      expectedDelivery: profile?.expectedDelivery || '',
+      completedProjects: profile?.completedProjects || 0,
+      profileImage: profile?.profileImage || targetUser.profileImage || null,
+      
+      // User fields
+      user: {
+        firstName: targetUser.firstName || '',
+        lastName: targetUser.lastName || '',
+        rating: targetUser.rating || 0,
+        isPremiumCreator: targetUser.isPremiumCreator || false,
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching clipper profile:', err);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
 
 
 /**

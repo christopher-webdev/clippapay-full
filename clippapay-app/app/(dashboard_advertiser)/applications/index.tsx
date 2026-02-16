@@ -77,7 +77,7 @@ interface Application {
   createdAt: string;
 }
 
-type FilterType = 'all' | 'pending' | 'offer_sent' | 'submitted' | 'approved';
+type FilterType = 'all' | 'pending' | 'shortlisted' | 'offer_sent' | 'submitted' | 'approved';
 
 export default function ApplicationsList() {
   const router = useRouter();
@@ -89,6 +89,7 @@ export default function ApplicationsList() {
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
   const [offerModalVisible, setOfferModalVisible] = useState(false);
   const [sendingOffer, setSendingOffer] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     loadApplications();
@@ -126,6 +127,7 @@ export default function ApplicationsList() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setActionLoading(null);
     }
   };
 
@@ -163,6 +165,7 @@ export default function ApplicationsList() {
 
   const handleShortlist = async (applicationId: string) => {
     try {
+      setActionLoading(applicationId);
       const token = await getToken();
       if (!token) throw new Error('No auth token found');
 
@@ -172,10 +175,48 @@ export default function ApplicationsList() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      loadApplications();
+      // Update local state optimistically
+      setApplications(prevApps => 
+        prevApps.map(app => 
+          app._id === applicationId 
+            ? { ...app, status: 'shortlisted' as const }
+            : app
+        )
+      );
 
     } catch (err: any) {
       Alert.alert('Error', err.response?.data?.error || 'Failed to shortlist');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleUnshortlist = async (applicationId: string) => {
+    try {
+      setActionLoading(applicationId);
+      const token = await getToken();
+      if (!token) throw new Error('No auth token found');
+
+      // You'll need to create this endpoint
+      await axios.post(
+        `${API_BASE}/applications/${applicationId}/unshortlist`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Update local state optimistically
+      setApplications(prevApps => 
+        prevApps.map(app => 
+          app._id === applicationId 
+            ? { ...app, status: 'pending' as const }
+            : app
+        )
+      );
+
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.error || 'Failed to remove from shortlist');
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -187,12 +228,20 @@ export default function ApplicationsList() {
     });
   };
 
+  const handleViewCreatorProfile = (creatorId: string) => {
+    router.push({
+      pathname: '/(dashboard_advertiser)/creator/[id]',
+      params: { id: creatorId }
+    });
+  };
+
   const stats = useMemo(() => {
     const apps = applications && Array.isArray(applications) ? applications : [];
     
     return {
       total: apps.length,
       pending: apps.filter(a => a.status === 'pending').length,
+      shortlisted: apps.filter(a => a.status === 'shortlisted').length,
       offer_sent: apps.filter(a => a.status === 'offer_sent').length,
       submitted: apps.filter(a => a.status === 'submitted' || a.status === 'revision_requested').length,
       approved: apps.filter(a => a.status === 'approved' || a.status === 'completed').length,
@@ -233,7 +282,11 @@ export default function ApplicationsList() {
         </View>
 
         <StatsHeader stats={stats} />
-        <FilterChips activeFilter={activeFilter} onFilterChange={setActiveFilter} />
+        <FilterChips 
+          activeFilter={activeFilter} 
+          onFilterChange={setActiveFilter}
+          filters={['all', 'pending', 'shortlisted', 'offer_sent', 'submitted', 'approved']}
+        />
       </View>
 
       {error && (
@@ -254,10 +307,14 @@ export default function ApplicationsList() {
             application={item}
             onPress={() => handleViewApplication(item)}
             onShortlist={() => handleShortlist(item._id)}
+            onUnshortlist={() => handleUnshortlist(item._id)}
             onSendOffer={() => {
               setSelectedApplication(item);
               setOfferModalVisible(true);
             }}
+            onViewCreatorProfile={() => handleViewCreatorProfile(item.clipper._id)}
+            showActions={true}
+            isLoading={actionLoading === item._id}
           />
         )}
         keyExtractor={(item) => item._id}
@@ -266,7 +323,12 @@ export default function ApplicationsList() {
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
         ListEmptyComponent={
-          !error && <EmptyState onBrowseCampaigns={() => router.push('/(dashboard_advertiser)/campaigns')} />
+          !error && (
+            <EmptyState 
+              onBrowseCampaigns={() => router.push('/(dashboard_advertiser)/campaigns')}
+              filter={activeFilter}
+            />
+          )
         }
       />
 
@@ -369,8 +431,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-
-
 // // app/(dashboard_advertiser)index.tsx
 // import React, { useEffect, useState, useCallback } from 'react';
 // import {

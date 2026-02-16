@@ -1,5 +1,5 @@
 // app/components/applications/ApplicationCard.tsx
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,15 +7,19 @@ import {
   StyleSheet,
   Image,
   Dimensions,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { formatDistanceToNow } from 'date-fns';
 import { StatusBadge } from './StatusBadge';
 import { AddonBadge } from './AddonBadge';
+import { useRouter } from 'expo-router';
 
 const { width } = Dimensions.get('window');
 const API_BASE = 'https://clippapay.com/api';
+const MEDIA_BASE = 'https://clippapay.com';
 
 interface Application {
   _id: string;
@@ -23,7 +27,7 @@ interface Application {
     _id: string;
     title: string;
     kind: string;
-    budget_total: number; // Changed from clipper_cpm
+    budget_total: number;
     desiredVideos: number;
     approvedVideosCount: number;
     pgcAddons?: string[];
@@ -54,6 +58,7 @@ interface ApplicationCardProps {
   application: Application;
   onPress: () => void;
   onShortlist?: () => void;
+  onUnshortlist?: () => void; // New prop for unshortlisting
   onSendOffer?: () => void;
   showActions?: boolean;
 }
@@ -62,13 +67,18 @@ export function ApplicationCard({
   application,
   onPress,
   onShortlist,
+  onUnshortlist,
   onSendOffer,
   showActions = true
 }: ApplicationCardProps) {
+  const router = useRouter();
+  const [isShortlisting, setIsShortlisting] = useState(false);
+  
   const campaign = application.campaign;
   const clipper = application.clipper;
   const hasOffer = application.status === 'offer_sent';
   const hasSubmitted = application.status === 'submitted' || application.status === 'revision_requested';
+  const isShortlisted = application.status === 'shortlisted';
 
   const formatCurrency = (amount?: number | null) => {
     if (typeof amount !== 'number' || isNaN(amount)) {
@@ -77,6 +87,49 @@ export function ApplicationCard({
     return `₦${amount.toLocaleString()}`;
   };
 
+  const getMediaUrl = (path?: string) => {
+    if (!path) return undefined;
+    if (path.startsWith('http')) return path;
+    return `${MEDIA_BASE}${path}`;
+  };
+
+  const handleViewCreatorProfile = () => {
+    router.push({
+      pathname: '/(dashboard_advertiser)/creator/[id]',
+      params: { id: clipper._id }
+    });
+  };
+
+  const handleShortlistPress = async () => {
+    if (isShortlisted && onUnshortlist) {
+      Alert.alert(
+        'Remove from Shortlist',
+        'Are you sure you want to remove this creator from your shortlist?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: async () => {
+              setIsShortlisting(true);
+              try {
+                await onUnshortlist();
+              } finally {
+                setIsShortlisting(false);
+              }
+            }
+          }
+        ]
+      );
+    } else if (onShortlist) {
+      setIsShortlisting(true);
+      try {
+        await onShortlist();
+      } finally {
+        setIsShortlisting(false);
+      }
+    }
+  };
 
   return (
     <TouchableOpacity
@@ -109,7 +162,7 @@ export function ApplicationCard({
           <View style={styles.campaignTitleContainer}>
             {campaign.thumb_url ? (
               <Image 
-                source={{ uri: `${API_BASE}${campaign.thumb_url}` }} 
+                source={{ uri: getMediaUrl(campaign.thumb_url) }} 
                 style={styles.campaignThumb}
               />
             ) : (
@@ -132,12 +185,16 @@ export function ApplicationCard({
           )}
         </View>
 
-        {/* Creator Info - Simplified without premium/rating */}
-        <View style={styles.creatorInfo}>
+        {/* Creator Info - Now clickable */}
+        <TouchableOpacity 
+          style={styles.creatorInfo}
+          onPress={handleViewCreatorProfile}
+          activeOpacity={0.7}
+        >
           <View style={styles.creatorAvatar}>
             {clipper.profileImage ? (
               <Image 
-                source={{ uri: `${API_BASE}${clipper.profileImage}` }} 
+                source={{ uri: getMediaUrl(clipper.profileImage) }} 
                 style={styles.avatarImage} 
               />
             ) : (
@@ -150,22 +207,25 @@ export function ApplicationCard({
           </View>
           
           <View style={styles.creatorDetails}>
-            <Text style={styles.creatorName}>
-              {clipper.firstName} {clipper.lastName}
-            </Text>
+            <View style={styles.creatorNameRow}>
+              <Text style={styles.creatorName}>
+                {clipper.firstName} {clipper.lastName}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+            </View>
             <Text style={styles.creatorEmail} numberOfLines={1}>
               {clipper.email}
             </Text>
           </View>
 
-          {/* Budget Display - Changed from payout */}
+          {/* Budget Display */}
           <View style={styles.budgetContainer}>
             <Ionicons name="wallet-outline" size={14} color="#059669" />
             <Text style={styles.budgetText}>
               {formatCurrency(campaign.budget_total)}
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* Progress/Status specific info */}
         {hasOffer && (
@@ -196,10 +256,17 @@ export function ApplicationCard({
           <View style={styles.cardActions}>
             <TouchableOpacity
               style={[styles.actionButton, styles.shortlistButton]}
-              onPress={onShortlist}
+              onPress={handleShortlistPress}
+              disabled={isShortlisting}
             >
-              <Ionicons name="star-outline" size={16} color="#2563EB" />
-              <Text style={styles.shortlistText}>Shortlist</Text>
+              {isShortlisting ? (
+                <ActivityIndicator size="small" color="#2563EB" />
+              ) : (
+                <>
+                  <Ionicons name="star-outline" size={16} color="#2563EB" />
+                  <Text style={styles.shortlistText}>Shortlist</Text>
+                </>
+              )}
             </TouchableOpacity>
             
             <TouchableOpacity
@@ -210,19 +277,41 @@ export function ApplicationCard({
                 colors={['#22C55E', '#16A34A']}
                 style={styles.offerButtonGradient}
               >
-                <Text style={styles.offerButtonText}>Send Offer</Text>
+                <Text style={styles.offerButtonText}>Offer This Job</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
         )}
 
         {showActions && application.status === 'shortlisted' && (
-          <TouchableOpacity
-            style={[styles.fullWidthButton, styles.sendOfferFullButton]}
-            onPress={onSendOffer}
-          >
-            <Text style={styles.sendOfferFullText}>Send Offer to Creator</Text>
-          </TouchableOpacity>
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.unshortlistButton]}
+              onPress={handleShortlistPress}
+              disabled={isShortlisting}
+            >
+              {isShortlisting ? (
+                <ActivityIndicator size="small" color="#DC2626" />
+              ) : (
+                <>
+                  <Ionicons name="star" size={16} color="#DC2626" />
+                  <Text style={styles.unshortlistText}>Shortlisted</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.actionButton, styles.offerButton]}
+              onPress={onSendOffer}
+            >
+              <LinearGradient
+                colors={['#22C55E', '#16A34A']}
+                style={styles.offerButtonGradient}
+              >
+                <Text style={styles.offerButtonText}>Offer This Job</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         )}
       </LinearGradient>
     </TouchableOpacity>
@@ -341,6 +430,11 @@ const styles = StyleSheet.create({
   creatorDetails: {
     flex: 1,
   },
+  creatorNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   creatorName: {
     fontSize: 15,
     fontWeight: '600',
@@ -417,7 +511,7 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
-    height: 40,
+    height: 44,
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
@@ -429,6 +523,16 @@ const styles = StyleSheet.create({
   },
   shortlistText: {
     color: '#2563EB',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  unshortlistButton: {
+    backgroundColor: '#FEE2E2',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  unshortlistText: {
+    color: '#DC2626',
     fontSize: 14,
     fontWeight: '600',
   },
