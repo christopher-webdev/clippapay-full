@@ -225,7 +225,7 @@ router.post('/:applicationId/reject', requireAuth, requireClipper, async (req, r
     if (!application) return res.status(404).json({ error: 'Application not found' });
     if (!application.clipper.equals(req.user._id)) {
       return res.status(403).json({ error: 'Not your application' });
-    }z
+    }
 
     await application.rejectOffer();
 
@@ -444,10 +444,6 @@ router.post('/:applicationId/script',
  * GET /api/applications/advertiser/all
  */
 /**
- * Get all applications for advertiser's campaigns
- * GET /api/applications/advertiser/all
- */
-/**
  * GET /api/applications/advertiser/all
  * Get all applications for advertiser's campaigns
  */
@@ -470,51 +466,6 @@ router.get(
         query.campaign = campaignId;
       }
 
-      // Populate configuration
-      const populateConfig = [
-        {
-          path: 'campaign',
-          select: `
-            title
-            kind
-            thumb_url
-            clipper_cpm
-            budget_total
-            budget_remaining
-            desiredVideos
-            approvedVideosCount
-            pgcAddons
-            postingRequirements
-            script
-            ugc
-          `,
-        },
-        {
-          path: 'clipper',
-          select: `
-            firstName
-            lastName
-            email
-            phone
-            country
-            rating
-            isPremiumCreator
-          `,
-          populate: {
-            path: 'clipperProfile',
-            select: `
-              profileImage
-              sampleVideo
-              bio
-              categories
-              ratePerVideo
-              expectedDelivery
-              completedProjects
-            `,
-          },
-        },
-      ];
-
       // ==============================
       // PAGINATION
       // ==============================
@@ -523,15 +474,36 @@ router.get(
         const limitNum = parseInt(limit);
         const skip = (pageNum - 1) * limitNum;
 
-        const [applications, total] = await Promise.all([
-          Application.find(query)
-            .populate(populateConfig)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limitNum)
-            .lean(),
-          Application.countDocuments(query),
-        ]);
+        // First get applications without the problematic populate
+        let applications = await Application.find(query)
+          .populate({
+            path: 'campaign',
+            select: 'title kind thumb_url clipper_cpm budget_total budget_remaining desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc'
+          })
+          .populate({
+            path: 'clipper',
+            select: 'firstName lastName email phone country rating isPremiumCreator'
+          })
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean();
+
+        // Then manually fetch clipper profiles for each application
+        applications = await Promise.all(
+          applications.map(async (app) => {
+            if (app.clipper) {
+              const clipperProfile = await ClipperProfile.findOne({ 
+                user: app.clipper._id 
+              }).lean();
+              
+              app.clipper.clipperProfile = clipperProfile || null;
+            }
+            return app;
+          })
+        );
+
+        const total = await Application.countDocuments(query);
 
         return res.json({
           success: true,
@@ -548,10 +520,31 @@ router.get(
       // ==============================
       // NO PAGINATION
       // ==============================
-      const applications = await Application.find(query)
-        .populate(populateConfig)
+      let applications = await Application.find(query)
+        .populate({
+          path: 'campaign',
+          select: 'title kind thumb_url clipper_cpm budget_total budget_remaining desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc'
+        })
+        .populate({
+          path: 'clipper',
+          select: 'firstName lastName email phone country rating isPremiumCreator'
+        })
         .sort({ createdAt: -1 })
         .lean();
+
+      // Manually fetch clipper profiles
+      applications = await Promise.all(
+        applications.map(async (app) => {
+          if (app.clipper) {
+            const clipperProfile = await ClipperProfile.findOne({ 
+              user: app.clipper._id 
+            }).lean();
+            
+            app.clipper.clipperProfile = clipperProfile || null;
+          }
+          return app;
+        })
+      );
 
       return res.json({
         success: true,
