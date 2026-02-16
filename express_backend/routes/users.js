@@ -141,29 +141,8 @@ router.patch(
   }
 );
 
-// GET public profile (for advertisers)
-router.get('/clipper-profile/:id', requireAuth, async (req, res) => {
-  const profile = await ClipperProfile.findById(req.params.id);
-  if (!profile) {
-    return res.status(404).json({ error: 'Profile not found' });
-  }
 
-  const targetUser = await User.findById(profile.user);
-  if (!targetUser || targetUser.role !== 'clipper' || !targetUser.isPremiumCreator) {
-    return res.status(404).json({ error: 'Premium clipper not found' });
-  }
-
-  res.json({
-    ...profile.toObject(),
-    user: {
-      firstName: targetUser.firstName,
-      lastName: targetUser.lastName,
-      rating: targetUser.rating,
-      isPremiumCreator: targetUser.isPremiumCreator,
-    }
-  });
-});
-
+// GET public profile (for advertisers) - View any clipper profile
 // GET public profile (for advertisers) - View any clipper profile
 router.get('/clipper-profile/:userId', requireAuth, async (req, res) => {
   try {
@@ -174,11 +153,12 @@ router.get('/clipper-profile/:userId', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Clipper not found' });
     }
 
+    // Try to find profile, but don't fail if it doesn't exist
     const profile = await ClipperProfile.findOne({ user: targetUser._id });
     
-    // Return combined profile data
+    // Return combined data - always return something, even if profile is null
     res.json({
-      // Profile fields from ClipperProfile (these include sampleVideo, bio, etc.)
+      // Profile fields (with defaults if profile is null)
       bio: profile?.bio || '',
       categories: profile?.categories || [],
       sampleVideo: profile?.sampleVideo || null,

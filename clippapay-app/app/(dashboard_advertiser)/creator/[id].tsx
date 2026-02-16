@@ -32,8 +32,21 @@ export default function CreatorProfileView() {
   const videoRef = useRef<Video>(null);
 
   const [loading, setLoading] = useState(true);
-  const [creator, setCreator] = useState<any>(null);
-  const [profile, setProfile] = useState<any>(null);
+  const [creator, setCreator] = useState<any>({
+    firstName: '',
+    lastName: '',
+    rating: 0,
+    isPremiumCreator: false,
+  });
+  const [profile, setProfile] = useState<any>({
+    bio: '',
+    categories: [],
+    sampleVideo: null,
+    ratePerVideo: 0,
+    expectedDelivery: '',
+    completedProjects: 0,
+    profileImage: null,
+  });
   const [showVideoPreview, setShowVideoPreview] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,18 +76,32 @@ export default function CreatorProfileView() {
       const token = await getToken();
       if (!token) throw new Error('No auth token found');
 
-      // Fetch user data
-      const userResponse = await axios.get(`${API_BASE}/user/${id}`, {
+      // Single API call to get combined profile data
+      const response = await axios.get(`${API_BASE}/user/clipper-profile/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      // Fetch clipper profile
-      const profileResponse = await axios.get(`${API_BASE}/user/clipper-profile/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      }).catch(() => ({ data: {} }));
+      const data = response.data;
+      
+      // Set creator info from user object
+      setCreator({
+        firstName: data.user?.firstName || '',
+        lastName: data.user?.lastName || '',
+        rating: data.user?.rating || 0,
+        isPremiumCreator: data.user?.isPremiumCreator || false,
+      });
 
-      setCreator(userResponse.data);
-      setProfile(profileResponse.data);
+      // Set profile info from main response
+      setProfile({
+        bio: data.bio || '',
+        categories: data.categories || [],
+        sampleVideo: data.sampleVideo || null,
+        ratePerVideo: data.ratePerVideo || 0,
+        expectedDelivery: data.expectedDelivery || '',
+        completedProjects: data.completedProjects || 0,
+        profileImage: data.profileImage || null,
+      });
+
     } catch (err: any) {
       console.error('Error loading creator profile:', err);
       setError(err.response?.data?.error || 'Failed to load creator profile');
@@ -110,13 +137,13 @@ export default function CreatorProfileView() {
     );
   }
 
-  if (error || !creator) {
+  if (error) {
     return (
       <View style={styles.centerContainer}>
         <LinearGradient colors={['#F9FAFB', '#F3F4F6']} style={StyleSheet.absoluteFill} />
         <Ionicons name="alert-circle" size={64} color="#EF4444" />
         <Text style={styles.errorTitle}>Failed to Load</Text>
-        <Text style={styles.errorText}>{error || 'Creator not found'}</Text>
+        <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
@@ -125,7 +152,7 @@ export default function CreatorProfileView() {
   }
 
   const isPremium = creator.isPremiumCreator;
-  const fullName = `${creator.firstName || ''} ${creator.lastName || ''}`.trim();
+  const fullName = `${creator.firstName} ${creator.lastName}`.trim() || 'Creator';
 
   return (
     <View style={styles.container}>
@@ -150,10 +177,10 @@ export default function CreatorProfileView() {
             {/* Profile Image */}
             <TouchableOpacity
               style={styles.profileImageContainer}
-              onPress={() => profile?.profileImage && setShowImagePreview(true)}
+              onPress={() => profile.profileImage && setShowImagePreview(true)}
               activeOpacity={0.9}
             >
-              {profile?.profileImage ? (
+              {profile.profileImage ? (
                 <Image
                   source={{ uri: getMediaUrl(profile.profileImage) }}
                   style={styles.profileImage}
@@ -169,7 +196,7 @@ export default function CreatorProfileView() {
 
             {/* Name and Premium Badge */}
             <View style={styles.nameContainer}>
-              <Text style={styles.creatorName}>{fullName || 'Creator'}</Text>
+              <Text style={styles.creatorName}>{fullName}</Text>
               {isPremium && (
                 <View style={styles.premiumBadge}>
                   <Ionicons name="star" size={14} color="#FFD700" />
@@ -192,28 +219,28 @@ export default function CreatorProfileView() {
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <Ionicons name="briefcase-outline" size={20} color="#6B7280" />
-                <Text style={styles.statValue}>{profile?.completedProjects || 0}</Text>
+                <Text style={styles.statValue}>{profile.completedProjects || 0}</Text>
                 <Text style={styles.statLabel}>Projects</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Ionicons name="cash-outline" size={20} color="#6B7280" />
                 <Text style={styles.statValue}>
-                  {profile?.ratePerVideo ? `₦${profile.ratePerVideo.toLocaleString()}` : '—'}
+                  {profile.ratePerVideo ? `₦${profile.ratePerVideo.toLocaleString()}` : '—'}
                 </Text>
                 <Text style={styles.statLabel}>Rate/Video</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Ionicons name="time-outline" size={20} color="#6B7280" />
-                <Text style={styles.statValue}>{profile?.expectedDelivery || '—'}</Text>
+                <Text style={styles.statValue}>{profile.expectedDelivery || '—'}</Text>
                 <Text style={styles.statLabel}>Delivery</Text>
               </View>
             </View>
           </View>
 
           {/* Bio Section */}
-          {profile?.bio ? (
+          {profile.bio ? (
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <View style={[styles.cardIcon, { backgroundColor: '#EEF2FF' }]}>
@@ -226,7 +253,7 @@ export default function CreatorProfileView() {
           ) : null}
 
           {/* Categories */}
-          {profile?.categories && profile.categories.length > 0 && (
+          {profile.categories && profile.categories.length > 0 && (
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <View style={[styles.cardIcon, { backgroundColor: '#FCE7F3' }]}>
@@ -245,7 +272,7 @@ export default function CreatorProfileView() {
           )}
 
           {/* Sample Video */}
-          {profile?.sampleVideo && (
+          {profile.sampleVideo && (
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <View style={[styles.cardIcon, { backgroundColor: '#E0F2FE' }]}>
@@ -279,8 +306,8 @@ export default function CreatorProfileView() {
             </View>
           )}
 
-          {/* Additional Info if needed */}
-          {!profile?.bio && !profile?.categories && !profile?.sampleVideo && (
+          {/* Empty State */}
+          {!profile.bio && (!profile.categories || profile.categories.length === 0) && !profile.sampleVideo && (
             <View style={styles.emptyContainer}>
               <Ionicons name="information-circle-outline" size={48} color="#9CA3AF" />
               <Text style={styles.emptyTitle}>No Profile Details Yet</Text>
@@ -312,7 +339,7 @@ export default function CreatorProfileView() {
                 <Ionicons name="close-circle" size={40} color="#FFFFFF" />
               </TouchableOpacity>
               <Image
-                source={{ uri: getMediaUrl(profile?.profileImage) }}
+                source={{ uri: getMediaUrl(profile.profileImage) }}
                 style={styles.fullscreenMedia}
                 resizeMode="contain"
               />
@@ -335,7 +362,7 @@ export default function CreatorProfileView() {
                 <Ionicons name="close-circle" size={40} color="#FFFFFF" />
               </TouchableOpacity>
               <Video
-                source={{ uri: getMediaUrl(profile?.sampleVideo) }}
+                source={{ uri: getMediaUrl(profile.sampleVideo) }}
                 style={styles.fullscreenMedia}
                 resizeMode={ResizeMode.CONTAIN}
                 shouldPlay
