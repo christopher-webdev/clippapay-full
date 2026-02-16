@@ -1,7 +1,7 @@
 // routes/applications.js
 import express from 'express';
 import Application from '../models/Application.js';
-import ClipperProfile from '../model/ClipperProfile';
+import ClipperProfile from '../models/ClipperProfile.js';
 import Campaign from '../models/Campaign.js';
 import User from '../models/User.js';
 import Wallet from '../models/Wallet.js';
@@ -447,6 +447,10 @@ router.post('/:applicationId/script',
  * Get all applications for advertiser's campaigns
  * GET /api/applications/advertiser/all
  */
+/**
+ * GET /api/applications/advertiser/all
+ * Get all applications for advertiser's campaigns
+ */
 router.get(
   '/advertiser/all',
   requireAuth,
@@ -455,6 +459,7 @@ router.get(
     try {
       const { status, campaignId, page, limit } = req.query;
 
+      // Build query
       let query = { advertiser: req.user._id };
 
       if (status) {
@@ -465,38 +470,71 @@ router.get(
         query.campaign = campaignId;
       }
 
+      // Populate configuration
       const populateConfig = [
         {
           path: 'campaign',
-          select:
-            'title kind clipper_cpm budget_total desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc.brief thumb_url',
+          select: `
+            title
+            kind
+            thumb_url
+            clipper_cpm
+            budget_total
+            budget_remaining
+            desiredVideos
+            approvedVideosCount
+            pgcAddons
+            postingRequirements
+            script
+            ugc
+          `,
         },
         {
           path: 'clipper',
-          select: 'firstName lastName email rating isPremiumCreator',
+          select: `
+            firstName
+            lastName
+            email
+            phone
+            country
+            rating
+            isPremiumCreator
+          `,
           populate: {
             path: 'clipperProfile',
-            select:
-              'profileImage bio categories ratePerVideo expectedDelivery completedProjects',
+            select: `
+              profileImage
+              sampleVideo
+              bio
+              categories
+              ratePerVideo
+              expectedDelivery
+              completedProjects
+            `,
           },
         },
       ];
 
-      // Pagination
+      // ==============================
+      // PAGINATION
+      // ==============================
       if (page && limit) {
         const pageNum = parseInt(page);
         const limitNum = parseInt(limit);
         const skip = (pageNum - 1) * limitNum;
 
-        const applications = await Application.find(query)
-          .populate(populateConfig)
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limitNum);
-
-        const total = await Application.countDocuments(query);
+        const [applications, total] = await Promise.all([
+          Application.find(query)
+            .populate(populateConfig)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limitNum)
+            .lean(),
+          Application.countDocuments(query),
+        ]);
 
         return res.json({
+          success: true,
           applications,
           pagination: {
             page: pageNum,
@@ -507,15 +545,25 @@ router.get(
         });
       }
 
-      // No pagination
+      // ==============================
+      // NO PAGINATION
+      // ==============================
       const applications = await Application.find(query)
         .populate(populateConfig)
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .lean();
 
-      return res.json(applications);
+      return res.json({
+        success: true,
+        applications,
+      });
+
     } catch (err) {
       console.error('Error fetching advertiser applications:', err);
-      res.status(500).json({ error: 'Failed to fetch applications' });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch applications',
+      });
     }
   }
 );

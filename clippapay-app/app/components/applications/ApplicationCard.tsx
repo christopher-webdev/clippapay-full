@@ -1,3 +1,4 @@
+// app/components/applications/ApplicationCard.tsx
 import React from 'react';
 import {
   View,
@@ -14,32 +15,35 @@ import { StatusBadge } from './StatusBadge';
 import { AddonBadge } from './AddonBadge';
 
 const { width } = Dimensions.get('window');
-
 const API_BASE = 'https://clippapay.com/api';
-const UPLOAD_BASE = 'https://clippapay.com'; // 🔥 IMPORTANT FIX
 
 interface Application {
   _id: string;
   campaign: {
     _id: string;
-    title?: string;
-    kind?: string;
-    budget_total?: number;
-    desiredVideos?: number;
-    approvedVideosCount?: number;
+    title: string;
+    kind: string;
+    budget_total: number; // Changed from clipper_cpm
+    desiredVideos: number;
+    approvedVideosCount: number;
     pgcAddons?: string[];
+    script?: string;
     thumb_url?: string;
+    ugc?: {
+      brief: string;
+      deliverables: string[];
+      assets: string[];
+      approvalCriteria: string;
+    };
   };
   clipper: {
     _id: string;
-    firstName?: string;
-    lastName?: string;
-    email?: string;
-    clipperProfile?: {
-      profileImage?: string;
-    };
+    firstName: string;
+    lastName: string;
+    email: string;
+    profileImage?: string;
   };
-  status: string;
+  status: 'pending' | 'shortlisted' | 'offer_sent' | 'accepted' | 'rejected' | 'expired' | 'working' | 'submitted' | 'revision_requested' | 'approved' | 'completed' | 'cancelled';
   offerExpiresAt?: string;
   createdAt: string;
   revisionCount: number;
@@ -59,70 +63,53 @@ export function ApplicationCard({
   onPress,
   onShortlist,
   onSendOffer,
-  showActions = true,
+  showActions = true
 }: ApplicationCardProps) {
-  const campaign = application.campaign || {};
-  const clipper = application.clipper || {};
-
+  const campaign = application.campaign;
+  const clipper = application.clipper;
   const hasOffer = application.status === 'offer_sent';
-  const hasSubmitted =
-    application.status === 'submitted' ||
-    application.status === 'revision_requested';
+  const hasSubmitted = application.status === 'submitted' || application.status === 'revision_requested';
 
-  // ✅ Safe currency
   const formatCurrency = (amount?: number | null) => {
-    if (typeof amount !== 'number' || isNaN(amount)) return '₦0';
+    if (typeof amount !== 'number' || isNaN(amount)) {
+      return '₦0';
+    }
     return `₦${amount.toLocaleString()}`;
   };
 
-  const creatorInitials = `${clipper.firstName?.[0] || ''}${
-    clipper.lastName?.[0] || ''
-  }`;
-
-  const profileImage =
-    clipper?.clipperProfile?.profileImage;
 
   return (
     <TouchableOpacity
       style={styles.card}
       onPress={onPress}
-      activeOpacity={0.8}
+      activeOpacity={0.7}
     >
       <LinearGradient colors={['#FFFFFF', '#F9FAFB']} style={styles.cardGradient}>
-        
-        {/* Header */}
+        {/* Header with status */}
         <View style={styles.cardHeader}>
           <View style={styles.cardHeaderLeft}>
             <StatusBadge status={application.status} />
-
-            {application.offerExpiresAt &&
-              application.status === 'offer_sent' && (
-                <View style={styles.expiryBadge}>
-                  <Ionicons name="time-outline" size={12} color="#D97706" />
-                  <Text style={styles.expiryText}>
-                    Expires{' '}
-                    {formatDistanceToNow(
-                      new Date(application.offerExpiresAt),
-                      { addSuffix: true }
-                    )}
-                  </Text>
-                </View>
-              )}
+            
+            {application.offerExpiresAt && application.status === 'offer_sent' && (
+              <View style={styles.expiryBadge}>
+                <Ionicons name="time-outline" size={12} color="#D97706" />
+                <Text style={styles.expiryText}>
+                  Expires {formatDistanceToNow(new Date(application.offerExpiresAt), { addSuffix: true })}
+                </Text>
+              </View>
+            )}
           </View>
-
           <Text style={styles.dateText}>
-            {formatDistanceToNow(new Date(application.createdAt), {
-              addSuffix: true,
-            })}
+            {formatDistanceToNow(new Date(application.createdAt), { addSuffix: true })}
           </Text>
         </View>
 
-        {/* Campaign */}
+        {/* Campaign Info with Thumbnail */}
         <View style={styles.campaignInfo}>
           <View style={styles.campaignTitleContainer}>
             {campaign.thumb_url ? (
-              <Image
-                source={{ uri: `${UPLOAD_BASE}${campaign.thumb_url}` }} // ✅ FIXED
+              <Image 
+                source={{ uri: `${API_BASE}${campaign.thumb_url}` }} 
                 style={styles.campaignThumb}
               />
             ) : (
@@ -130,36 +117,38 @@ export function ApplicationCard({
                 <Ionicons name="megaphone" size={20} color="#4F46E5" />
               </View>
             )}
-
             <Text style={styles.campaignTitle} numberOfLines={2}>
-              {campaign.title || 'Untitled Campaign'}
+              {campaign.title}
             </Text>
           </View>
-
-          {campaign.pgcAddons?.length ? (
+          
+          {/* Add-ons badges */}
+          {campaign.pgcAddons && campaign.pgcAddons.length > 0 && (
             <View style={styles.addonsContainer}>
               {campaign.pgcAddons.map((addon, index) => (
                 <AddonBadge key={index} addonId={addon} />
               ))}
             </View>
-          ) : null}
+          )}
         </View>
 
-        {/* Creator */}
+        {/* Creator Info - Simplified without premium/rating */}
         <View style={styles.creatorInfo}>
           <View style={styles.creatorAvatar}>
-            {profileImage ? (
-              <Image
-                source={{ uri: `${UPLOAD_BASE}${profileImage}` }} // ✅ FIXED
-                style={styles.avatarImage}
+            {clipper.profileImage ? (
+              <Image 
+                source={{ uri: `${API_BASE}${clipper.profileImage}` }} 
+                style={styles.avatarImage} 
               />
             ) : (
               <View style={styles.avatarPlaceholder}>
-                <Text style={styles.avatarText}>{creatorInitials}</Text>
+                <Text style={styles.avatarText}>
+                  {clipper.firstName?.[0]}{clipper.lastName?.[0]}
+                </Text>
               </View>
             )}
           </View>
-
+          
           <View style={styles.creatorDetails}>
             <Text style={styles.creatorName}>
               {clipper.firstName} {clipper.lastName}
@@ -169,16 +158,16 @@ export function ApplicationCard({
             </Text>
           </View>
 
-          {/* Budget */}
+          {/* Budget Display - Changed from payout */}
           <View style={styles.budgetContainer}>
             <Ionicons name="wallet-outline" size={14} color="#059669" />
             <Text style={styles.budgetText}>
-              {formatCurrency(campaign.budget_total ?? 0)}
+              {formatCurrency(campaign.budget_total)}
             </Text>
           </View>
         </View>
 
-        {/* Offer Info */}
+        {/* Progress/Status specific info */}
         {hasOffer && (
           <View style={styles.offerInfo}>
             <Ionicons name="information-circle" size={16} color="#2563EB" />
@@ -188,7 +177,6 @@ export function ApplicationCard({
           </View>
         )}
 
-        {/* Submission Info */}
         {hasSubmitted && (
           <View style={styles.submissionInfo}>
             <View style={styles.revisionCounter}>
@@ -201,6 +189,40 @@ export function ApplicationCard({
               <Text style={styles.reviewBadgeText}>Ready to Review</Text>
             </View>
           </View>
+        )}
+
+        {/* Action Buttons */}
+        {showActions && application.status === 'pending' && (
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.shortlistButton]}
+              onPress={onShortlist}
+            >
+              <Ionicons name="star-outline" size={16} color="#2563EB" />
+              <Text style={styles.shortlistText}>Shortlist</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.actionButton, styles.offerButton]}
+              onPress={onSendOffer}
+            >
+              <LinearGradient
+                colors={['#22C55E', '#16A34A']}
+                style={styles.offerButtonGradient}
+              >
+                <Text style={styles.offerButtonText}>Send Offer</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {showActions && application.status === 'shortlisted' && (
+          <TouchableOpacity
+            style={[styles.fullWidthButton, styles.sendOfferFullButton]}
+            onPress={onSendOffer}
+          >
+            <Text style={styles.sendOfferFullText}>Send Offer to Creator</Text>
+          </TouchableOpacity>
         )}
       </LinearGradient>
     </TouchableOpacity>
@@ -361,6 +383,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 8,
   },
   revisionCounter: {
     backgroundColor: '#F3F4F6',
@@ -385,6 +408,57 @@ const styles = StyleSheet.create({
   reviewBadgeText: {
     fontSize: 12,
     color: '#4F46E5',
+    fontWeight: '600',
+  },
+  cardActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  actionButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  shortlistButton: {
+    backgroundColor: '#EEF2FF',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  shortlistText: {
+    color: '#2563EB',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  offerButton: {
+    overflow: 'hidden',
+  },
+  offerButtonGradient: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  offerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fullWidthButton: {
+    height: 44,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  sendOfferFullButton: {
+    backgroundColor: '#22C55E',
+  },
+  sendOfferFullText: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '600',
   },
 });
