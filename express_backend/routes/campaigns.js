@@ -1023,11 +1023,11 @@ router.put(
         await camp.save();
         
         // Send Telegram notification when campaign becomes active
-        if (adWorkerStatus === 'ready' && camp.status === 'active') {
-          sendTelegramCampaignAlert(camp)
-            .then(() => console.log('✅ Telegram notification sent for campaign:', camp.title))
-            .catch(err => console.error('❌ Telegram notification failed:', err.message));
-        }
+        // if (adWorkerStatus === 'ready' && camp.status === 'active') {
+        //   sendTelegramCampaignAlert(camp)
+        //     .then(() => console.log('✅ Telegram notification sent for campaign:', camp.title))
+        //     .catch(err => console.error('❌ Telegram notification failed:', err.message));
+        // }
         
         return res.json(camp);
       }

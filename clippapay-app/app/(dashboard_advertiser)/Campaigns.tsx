@@ -261,7 +261,7 @@ export default function AdvertiserDashboard() {
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerTop}>
+          {/* <View style={styles.headerTop}>
             <View>
               <Text style={styles.greeting}>Welcome back,</Text>
               <Text style={styles.title}>Your Campaigns</Text>
@@ -269,7 +269,7 @@ export default function AdvertiserDashboard() {
             <TouchableOpacity style={styles.refreshButton} onPress={handleRefresh}>
               <TrendingUp size={20} color="#4F46E5" />
             </TouchableOpacity>
-          </View>
+          </View> */}
 
           {/* Stats Cards */}
           <View style={styles.statsGrid}>
@@ -665,7 +665,7 @@ function CampaignCard({
                 style={styles.viewClipsGradient}
               >
                 <Text style={styles.viewClipsText}>
-                  {isPGC ? "Select Creator" : "View Clips"}
+                  {isPGC ? "View Assets " : "View Clips"}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -1067,7 +1067,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 0,
   },
   greeting: {
     fontSize: 14,
@@ -1096,8 +1096,8 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 20,
+    gap: 5,
+    marginBottom: 0,
   },
   statCard: {
     flex: 1,
@@ -1131,7 +1131,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   filterScroll: {
-    marginBottom: 8,
+    marginBottom: 3,
   },
   filterRow: {
     flexDirection: 'row',

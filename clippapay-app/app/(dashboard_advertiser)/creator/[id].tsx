@@ -36,14 +36,11 @@ export default function CreatorProfileView() {
     firstName: '',
     lastName: '',
     rating: 0,
-    isPremiumCreator: false,
   });
   const [profile, setProfile] = useState<any>({
     bio: '',
     categories: [],
     sampleVideo: null,
-    ratePerVideo: 0,
-    expectedDelivery: '',
     completedProjects: 0,
     profileImage: null,
   });
@@ -88,7 +85,6 @@ export default function CreatorProfileView() {
         firstName: data.user?.firstName || '',
         lastName: data.user?.lastName || '',
         rating: data.user?.rating || 0,
-        isPremiumCreator: data.user?.isPremiumCreator || false,
       });
 
       // Set profile info from main response
@@ -96,8 +92,6 @@ export default function CreatorProfileView() {
         bio: data.bio || '',
         categories: data.categories || [],
         sampleVideo: data.sampleVideo || null,
-        ratePerVideo: data.ratePerVideo || 0,
-        expectedDelivery: data.expectedDelivery || '',
         completedProjects: data.completedProjects || 0,
         profileImage: data.profileImage || null,
       });
@@ -151,7 +145,6 @@ export default function CreatorProfileView() {
     );
   }
 
-  const isPremium = creator.isPremiumCreator;
   const fullName = `${creator.firstName} ${creator.lastName}`.trim() || 'Creator';
 
   return (
@@ -194,16 +187,8 @@ export default function CreatorProfileView() {
               )}
             </TouchableOpacity>
 
-            {/* Name and Premium Badge */}
-            <View style={styles.nameContainer}>
-              <Text style={styles.creatorName}>{fullName}</Text>
-              {isPremium && (
-                <View style={styles.premiumBadge}>
-                  <Ionicons name="star" size={14} color="#FFD700" />
-                  <Text style={styles.premiumText}>PREMIUM</Text>
-                </View>
-              )}
-            </View>
+            {/* Name */}
+            <Text style={styles.creatorName}>{fullName}</Text>
 
             {/* Rating */}
             <View style={styles.ratingContainer}>
@@ -215,26 +200,12 @@ export default function CreatorProfileView() {
               </Text>
             </View>
 
-            {/* Stats Row */}
+            {/* Stats Row - Only Projects */}
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <Ionicons name="briefcase-outline" size={20} color="#6B7280" />
                 <Text style={styles.statValue}>{profile.completedProjects || 0}</Text>
-                <Text style={styles.statLabel}>Projects</Text>
-              </View>
-              <View style={styles.statDivider} />
-              <View style={styles.statItem}>
-                <Ionicons name="cash-outline" size={20} color="#6B7280" />
-                <Text style={styles.statValue}>
-                  {profile.ratePerVideo ? `₦${profile.ratePerVideo.toLocaleString()}` : '—'}
-                </Text>
-                <Text style={styles.statLabel}>Rate/Video</Text>
-              </View>
-              <View style={styles.statDivider} />
-              <View style={styles.statItem}>
-                <Ionicons name="time-outline" size={20} color="#6B7280" />
-                <Text style={styles.statValue}>{profile.expectedDelivery || '—'}</Text>
-                <Text style={styles.statLabel}>Delivery</Text>
+                <Text style={styles.statLabel}>Projects Completed</Text>
               </View>
             </View>
           </View>
@@ -469,30 +440,11 @@ const styles = StyleSheet.create({
     fontSize: 40,
     fontWeight: '700',
   },
-  nameContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
   creatorName: {
     fontSize: 24,
     fontWeight: '800',
     color: '#111827',
-  },
-  premiumBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF3C7',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
-  },
-  premiumText: {
-    fontSize: 10,
-    color: '#D97706',
-    fontWeight: '700',
+    marginBottom: 8,
   },
   ratingContainer: {
     alignItems: 'center',
@@ -510,7 +462,7 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'center',
     width: '100%',
     paddingTop: 16,
     borderTopWidth: 1,
@@ -531,10 +483,6 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontWeight: '500',
     marginTop: 2,
-  },
-  statDivider: {
-    width: 1,
-    backgroundColor: '#E5E7EB',
   },
   card: {
     backgroundColor: '#FFFFFF',
