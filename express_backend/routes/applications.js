@@ -443,10 +443,7 @@ router.post('/:applicationId/script',
  * Get all applications for advertiser's campaigns
  * GET /api/applications/advertiser/all
  */
-/**
- * GET /api/applications/advertiser/all
- * Get all applications for advertiser's campaigns
- */
+
 router.get(
   '/advertiser/all',
   requireAuth,
@@ -474,30 +471,36 @@ router.get(
         const limitNum = parseInt(limit);
         const skip = (pageNum - 1) * limitNum;
 
-        // First get applications without the problematic populate
-        let applications = await Application.find(query)
+        // Get applications with basic population first
+        const applications = await Application.find(query)
           .populate({
             path: 'campaign',
             select: 'title kind thumb_url clipper_cpm budget_total budget_remaining desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc'
           })
           .populate({
             path: 'clipper',
-            select: 'firstName lastName email phone country rating isPremiumCreator'
+            select: 'firstName lastName email phone country rating isPremiumCreator profileImage'
           })
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limitNum)
           .lean();
 
-        // Then manually fetch clipper profiles for each application
-        applications = await Promise.all(
+        // Manually fetch clipper profiles for each application
+        const applicationsWithProfiles = await Promise.all(
           applications.map(async (app) => {
-            if (app.clipper) {
-              const clipperProfile = await ClipperProfile.findOne({ 
-                user: app.clipper._id 
-              }).lean();
-              
-              app.clipper.clipperProfile = clipperProfile || null;
+            if (app.clipper && app.clipper._id) {
+              try {
+                const clipperProfile = await ClipperProfile.findOne({ 
+                  user: app.clipper._id 
+                }).lean();
+                
+                // Add the profile directly to the clipper object
+                app.clipper.clipperProfile = clipperProfile || null;
+              } catch (profileErr) {
+                console.error(`Error fetching profile for clipper ${app.clipper._id}:`, profileErr);
+                app.clipper.clipperProfile = null;
+              }
             }
             return app;
           })
@@ -507,7 +510,7 @@ router.get(
 
         return res.json({
           success: true,
-          applications,
+          applications: applicationsWithProfiles,
           pagination: {
             page: pageNum,
             limit: limitNum,
@@ -520,27 +523,33 @@ router.get(
       // ==============================
       // NO PAGINATION
       // ==============================
-      let applications = await Application.find(query)
+      const applications = await Application.find(query)
         .populate({
           path: 'campaign',
           select: 'title kind thumb_url clipper_cpm budget_total budget_remaining desiredVideos approvedVideosCount pgcAddons postingRequirements script ugc'
         })
         .populate({
           path: 'clipper',
-          select: 'firstName lastName email phone country rating isPremiumCreator'
+          select: 'firstName lastName email phone country rating isPremiumCreator profileImage'
         })
         .sort({ createdAt: -1 })
         .lean();
 
-      // Manually fetch clipper profiles
-      applications = await Promise.all(
+      // Manually fetch clipper profiles for each application
+      const applicationsWithProfiles = await Promise.all(
         applications.map(async (app) => {
-          if (app.clipper) {
-            const clipperProfile = await ClipperProfile.findOne({ 
-              user: app.clipper._id 
-            }).lean();
-            
-            app.clipper.clipperProfile = clipperProfile || null;
+          if (app.clipper && app.clipper._id) {
+            try {
+              const clipperProfile = await ClipperProfile.findOne({ 
+                user: app.clipper._id 
+              }).lean();
+              
+              // Add the profile directly to the clipper object
+              app.clipper.clipperProfile = clipperProfile || null;
+            } catch (profileErr) {
+              console.error(`Error fetching profile for clipper ${app.clipper._id}:`, profileErr);
+              app.clipper.clipperProfile = null;
+            }
           }
           return app;
         })
@@ -548,7 +557,7 @@ router.get(
 
       return res.json({
         success: true,
-        applications,
+        applications: applicationsWithProfiles,
       });
 
     } catch (err) {
