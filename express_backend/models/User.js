@@ -1,7 +1,39 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
+/* ================================
+   Push Token Schema
+================================ */
+const pushTokenSchema = new mongoose.Schema({
+  token: { 
+    type: String, 
+    required: true 
+  },
+  device: { 
+    type: String, 
+    default: 'unknown' 
+  },
+  platform: { 
+    type: String, 
+    enum: ['ios', 'android', 'web', 'unknown'],
+    default: 'unknown'
+  },
+  lastUsed: { 
+    type: Date, 
+    default: Date.now 
+  },
+  createdAt: { 
+    type: Date, 
+    default: Date.now 
+  }
+});
+
+/* ================================
+   User Schema
+================================ */
 const userSchema = new mongoose.Schema({
+
+  /* ---------- Role ---------- */
   role: {
     type: String,
     enum: ['clipper', 'advertiser', 'admin', 'ad-worker', 'platform'],
@@ -13,18 +45,40 @@ const userSchema = new mongoose.Schema({
     default: false
   },
 
+  /* ---------- Auth ---------- */
+  email: { 
+    type: String, 
+    required: true, 
+    unique: true 
+  },
+
+  passwordHash: { 
+    type: String, 
+    required: true 
+  },
+
   resetCode: String,
   resetExpires: Date,
 
-  email: { type: String, required: true, unique: true },
-  passwordHash: { type: String, required: true },
+  emailOTP: String,
+  otpExpires: Date,
 
+  twoFactorEnabled: { 
+    type: Boolean, 
+    default: false 
+  },
+
+  /* ---------- Basic Info ---------- */
+  firstName: String,
+  lastName: String,
   phone: String,
   country: String,
 
-  // Clipper
-  firstName: String,
-  lastName: String,
+  /* ---------- Advertiser Fields ---------- */
+  company: String,
+  contactName: String,
+
+  /* ---------- Creator Profile Fields ---------- */
 
   rating: {
     type: Number,
@@ -33,29 +87,36 @@ const userSchema = new mongoose.Schema({
     max: 5
   },
 
-  isPremiumCreator: {
-    type: Boolean,
-    default: false
+  profileImage: {
+    type: String,
+    default: null
   },
 
-  // Advertiser
-  contactName: String,
-  company: String,
+  // MAX 3 VIDEOS
+  sampleVideos: {
+    type: [String],
+    default: [],
+    validate: {
+      validator: function (arr) {
+        return arr.length <= 3;
+      },
+      message: 'Maximum 3 sample videos allowed'
+    }
+  },
 
-  creatorTypes: {
+  bio: {
+    type: String,
+    default: '',
+    maxlength: 500
+  },
+
+  categories: {
     type: [String],
     default: []
   },
 
-  otherCreatorType: String,
 
-  twoFactorEnabled: { type: Boolean, default: false },
-  isBlocked: { type: Boolean, default: false },
-  isVerified: { type: Boolean, default: false },
-
-  emailOTP: String,
-  otpExpires: Date,
-
+  /* ---------- Telegram ---------- */
   hasJoinedTelegram: {
     type: Boolean,
     default: false
@@ -66,7 +127,11 @@ const userSchema = new mongoose.Schema({
     sparse: true
   },
 
-  wallet: { type: mongoose.Schema.Types.ObjectId, ref: 'Wallet' },
+  /* ---------- Wallet ---------- */
+  wallet: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Wallet' 
+  },
 
   paymentMethod: {
     type: String,
@@ -80,32 +145,26 @@ const userSchema = new mongoose.Schema({
   payAccountNumber: String,
   payAccountName: String,
 
+  /* ---------- System Flags ---------- */
+  isBlocked: { 
+    type: Boolean, 
+    default: false 
+  },
+
+  isVerified: { 
+    type: Boolean, 
+    default: false 
+  },
+
+  /* ---------- Push Tokens ---------- */
+  pushTokens: [pushTokenSchema]
+
 }, { timestamps: true });
 
-/* ===========================================================
-   ⭐ VIRTUAL POPULATE FOR CLIPPER PROFILE (CRITICAL FIX)
-   =========================================================== */
 
-userSchema.virtual('clipperProfile', {
-  ref: 'ClipperProfile',
-  localField: '_id',
-  foreignField: 'user',
-  justOne: true,
-});
-
-/* Include virtuals in JSON */
-userSchema.set('toObject', { virtuals: true });
-userSchema.set('toJSON', { virtuals: true });
-
-/* Auto premium logic */
-userSchema.pre('save', function(next) {
-  if (this.role === 'clipper' && this.rating >= 4 && !this.isPremiumCreator) {
-    this.isPremiumCreator = true;
-  }
-  next();
-});
-
-/* Password helpers */
+/* ================================
+   Password Helpers
+================================ */
 userSchema.methods.setPassword = async function(plain) {
   this.passwordHash = await bcrypt.hash(plain, 10);
 };
@@ -114,156 +173,8 @@ userSchema.methods.validatePassword = async function(plain) {
   return bcrypt.compare(plain, this.passwordHash);
 };
 
-export default mongoose.model('User', userSchema);
-
-
-
-// // File: express_backend/models/User.js
-
-// import mongoose from 'mongoose';
-// import bcrypt from 'bcryptjs';
-
-// /**
-//  * User schema: stores authentication credentials, profile info,
-//  * roles (clipper/advertiser/admin), security flags, and payment details.
-//  */
-// const userSchema = new mongoose.Schema({
-//   // Determines which dashboard/features the user can access
-//   role: {
-//     type: String,
-//     enum: ['clipper', 'advertiser', 'admin', 'ad-worker', 'platform'],
-//     required: true
-//   },
-
-//   // Super-admin flag (only one initial signup; then disable that route)
-//   isSuperAdmin: {
-//     type: Boolean,
-//     default: false
-//   },
-
-//   resetCode: String,
-//   resetExpires: Date,
-
-//   // Login credentials
-//   email:        { type: String, required: true, unique: true },
-//   passwordHash: { type: String, required: true },
-
-//   // ----------------------------
-//   // Contact & Profile
-//   // ----------------------------
-//   phone:   String,
-//   country: String,
-
-//   // Clipper-specific fields
-//   firstName: String,
-//   lastName:  String,
-
-//   // ----------------------------
-//   // ⭐ PERFORMANCE PREMIUM SYSTEM
-//   // ----------------------------
-
-//   // Clipper performance rating (0 → 5 scale)
-//   rating: {
-//     type: Number,
-//     default: 0,
-//     min: 0,
-//     max: 5
-//   },
-
-//   // Auto set based on rating
-//   isPremiumCreator: {
-//     type: Boolean,
-//     default: false
-//   },
-
-//   // ----------------------------
-//   // Advertiser-specific fields
-//   // ----------------------------
-//   contactName: String,
-//   company:     String,
-
-//   creatorTypes: {  
-//     type: [String],
-//     default: []
-//   },
-
-//   otherCreatorType: String,
-
-//   // ----------------------------
-//   // Security & Verification
-//   // ----------------------------
-//   twoFactorEnabled: { type: Boolean, default: false },
-//   isBlocked:        { type: Boolean, default: false },
-//   isVerified:       { type: Boolean, default: false },
-
-//   emailOTP: String,
-//   otpExpires: Date,
-
-//   hasJoinedTelegram: {
-//     type: Boolean,
-//     default: false
-//   },
-
-//   telegramId: {
-//     type: String,
-//     sparse: true
-//   },
-
-//   // ----------------------------
-//   // Wallet & Transactions
-//   // ----------------------------
-//   wallet: { type: mongoose.Schema.Types.ObjectId, ref: 'Wallet' },
-
-//   // ----------------------------
-//   // Payment Preferences
-//   // ----------------------------
-//   paymentMethod: {
-//     type: String,
-//     enum: ['USDT', 'Bank'],
-//     default: 'Bank'
-//   },
-
-//   usdtAddress:     String,
-//   usdtNetwork:     String,
-//   payBankName:      String,
-//   payAccountNumber: String,
-//   payAccountName:   String,
-
-// }, { timestamps: true });
-
-// /**
-//  * ⭐ AUTO PREMIUM LOGIC
-//  * If clipper rating >= 4 → premium creator
-//  */
-// // userSchema.pre('save', function(next) {
-// //   if (this.role === 'clipper' && this.rating >= 4) {
-// //     this.isPremiumCreator = true;
-// //   } else {
-// //     this.isPremiumCreator = false;
-// //   }
-// //   next();
-// // });
-
-// userSchema.pre('save', function(next) {
-//   if (this.role === 'clipper' && this.rating >= 4 && !this.isPremiumCreator) {
-//     this.isPremiumCreator = true;
-//   }
-//   // Removed the else clause to allow manual setting to true even if rating < 4
-//   next();
-// });
-// /**
-//  * Hashes a plaintext password and stores it in passwordHash.
-//  */
-// userSchema.methods.setPassword = async function(plain) {
-//   this.passwordHash = await bcrypt.hash(plain, 10);
-// };
-
-// /**
-//  * Compares a plaintext password against the stored hash.
-//  */
-// userSchema.methods.validatePassword = async function(plain) {
-//   return bcrypt.compare(plain, this.passwordHash);
-// };
-
-// export default mongoose.model('User', userSchema);
-
+/* ================================
+   Safe Export (Prevents OverwriteModelError)
+================================ */
+export default mongoose.models.User || 
+       mongoose.model('User', userSchema);

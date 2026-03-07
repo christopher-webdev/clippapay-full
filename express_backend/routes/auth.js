@@ -31,14 +31,6 @@ function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Middleware to validate creator types for advertisers
-const validateCreatorTypes = (req, res, next) => {
-  if (req.body.role === 'advertiser' && (!req.body.creatorTypes || req.body.creatorTypes.length === 0)) {
-    return res.status(400).json({ error: 'At least one creator type must be selected' });
-  }
-  next();
-};
-
 // POST /api/auth/signup
 router.post('/signup', async (req, res) => {
   try {
@@ -51,9 +43,7 @@ router.post('/signup', async (req, res) => {
       firstName,
       lastName,
       contactName,
-      company,
-      creatorTypes = [],
-      otherCreatorType = ''
+      company
     } = req.body;
 
     const email = req.body.email?.toLowerCase();
@@ -61,14 +51,6 @@ router.post('/signup', async (req, res) => {
     // Validation
     if (password !== confirm) return res.status(400).json({ error: 'Passwords must match.' });
     if (password.length < 8) return res.status(400).json({ error: 'Password too short.' });
-
-    const finalCreatorTypes = creatorTypes.includes("Other (please specify)")
-      ? [...creatorTypes.filter(type => type !== "Other (please specify)"), otherCreatorType]
-      : creatorTypes;
-
-    if (role === 'advertiser' && finalCreatorTypes.length === 0) {
-      return res.status(400).json({ error: 'Please select at least one creator type.' });
-    }
 
     const existing = await User.findOne({ email });
     if (existing) {
@@ -95,8 +77,6 @@ router.post('/signup', async (req, res) => {
        Object.assign(user, {
         contactName,
         company,
-        creatorTypes: finalCreatorTypes,
-        otherCreatorType: finalCreatorTypes.includes(otherCreatorType) ? otherCreatorType : ''
       });
     }
 

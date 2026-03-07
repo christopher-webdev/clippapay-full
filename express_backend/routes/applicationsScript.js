@@ -123,4 +123,58 @@ router.post('/:id/request-script-changes', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/applications/:id
+router.get('/:id', requireAuth, async (req, res) => {
+  try {
+    const application = await Application.findById(req.params.id)
+      .populate('campaign', 'title thumbnailUrl category preferredLength applicationDeadline advertiser')
+      .populate('clipper', 'firstName lastName');
+
+    if (!application) return res.status(404).json({ error: 'Application not found' });
+
+    // Only allow clipper to see their own offer
+    if (application.clipper.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    res.json({ success: true, application });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load application' });
+  }
+});
+
+// POST /api/applications/:id/accept
+router.post('/:id/accept', requireAuth, requireClipper, async (req, res) => {
+  try {
+    const application = await Application.findById(req.params.id);
+    if (!application) return res.status(404).json({ error: 'Not found' });
+
+    if (application.clipper.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: 'Not your application' });
+    }
+
+    if (application.status !== 'selected') {
+      return res.status(400).json({ error: 'Offer not available for acceptance' });
+    }
+
+    if (new Date() > new Date(application.offerExpiresAt)) {
+      application.status = 'expired';
+      await application.save();
+      return res.status(400).json({ error: 'Offer has expired' });
+    }
+
+    application.status = 'accepted';
+    application.acceptedAt = new Date();
+    application.submissionDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+
+    await application.save();
+
+    // Notify advertiser
+    // await createNotification(application.campaign.advertiser, 'offer_accepted', ...);
+
+    res.json({ success: true, application });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to accept offer' });
+  }
+});
 export default router;

@@ -6,16 +6,17 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
-  SafeAreaView,
   Alert,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
+const API_BASE = process.env.EXPO_PUBLIC_API_URL;
 const { width } = Dimensions.get('window');
 const scale = width / 428;
 
@@ -28,19 +29,15 @@ const TAB_ITEMS = [
     route: '/(dashboard_clipper)/clipper_dashboard',
     activeRoutes: [
       '/(dashboard_clipper)/clipper_dashboard',
-      '/(dashboard_clipper)',
-      '/clipper_dashboard',
     ],
   },
   {
-    name: 'Submissions',
+    name: 'My applications ',
     icon: 'document-text-outline',
     activeIcon: 'document-text',
-    route: '/(dashboard_clipper)/mysubmissions',
+    route: '/(dashboard_clipper)/my-applications',
     activeRoutes: [
-      '/(dashboard_clipper)/mysubmissions',
-      '/mysubmissions',
-      '/(dashboard_clipper)/submissions',
+      '/(dashboard_clipper)/my-applications',
     ],
   },
   {
@@ -50,8 +47,7 @@ const TAB_ITEMS = [
     route: '/(dashboard_clipper)/wallet',
     activeRoutes: [
       '/(dashboard_clipper)/wallet',
-      '/wallet',
-      '/(dashboard_clipper)/wallet_screen',
+
     ],
   },
   {
@@ -61,8 +57,6 @@ const TAB_ITEMS = [
     route: '/(dashboard_clipper)/clipper_profile_edit',
     activeRoutes: [
       '/(dashboard_clipper)/clipper_profile_edit',
-      '/clipper_profile_edit',
-      '/(dashboard_clipper)/profile',
     ],
   },
 ];
@@ -226,7 +220,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
     height: 64 * scale,
-    paddingHorizontal: 8 * scale,
+    paddingHorizontal: 4 * scale,
   },
   tabItem: {
     alignItems: 'center',
@@ -241,17 +235,17 @@ const styles = StyleSheet.create({
   iconContainer: {
     padding: 6 * scale,
     borderRadius: 12 * scale,
+    position: 'relative',
   },
   activeIconContainer: {
     backgroundColor: 'rgba(124, 58, 237, 0.12)',
-    padding: 6 * scale,
-    borderRadius: 12 * scale,
   },
   tabLabel: {
     fontSize: 11 * scale,
-    lineHeight: 11 * scale * 1.4,
+    lineHeight: 14 * scale,
     letterSpacing: 0.3 * scale,
     marginTop: 4 * scale,
+    maxWidth: 70 * scale,
   },
   activeTabLabel: {
     color: '#7C3AED',
@@ -276,6 +270,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     position: 'relative',
     overflow: 'hidden',
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
   },
   logoutGradient: {
     ...StyleSheet.absoluteFillObject,

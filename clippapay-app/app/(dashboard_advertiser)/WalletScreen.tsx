@@ -1,4 +1,5 @@
-// app/(dashboard)/wallet.tsx
+// app/(dashboard)/wallet.tsx (complete updated version)
+
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -20,39 +21,109 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
+import * as Clipboard from 'expo-clipboard';
+import { useNotificationsContext } from '../../hooks/useNotifications';
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
-const API_BASE = 'https://clippapay.com/api';
+const API_BASE = process.env.EXPO_PUBLIC_API_URL;
+
+interface PlatformDetails {
+  bank: {
+    name: string;
+    accountNumber: string;
+    accountName: string;
+  };
+  usdt: {
+    address: string;
+    network: string;
+    minDeposit: number;
+    minWithdrawal: number;
+  };
+  limits: {
+    ngnMinDeposit: number;
+    ngnMinWithdrawal: number;
+    usdtRate: number;
+  };
+}
 
 interface Deposit {
   _id: string;
   amount: number;
+  currency: 'NGN' | 'USDT';
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
   receiptUrl?: string;
+  txHash?: string;
+}
+
+interface Withdrawal {
+  _id: string;
+  amount: number;
+  currency: 'NGN' | 'USDT';
+  paymentMethod: 'bank' | 'usdt';
+  bank_name?: string;
+  account_number?: string;
+  account_name?: string;
+  usdt_address?: string;
+  usdt_network?: string;
+  status: 'pending' | 'completed' | 'declined';
+  declineReason?: string;
+  createdAt: string;
 }
 
 export default function WalletScreen() {
+  const { refresh: refreshNotifications } = useNotificationsContext();
   const [balance, setBalance] = useState<number>(0);
+  const [usdtBalance, setUsdtBalance] = useState<number>(0);
   const [escrow, setEscrow] = useState<number>(0);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
+  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>('deposit');
+  const [platformDetails, setPlatformDetails] = useState<PlatformDetails | null>(null);
+  const [loadingPlatformDetails, setLoadingPlatformDetails] = useState(true);
+
+  // Currency selection
+  const [selectedCurrency, setSelectedCurrency] = useState<'NGN' | 'USDT'>('NGN');
 
   // Deposit flow
   const [modalVisible, setModalVisible] = useState(false);
   const [depositAmount, setDepositAmount] = useState('');
-  const [depositMethod, setDepositMethod] = useState<'paystack' | 'manual'>('paystack');
+  const [depositMethod, setDepositMethod] = useState<'paystack' | 'manual' | 'usdt'>('paystack');
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Receipt upload
+  // Receipt upload (unified for both NGN and USDT)
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  
+  // USDT specific fields
+  const [usdtTxHash, setUsdtTxHash] = useState('');
+  const [usdtNetwork, setUsdtNetwork] = useState('');
+
+  // Withdrawal flow
+  const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
+  const [wdrAmount, setWdrAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'bank' | 'usdt'>('bank');
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [withdrawUsdtAddress, setWithdrawUsdtAddress] = useState('');
+  const [withdrawUsdtNetwork, setWithdrawUsdtNetwork] = useState('');
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+
+  // Constants (will be overridden by platform details)
+  const [MIN_NGN_DEPOSIT, setMinNgnDeposit] = useState(20000);
+  const [MIN_USDT_DEPOSIT, setMinUsdtDeposit] = useState(10);
+  const [MIN_NGN_WITHDRAWAL, setMinNgnWithdrawal] = useState(1000);
+  const [MIN_USDT_WITHDRAWAL, setMinUsdtWithdrawal] = useState(5);
+  const [USDT_RATE, setUsdtRate] = useState(1500);
 
   useEffect(() => {
     loadUserEmail();
+    fetchPlatformDetails();
     fetchWalletData();
   }, []);
 
@@ -76,24 +147,51 @@ export default function WalletScreen() {
     }
   };
 
+  const fetchPlatformDetails = async () => {
+    setLoadingPlatformDetails(true);
+    try {
+      const token = await getToken();
+      const res = await axios.get(`${API_BASE}/wallet/platform-details`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setPlatformDetails(res.data);
+      
+      // Update constants
+      setMinNgnDeposit(res.data.limits.ngnMinDeposit);
+      setMinNgnWithdrawal(res.data.limits.ngnMinWithdrawal);
+      setMinUsdtDeposit(res.data.usdt.minDeposit);
+      setMinUsdtWithdrawal(res.data.usdt.minWithdrawal);
+      setUsdtRate(res.data.limits.usdtRate);
+    } catch (err) {
+      console.error('Failed to fetch platform details:', err);
+    } finally {
+      setLoadingPlatformDetails(false);
+    }
+  };
+
   const fetchWalletData = async () => {
     setLoading(true);
     try {
       const token = await getToken();
       if (!token) throw new Error('No token');
 
-      const [walletRes, depositsRes] = await Promise.all([
+      const [walletRes, depositsRes, withdrawalsRes] = await Promise.all([
         axios.get(`${API_BASE}/wallet`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
         axios.get(`${API_BASE}/wallet/deposits`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
+        axios.get(`${API_BASE}/withdrawals`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
       ]);
 
       setBalance(walletRes.data.balance || 0);
+      setUsdtBalance(walletRes.data.usdtBalance || 0);
       setEscrow(walletRes.data.escrowLocked || 0);
       setDeposits(depositsRes.data || []);
+      setWithdrawals(withdrawalsRes.data || []);
     } catch (err: any) {
       console.error(err);
       Alert.alert('Error', 'Failed to load wallet data');
@@ -108,45 +206,12 @@ export default function WalletScreen() {
     fetchWalletData();
   };
 
-  const handleDeposit = async () => {
-    const amount = parseInt(depositAmount, 10);
-    if (isNaN(amount) || amount < 20000) {
-      Alert.alert('Invalid Amount', 'Minimum deposit is ₦20,000');
-      return;
-    }
-
-    setSubmitting(true);
-
-    if (depositMethod === 'paystack') {
-      if (!email) {
-        Alert.alert('Error', 'Email is required for Paystack');
-        setSubmitting(false);
-        return;
-      }
-
-      try {
-        const token = await getToken();
-        const initRes = await axios.post(
-          `${API_BASE}/wallet/init-paystack`,
-          { amount, email },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-
-        const { reference, authorization_url } = initRes.data;
-        Alert.alert('Paystack Payment', `Reference: ${reference}`);
-        setModalVisible(false);
-        setDepositAmount('');
-      } catch (err: any) {
-        Alert.alert('Error', err.response?.data?.error || 'Failed to start payment');
-      }
-    } else {
-      setModalVisible(false);
-      setReceiptModalVisible(true);
-    }
-
-    setSubmitting(false);
+  const copyToClipboard = async (text: string) => {
+    await Clipboard.setStringAsync(text);
+    Alert.alert('Copied!', 'Address copied to clipboard');
   };
 
+  // Unified receipt picker
   const pickReceipt = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -171,14 +236,76 @@ export default function WalletScreen() {
     }
   };
 
-  const submitManualDeposit = async () => {
-    const amount = parseInt(depositAmount, 10);
-    if (isNaN(amount) || amount < 20000) {
+  const handleDeposit = async () => {
+    if (selectedCurrency === 'NGN') {
+      const amount = parseInt(depositAmount, 10);
+      if (isNaN(amount) || amount < MIN_NGN_DEPOSIT) {
+        Alert.alert('Invalid Amount', `Minimum deposit is ₦${MIN_NGN_DEPOSIT.toLocaleString()}`);
+        return;
+      }
+
+      setSubmitting(true);
+
+      if (depositMethod === 'paystack') {
+        if (!email) {
+          Alert.alert('Error', 'Coming soon, please use bank deposit or USDT');
+          setSubmitting(false);
+          return;
+        }
+
+        try {
+          const token = await getToken();
+          const initRes = await axios.post(
+            `${API_BASE}/wallet/init-paystack`,
+            { amount, email },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+
+          const { reference, authorization_url } = initRes.data;
+          Alert.alert('Paystack Payment', `Reference: ${reference}\n\nComplete payment in the browser that will open.`);
+          setModalVisible(false);
+          setDepositAmount('');
+        } catch (err: any) {
+          Alert.alert('Error', err.response?.data?.error || 'Failed to start payment');
+        }
+      } else {
+        // Manual NGN deposit
+        setModalVisible(false);
+        setReceiptModalVisible(true);
+      }
+    } else {
+      // USDT Deposit
+      const amount = parseFloat(depositAmount);
+      if (isNaN(amount) || amount < MIN_USDT_DEPOSIT) {
+        Alert.alert('Invalid Amount', `Minimum deposit is ${MIN_USDT_DEPOSIT} USDT`);
+        return;
+      }
+      setModalVisible(false);
+      setReceiptModalVisible(true); // Use same receipt modal for USDT
+    }
+
+    setSubmitting(false);
+  };
+
+  // Unified deposit submission for both NGN and USDT
+  const submitDeposit = async () => {
+    const amount = selectedCurrency === 'NGN' 
+      ? parseInt(depositAmount, 10) 
+      : parseFloat(depositAmount);
+      
+    if (isNaN(amount) || amount < (selectedCurrency === 'NGN' ? MIN_NGN_DEPOSIT : MIN_USDT_DEPOSIT)) {
       Alert.alert('Error', 'Invalid amount');
       return;
     }
+    
     if (!selectedReceipt) {
       Alert.alert('Missing Receipt', 'Please select a receipt image');
+      return;
+    }
+
+    // For USDT, validate transaction hash
+    if (selectedCurrency === 'USDT' && !usdtTxHash.trim()) {
+      Alert.alert('Missing Transaction Hash', 'Please provide the USDT transaction hash');
       return;
     }
 
@@ -190,12 +317,19 @@ export default function WalletScreen() {
 
       const formData = new FormData();
       formData.append('amount', amount.toString());
-      formData.append('paymentMethod', 'bank');
+      formData.append('currency', selectedCurrency);
+      formData.append('paymentMethod', selectedCurrency === 'NGN' ? 'bank_transfer' : 'usdt');
       formData.append('receipt', {
         uri: selectedReceipt.uri,
         name: selectedReceipt.fileName || `receipt-${Date.now()}.jpg`,
         type: selectedReceipt.mimeType || 'image/jpeg',
       } as any);
+
+      // Add USDT-specific fields
+      if (selectedCurrency === 'USDT') {
+        formData.append('txHash', usdtTxHash.trim());
+        formData.append('network', usdtNetwork || platformDetails?.usdt.network || 'TRC20');
+      }
 
       await axios.post(`${API_BASE}/wallet/deposits`, formData, {
         headers: {
@@ -205,36 +339,170 @@ export default function WalletScreen() {
         timeout: 30000,
       });
 
-      Alert.alert('Success', 'Receipt uploaded! Your deposit is pending approval.');
+      Alert.alert(
+        'Success', 
+        selectedCurrency === 'NGN' 
+          ? 'Receipt uploaded! Your deposit is pending approval.'
+          : 'USDT deposit submitted! Your deposit is pending confirmation.'
+      );
+      
+      // Refresh notifications
+      refreshNotifications();
+      
+      // Reset all states
       setReceiptModalVisible(false);
       setSelectedReceipt(null);
+      setUsdtTxHash('');
+      setUsdtNetwork('');
       setDepositAmount('');
+      setModalVisible(false);
+      
+      // Refresh wallet data
       fetchWalletData();
     } catch (err: any) {
       console.error('Upload error:', err);
-      const msg = err.response?.data?.error || err.message || 'Failed to upload receipt';
+      const msg = err.response?.data?.error || err.message || 'Failed to submit deposit';
       Alert.alert('Upload Error', msg);
     } finally {
       setSubmitting(false);
     }
   };
 
+  const handleWithdrawPress = () => {
+    if (selectedCurrency === 'NGN' && balance < MIN_NGN_WITHDRAWAL) {
+      Alert.alert(
+        "Can't Withdraw Yet",
+        `Your NGN balance (₦${balance.toLocaleString()}) is below the minimum withdrawal amount of ₦${MIN_NGN_WITHDRAWAL.toLocaleString()}.`,
+        [{ text: 'OK', style: 'default' }]
+      );
+      return;
+    }
+
+    if (selectedCurrency === 'USDT' && usdtBalance < MIN_USDT_WITHDRAWAL) {
+      Alert.alert(
+        "Can't Withdraw Yet",
+        `Your USDT balance (${usdtBalance} USDT) is below the minimum withdrawal amount of ${MIN_USDT_WITHDRAWAL} USDT.`,
+        [{ text: 'OK', style: 'default' }]
+      );
+      return;
+    }
+
+    setWithdrawModalVisible(true);
+  };
+
+  const handleWithdraw = async () => {
+    const amount = selectedCurrency === 'NGN' 
+      ? parseInt(wdrAmount, 10) 
+      : parseFloat(wdrAmount);
+
+    if (isNaN(amount) || amount <= 0) {
+      setWithdrawError('Please enter a valid amount');
+      return;
+    }
+
+    const maxAmount = selectedCurrency === 'NGN' ? balance : usdtBalance;
+    if (amount > maxAmount) {
+      setWithdrawError(`Amount exceeds your ${selectedCurrency} balance`);
+      return;
+    }
+
+    if (selectedCurrency === 'NGN') {
+      if (amount < MIN_NGN_WITHDRAWAL) {
+        setWithdrawError(`Minimum NGN withdrawal is ₦${MIN_NGN_WITHDRAWAL}`);
+        return;
+      }
+    } else {
+      if (amount < MIN_USDT_WITHDRAWAL) {
+        setWithdrawError(`Minimum USDT withdrawal is ${MIN_USDT_WITHDRAWAL} USDT`);
+        return;
+      }
+    }
+
+    if (selectedCurrency === 'NGN' && paymentMethod === 'bank') {
+      if (!bankName || !accountNumber || !accountName) {
+        setWithdrawError('Please fill in all bank details');
+        return;
+      }
+    }
+
+    if (selectedCurrency === 'USDT' && paymentMethod === 'usdt') {
+      if (!withdrawUsdtAddress || !withdrawUsdtNetwork) {
+        setWithdrawError('Please provide USDT address and network');
+        return;
+      }
+    }
+
+    setSubmitting(true);
+    setWithdrawError(null);
+
+    try {
+      const token = await getToken();
+      if (!token) throw new Error('No auth token');
+
+      const payload = {
+        amount,
+        currency: selectedCurrency,
+        paymentMethod: selectedCurrency === 'NGN' ? 'bank' : 'usdt',
+        ...(selectedCurrency === 'NGN'
+          ? { bank_name: bankName, account_number: accountNumber, account_name: accountName }
+          : { usdt_address: withdrawUsdtAddress, usdt_network: withdrawUsdtNetwork }),
+      };
+
+      await axios.post(`${API_BASE}/withdrawals`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      Alert.alert(
+        'Request Submitted!',
+        'Your withdrawal request has been sent. We’ll process it soon.',
+        [{ text: 'OK' }]
+      );
+
+      // Refresh notifications
+      refreshNotifications();
+
+      setWithdrawModalVisible(false);
+      resetWithdrawForm();
+      fetchWalletData();
+    } catch (err: any) {
+      setWithdrawError(err.response?.data?.error || 'Failed to submit request');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetWithdrawForm = () => {
+    setWdrAmount('');
+    setBankName('');
+    setAccountNumber('');
+    setAccountName('');
+    setWithdrawUsdtAddress('');
+    setWithdrawUsdtNetwork('');
+    setWithdrawError(null);
+  };
+
   const formatNaira = (num: number) => `₦${num.toLocaleString()}`;
-  const amountNum = parseInt(depositAmount, 10);
+  const formatUSDT = (num: number) => `${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
+
+  const amountNum = selectedCurrency === 'NGN' 
+    ? parseInt(depositAmount, 10) 
+    : parseFloat(depositAmount);
   const displayAmount = isNaN(amountNum) ? '0' : amountNum.toLocaleString();
 
   const getStatusConfig = (status: string) => {
     switch (status) {
       case 'approved':
+      case 'completed':
         return { bg: '#DCFCE7', text: '#16A34A', icon: 'checkmark-circle' };
       case 'rejected':
+      case 'declined':
         return { bg: '#FEE2E2', text: '#DC2626', icon: 'close-circle' };
       default:
         return { bg: '#FEF3C7', text: '#D97706', icon: 'time' };
     }
   };
 
-  if (loading) {
+  if (loading || loadingPlatformDetails) {
     return (
       <View style={styles.centerContainer}>
         <LinearGradient
@@ -264,6 +532,26 @@ export default function WalletScreen() {
           <Text style={styles.subtitle}>Manage your funds and transactions</Text>
         </View>
 
+        {/* Currency Selector */}
+        <View style={styles.currencySelector}>
+          <TouchableOpacity
+            style={[styles.currencyTab, selectedCurrency === 'NGN' && styles.currencyTabActive]}
+            onPress={() => setSelectedCurrency('NGN')}
+          >
+            <Text style={[styles.currencyTabText, selectedCurrency === 'NGN' && styles.currencyTabTextActive]}>
+              NGN
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.currencyTab, selectedCurrency === 'USDT' && styles.currencyTabActive]}
+            onPress={() => setSelectedCurrency('USDT')}
+          >
+            <Text style={[styles.currencyTabText, selectedCurrency === 'USDT' && styles.currencyTabTextActive]}>
+              USDT
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Balance Cards */}
         <View style={styles.cardsContainer}>
           <View style={styles.balanceCard}>
@@ -271,20 +559,46 @@ export default function WalletScreen() {
               <View style={[styles.cardIconContainer, { backgroundColor: '#EEF2FF' }]}>
                 <Ionicons name="wallet-outline" size={20} color="#4F46E5" />
               </View>
-              <Text style={styles.cardLabel}>Available Balance</Text>
+              <Text style={styles.cardLabel}>
+                {selectedCurrency === 'NGN' ? 'Available Balance' : 'USDT Balance'}
+              </Text>
             </View>
-            <Text style={styles.balanceAmount}>{formatNaira(balance)}</Text>
-            <TouchableOpacity
-              style={styles.depositButton}
-              onPress={() => setModalVisible(true)}
-            >
-              <LinearGradient
-                colors={['#4F46E5', '#6366F1']}
-                style={styles.depositGradient}
+            <Text style={styles.balanceAmount}>
+              {selectedCurrency === 'NGN' ? formatNaira(balance) : formatUSDT(usdtBalance)}
+            </Text>
+
+            {/* Action Buttons */}
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.depositAction]}
+                onPress={() => {
+                  setActiveTab('deposit');
+                  setModalVisible(true);
+                }}
               >
-                <Text style={styles.depositButtonText}>Deposit Funds</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+                <LinearGradient
+                  colors={['#4F46E5', '#6366F1']}
+                  style={styles.actionGradient}
+                >
+                  <Text style={styles.actionButtonText}>Deposit</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* <TouchableOpacity
+                style={[styles.actionButton, styles.withdrawAction]}
+                onPress={() => {
+                  setActiveTab('withdraw');
+                  handleWithdrawPress();
+                }}
+              >
+                <LinearGradient
+                  colors={['#EF4444', '#F87171']}
+                  style={styles.actionGradient}
+                >
+                  <Text style={styles.actionButtonText}>Withdraw</Text>
+                </LinearGradient>
+              </TouchableOpacity> */}
+            </View>
           </View>
 
           <View style={styles.escrowCard}>
@@ -301,19 +615,45 @@ export default function WalletScreen() {
           </View>
         </View>
 
-        {/* Recent Deposits */}
+        {/* Tabs for Deposits/Withdrawals */}
+        <View style={styles.historyTabs}>
+          <TouchableOpacity
+            style={[styles.historyTab, activeTab === 'deposit' && styles.historyTabActive]}
+            onPress={() => setActiveTab('deposit')}
+          >
+            <Text style={[styles.historyTabText, activeTab === 'deposit' && styles.historyTabTextActive]}>
+              Deposits
+            </Text>
+          </TouchableOpacity>
+          {/* <TouchableOpacity
+            style={[styles.historyTab, activeTab === 'withdraw' && styles.historyTabActive]}
+            onPress={() => setActiveTab('withdraw')}
+          >
+            <Text style={[styles.historyTabText, activeTab === 'withdraw' && styles.historyTabTextActive]}>
+              Withdrawals
+            </Text>
+          </TouchableOpacity> */}
+        </View>
+
+        {/* History List */}
         <View style={styles.recentSection}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleContainer}>
-              <Ionicons name="time-outline" size={20} color="#4F46E5" />
-              <Text style={styles.sectionTitle}>Recent Deposits</Text>
+              <Ionicons 
+                name={activeTab === 'deposit' ? 'time-outline' : 'arrow-up-outline'} 
+                size={20} 
+                color="#4F46E5" 
+              />
+              <Text style={styles.sectionTitle}>
+                {activeTab === 'deposit' ? 'Recent Deposits' : 'Withdrawal History'}
+              </Text>
             </View>
             <TouchableOpacity onPress={handleRefresh}>
               <Ionicons name="refresh-outline" size={20} color="#6B7280" />
             </TouchableOpacity>
           </View>
 
-          {deposits.length === 0 ? (
+          {activeTab === 'deposit' && deposits.length === 0 ? (
             <View style={styles.emptyState}>
               <View style={styles.emptyIconContainer}>
                 <Ionicons name="wallet-outline" size={32} color="#9CA3AF" />
@@ -323,21 +663,45 @@ export default function WalletScreen() {
                 Your deposit history will appear here
               </Text>
             </View>
+          ) : activeTab === 'withdraw' && withdrawals.length === 0 ? (
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIconContainer}>
+                <Ionicons name="arrow-up-outline" size={32} color="#9CA3AF" />
+              </View>
+              <Text style={styles.emptyTitle}>No withdrawals yet</Text>
+              <Text style={styles.emptyText}>
+                Your withdrawal history will appear here
+              </Text>
+            </View>
           ) : (
-            deposits.slice(0, 10).map((deposit) => {
-              const config = getStatusConfig(deposit.status);
+            (activeTab === 'deposit' ? deposits : withdrawals).slice(0, 10).map((item) => {
+              const config = getStatusConfig(item.status);
+              const isDeposit = activeTab === 'deposit';
+              const deposit = item as Deposit;
+              const withdrawal = item as Withdrawal;
+              
               return (
-                <View key={deposit._id} style={styles.depositItem}>
+                <View key={item._id} style={styles.depositItem}>
                   <View style={styles.depositInfo}>
-                    <View style={styles.depositIconContainer}>
-                      <Ionicons name="arrow-down-circle" size={24} color="#4F46E5" />
+                    <View style={[styles.depositIconContainer, { backgroundColor: isDeposit ? '#EEF2FF' : '#FEE2E2' }]}>
+                      <Ionicons 
+                        name={isDeposit ? "arrow-down-circle" : "arrow-up-circle"} 
+                        size={24} 
+                        color={isDeposit ? "#4F46E5" : "#EF4444"} 
+                      />
                     </View>
                     <View>
                       <Text style={styles.depositAmount}>
-                        {formatNaira(deposit.amount)}
+                        {isDeposit 
+                          ? (deposit.currency === 'USDT' ? formatUSDT(deposit.amount) : formatNaira(deposit.amount))
+                          : (withdrawal.currency === 'USDT' ? formatUSDT(withdrawal.amount) : formatNaira(withdrawal.amount))
+                        }
+                      </Text>
+                      <Text style={styles.depositCurrency}>
+                        {isDeposit ? deposit.currency : withdrawal.currency}
                       </Text>
                       <Text style={styles.depositDate}>
-                        {new Date(deposit.createdAt).toLocaleDateString('en-US', {
+                        {new Date(item.createdAt).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric',
@@ -348,7 +712,7 @@ export default function WalletScreen() {
                   <View style={[styles.depositStatus, { backgroundColor: config.bg }]}>
                     <Ionicons name={config.icon as any} size={14} color={config.text} />
                     <Text style={[styles.statusText, { color: config.text }]}>
-                      {deposit.status}
+                      {item.status}
                     </Text>
                   </View>
                 </View>
@@ -371,7 +735,9 @@ export default function WalletScreen() {
         <BlurView intensity={20} tint="dark" style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Deposit Funds</Text>
+              <Text style={styles.modalTitle}>
+                Deposit {selectedCurrency}
+              </Text>
               <TouchableOpacity 
                 onPress={() => setModalVisible(false)}
                 style={styles.closeButton}
@@ -382,76 +748,92 @@ export default function WalletScreen() {
 
             <View style={styles.modalBody}>
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Amount (₦)</Text>
+                <Text style={styles.inputLabel}>
+                  Amount ({selectedCurrency === 'NGN' ? '₦' : 'USDT'})
+                </Text>
                 <View style={styles.inputContainer}>
-                  <Text style={styles.inputCurrency}>₦</Text>
+                  {selectedCurrency === 'NGN' && (
+                    <Text style={styles.inputCurrency}>₦</Text>
+                  )}
                   <TextInput
                     style={styles.input}
                     value={depositAmount}
                     onChangeText={setDepositAmount}
-                    placeholder="20000"
+                    placeholder={selectedCurrency === 'NGN' ? MIN_NGN_DEPOSIT.toString() : MIN_USDT_DEPOSIT.toString()}
                     keyboardType="numeric"
                     placeholderTextColor="#9CA3AF"
                   />
                 </View>
-                <Text style={styles.inputHint}>Minimum deposit: ₦20,000</Text>
+                <Text style={styles.inputHint}>
+                  Minimum: {selectedCurrency === 'NGN' ? `₦${MIN_NGN_DEPOSIT.toLocaleString()}` : `${MIN_USDT_DEPOSIT} USDT`}
+                </Text>
               </View>
 
-              <Text style={styles.methodLabel}>Payment Method</Text>
+              {selectedCurrency === 'NGN' && (
+                <>
+                  <Text style={styles.methodLabel}>Payment Method</Text>
 
-              <TouchableOpacity
-                style={[
-                  styles.methodCard,
-                  depositMethod === 'paystack' && styles.methodCardActive,
-                ]}
-                onPress={() => setDepositMethod('paystack')}
-              >
-                <View style={styles.methodLeft}>
-                  <View style={[styles.methodIcon, { backgroundColor: '#EEF2FF' }]}>
-                    <MaterialIcons name="payment" size={20} color="#4F46E5" />
-                  </View>
-                  <View>
-                    <Text style={styles.methodTitle}>Paystack</Text>
-                    <Text style={styles.methodDescription}>Instant payment with card or bank</Text>
-                  </View>
-                </View>
-                {depositMethod === 'paystack' && (
-                  <View style={styles.methodSelected}>
-                    <Ionicons name="checkmark-circle" size={24} color="#4F46E5" />
-                  </View>
-                )}
-              </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.methodCard,
+                      depositMethod === 'paystack' && styles.methodCardActive,
+                    ]}
+                    onPress={() => setDepositMethod('paystack')}
+                  >
+                    <View style={styles.methodLeft}>
+                      <View style={[styles.methodIcon, { backgroundColor: '#EEF2FF' }]}>
+                        <MaterialIcons name="payment" size={20} color="#4F46E5" />
+                      </View>
+                      <View>
+                        <Text style={styles.methodTitle}>Paystack</Text>
+                        <Text style={styles.methodDescription}>Instant payment with card or bank</Text>
+                      </View>
+                    </View>
+                    {depositMethod === 'paystack' && (
+                      <View style={styles.methodSelected}>
+                        <Ionicons name="checkmark-circle" size={24} color="#4F46E5" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[
-                  styles.methodCard,
-                  depositMethod === 'manual' && styles.methodCardActive,
-                ]}
-                onPress={() => setDepositMethod('manual')}
-              >
-                <View style={styles.methodLeft}>
-                  <View style={[styles.methodIcon, { backgroundColor: '#FEF3C7' }]}>
-                    <Ionicons name="cash-outline" size={20} color="#D97706" />
-                  </View>
-                  <View>
-                    <Text style={styles.methodTitle}>Bank Transfer</Text>
-                    <Text style={styles.methodDescription}>Upload receipt after transfer</Text>
-                  </View>
-                </View>
-                {depositMethod === 'manual' && (
-                  <View style={styles.methodSelected}>
-                    <Ionicons name="checkmark-circle" size={24} color="#4F46E5" />
-                  </View>
-                )}
-              </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.methodCard,
+                      depositMethod === 'manual' && styles.methodCardActive,
+                    ]}
+                    onPress={() => setDepositMethod('manual')}
+                  >
+                    <View style={styles.methodLeft}>
+                      <View style={[styles.methodIcon, { backgroundColor: '#FEF3C7' }]}>
+                        <Ionicons name="cash-outline" size={20} color="#D97706" />
+                      </View>
+                      <View>
+                        <Text style={styles.methodTitle}>Bank Transfer</Text>
+                        <Text style={styles.methodDescription}>Upload receipt after transfer</Text>
+                      </View>
+                    </View>
+                    {depositMethod === 'manual' && (
+                      <View style={styles.methodSelected}>
+                        <Ionicons name="checkmark-circle" size={24} color="#4F46E5" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
 
               <TouchableOpacity
                 style={[
                   styles.submitButton,
-                  (isNaN(amountNum) || amountNum < 20000 || submitting) && styles.submitButtonDisabled,
+                  ((selectedCurrency === 'NGN' && (isNaN(amountNum) || amountNum < MIN_NGN_DEPOSIT)) ||
+                   (selectedCurrency === 'USDT' && (isNaN(amountNum) || amountNum < MIN_USDT_DEPOSIT)) ||
+                   submitting) && styles.submitButtonDisabled,
                 ]}
                 onPress={handleDeposit}
-                disabled={isNaN(amountNum) || amountNum < 20000 || submitting}
+                disabled={
+                  (selectedCurrency === 'NGN' && (isNaN(amountNum) || amountNum < MIN_NGN_DEPOSIT)) ||
+                  (selectedCurrency === 'USDT' && (isNaN(amountNum) || amountNum < MIN_USDT_DEPOSIT)) ||
+                  submitting
+                }
               >
                 <LinearGradient
                   colors={['#4F46E5', '#6366F1']}
@@ -469,21 +851,30 @@ export default function WalletScreen() {
         </BlurView>
       </Modal>
 
-      {/* Receipt Upload Modal */}
+      {/* Unified Receipt Upload Modal for both NGN and USDT */}
       <Modal
         visible={receiptModalVisible}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setReceiptModalVisible(false)}
+        onRequestClose={() => {
+          setReceiptModalVisible(false);
+          setSelectedReceipt(null);
+          setUsdtTxHash('');
+          setUsdtNetwork('');
+        }}
       >
         <BlurView intensity={20} tint="dark" style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Upload Receipt</Text>
+              <Text style={styles.modalTitle}>
+                {selectedCurrency === 'NGN' ? 'Upload Receipt' : 'USDT Deposit Details'}
+              </Text>
               <TouchableOpacity 
                 onPress={() => {
                   setReceiptModalVisible(false);
                   setSelectedReceipt(null);
+                  setUsdtTxHash('');
+                  setUsdtNetwork('');
                 }}
                 style={styles.closeButton}
               >
@@ -491,36 +882,99 @@ export default function WalletScreen() {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.modalBody}>
-              <View style={styles.bankDetailsCard}>
-                <View style={styles.bankHeader}>
-                  <Ionicons name="business" size={20} color="#4F46E5" />
-                  <Text style={styles.bankTitle}>Bank Transfer Details</Text>
+            <ScrollView style={styles.modalBody}>
+              {selectedCurrency === 'NGN' ? (
+                // NGN Bank Transfer Details
+                <View style={styles.bankDetailsCard}>
+                  <View style={styles.bankHeader}>
+                    <Ionicons name="business" size={20} color="#4F46E5" />
+                    <Text style={styles.bankTitle}>Bank Transfer Details</Text>
+                  </View>
+                  <View style={styles.bankDetailsRow}>
+                    <Text style={styles.bankDetailLabel}>Amount:</Text>
+                    <Text style={styles.bankDetailValue}>₦{displayAmount}</Text>
+                  </View>
+                  <View style={styles.bankDetailsRow}>
+                    <Text style={styles.bankDetailLabel}>Bank:</Text>
+                    <Text style={styles.bankDetailValue}>{platformDetails?.bank.name || 'Kuda Microfinance Bank'}</Text>
+                  </View>
+                  <View style={styles.bankDetailsRow}>
+                    <Text style={styles.bankDetailLabel}>Account:</Text>
+                    <Text style={styles.bankDetailValue}>{platformDetails?.bank.accountNumber || '3002830057'}</Text>
+                  </View>
+                  <View style={styles.bankDetailsRow}>
+                    <Text style={styles.bankDetailLabel}>Account Name:</Text>
+                    <Text style={styles.bankDetailValue}>{platformDetails?.bank.accountName || 'Clippa Digital Hub LTD'}</Text>
+                  </View>
                 </View>
-                <View style={styles.bankDetailsRow}>
-                  <Text style={styles.bankDetailLabel}>Amount:</Text>
-                  <Text style={styles.bankDetailValue}>₦{displayAmount}</Text>
-                </View>
-                <View style={styles.bankDetailsRow}>
-                  <Text style={styles.bankDetailLabel}>Bank:</Text>
-                  <Text style={styles.bankDetailValue}>Kuda Microfinance Bank</Text>
-                </View>
-                <View style={styles.bankDetailsRow}>
-                  <Text style={styles.bankDetailLabel}>Account:</Text>
-                  <Text style={styles.bankDetailValue}>3002830057</Text>
-                </View>
-                <View style={styles.bankDetailsRow}>
-                  <Text style={styles.bankDetailLabel}>Account Name:</Text>
-                  <Text style={styles.bankDetailValue}>Clippa Digital Hub LTD</Text>
-                </View>
-              </View>
+              ) : (
+                // USDT Transfer Details
+                <View style={styles.usdtDetailsCard}>
+                  <View style={styles.usdtHeader}>
+                    <Ionicons name="logo-usd" size={24} color="#16A34A" />
+                    <Text style={styles.usdtTitle}>Send USDT to this address</Text>
+                  </View>
 
+                  <View style={styles.usdtAddressContainer}>
+                    <Text style={styles.usdtAddressLabel}>Network: {platformDetails?.usdt.network || 'TRC20'}</Text>
+                    <View style={styles.usdtAddressRow}>
+                      <Text style={styles.usdtAddress} numberOfLines={1}>
+                        {platformDetails?.usdt.address || 'TXmz7jY7yY9Zy9Zy9Zy9Zy9Zy9Zy9Zy9Zy9'}
+                      </Text>
+                      <TouchableOpacity 
+                        onPress={() => copyToClipboard(platformDetails?.usdt.address || '')}
+                        style={styles.copyButton}
+                      >
+                        <Ionicons name="copy-outline" size={20} color="#4F46E5" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={styles.usdtWarning}>
+                    <Ionicons name="alert-circle-outline" size={16} color="#D97706" />
+                    <Text style={styles.usdtWarningText}>
+                      Only send USDT on {platformDetails?.usdt.network || 'TRC20'} network. Sending on other networks may result in loss of funds.
+                    </Text>
+                  </View>
+
+                  <View style={styles.usdtAmountRow}>
+                    <Text style={styles.usdtAmountLabel}>Amount to send:</Text>
+                    <Text style={styles.usdtAmountValue}>{displayAmount} USDT</Text>
+                  </View>
+                </View>
+              )}
+
+              {selectedCurrency === 'USDT' && (
+                // USDT Transaction Hash Input
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Transaction Hash / TXID</Text>
+                  <TextInput
+                    style={[styles.input, styles.usdtTxInput]}
+                    value={usdtTxHash}
+                    onChangeText={setUsdtTxHash}
+                    placeholder="Enter the transaction hash from your wallet"
+                    placeholderTextColor="#9CA3AF"
+                    multiline
+                  />
+                  <Text style={styles.inputHint}>
+                    You'll find this in your wallet after sending USDT
+                  </Text>
+                </View>
+              )}
+
+              {/* Receipt Upload Section (for both currencies) */}
+              <Text style={[styles.methodLabel, { marginTop: 16 }]}>
+                {selectedCurrency === 'NGN' ? 'Upload Payment Receipt' : 'Upload Transaction Screenshot'}
+              </Text>
+              
               <TouchableOpacity style={styles.uploadArea} onPress={pickReceipt}>
                 <View style={styles.uploadIconContainer}>
                   <Ionicons name="cloud-upload" size={32} color="#4F46E5" />
                 </View>
-                <Text style={styles.uploadTitle}>Tap to upload receipt</Text>
-                <Text style={styles.uploadHint}>PNG, JPG or PDF (max 5MB)</Text>
+                <Text style={styles.uploadTitle}>Tap to upload {selectedCurrency === 'NGN' ? 'receipt' : 'screenshot'}</Text>
+                <Text style={styles.uploadHint}>
+                  {selectedCurrency === 'NGN' ? 'PNG, JPG or PDF' : 'PNG or JPG'} (max 5MB)
+                </Text>
               </TouchableOpacity>
 
               {selectedReceipt && (
@@ -548,10 +1002,12 @@ export default function WalletScreen() {
               <TouchableOpacity
                 style={[
                   styles.submitButton,
-                  (!selectedReceipt || submitting) && styles.submitButtonDisabled,
+                  (!selectedReceipt || 
+                   (selectedCurrency === 'USDT' && !usdtTxHash.trim()) ||
+                   submitting) && styles.submitButtonDisabled,
                 ]}
-                onPress={submitManualDeposit}
-                disabled={!selectedReceipt || submitting}
+                onPress={submitDeposit}
+                disabled={!selectedReceipt || (selectedCurrency === 'USDT' && !usdtTxHash.trim()) || submitting}
               >
                 <LinearGradient
                   colors={['#4F46E5', '#6366F1']}
@@ -560,11 +1016,158 @@ export default function WalletScreen() {
                   {submitting ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.submitButtonText}>Submit for Verification</Text>
+                    <Text style={styles.submitButtonText}>
+                      {selectedCurrency === 'NGN' ? 'Submit for Verification' : 'Submit Deposit'}
+                    </Text>
                   )}
                 </LinearGradient>
               </TouchableOpacity>
+
+              {selectedCurrency === 'USDT' && (
+                <Text style={styles.usdtNote}>
+                  Your deposit will be credited after {platformDetails?.usdt.network || 'TRC20'} network confirmations
+                </Text>
+              )}
+            </ScrollView>
+          </View>
+        </BlurView>
+      </Modal>
+
+      {/* Withdrawal Modal */}
+      <Modal
+        visible={withdrawModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setWithdrawModalVisible(false)}
+      >
+        <BlurView intensity={20} tint="dark" style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                Withdraw {selectedCurrency}
+              </Text>
+              <TouchableOpacity 
+                onPress={() => {
+                  setWithdrawModalVisible(false);
+                  resetWithdrawForm();
+                }}
+                style={styles.closeButton}
+              >
+                <Ionicons name="close" size={24} color="#6B7280" />
+              </TouchableOpacity>
             </View>
+
+            <ScrollView style={styles.modalBody}>
+              {withdrawError && (
+                <Text style={styles.errorText}>{withdrawError}</Text>
+              )}
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>
+                  Amount ({selectedCurrency === 'NGN' ? '₦' : 'USDT'})
+                </Text>
+                <View style={styles.inputContainer}>
+                  {selectedCurrency === 'NGN' && (
+                    <Text style={styles.inputCurrency}>₦</Text>
+                  )}
+                  <TextInput
+                    style={styles.input}
+                    value={wdrAmount}
+                    onChangeText={setWdrAmount}
+                    placeholder={selectedCurrency === 'NGN' ? MIN_NGN_WITHDRAWAL.toString() : MIN_USDT_WITHDRAWAL.toString()}
+                    keyboardType="numeric"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                </View>
+                <Text style={styles.inputHint}>
+                  Available: {selectedCurrency === 'NGN' ? formatNaira(balance) : formatUSDT(usdtBalance)}
+                </Text>
+                <Text style={styles.inputHint}>
+                  Minimum: {selectedCurrency === 'NGN' ? `₦${MIN_NGN_WITHDRAWAL}` : `${MIN_USDT_WITHDRAWAL} USDT`}
+                </Text>
+              </View>
+
+              {selectedCurrency === 'NGN' ? (
+                <>
+                  <Text style={styles.label}>Bank Name</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={bankName}
+                    onChangeText={setBankName}
+                    placeholder="e.g. Zenith Bank"
+                    placeholderTextColor="#9CA3AF"
+                  />
+
+                  <Text style={styles.label}>Account Number</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={accountNumber}
+                    onChangeText={setAccountNumber}
+                    placeholder="10-digit account number"
+                    keyboardType="numeric"
+                    maxLength={10}
+                    placeholderTextColor="#9CA3AF"
+                  />
+
+                  <Text style={styles.label}>Account Name</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={accountName}
+                    onChangeText={setAccountName}
+                    placeholder="Account holder's name"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                </>
+              ) : (
+                <>
+                  <Text style={styles.label}>USDT Wallet Address</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={withdrawUsdtAddress}
+                    onChangeText={setWithdrawUsdtAddress}
+                    placeholder="Enter your USDT address"
+                    placeholderTextColor="#9CA3AF"
+                  />
+
+                  <Text style={styles.label}>Network (TRC20 / ERC20 / BEP20)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={withdrawUsdtNetwork}
+                    onChangeText={setWithdrawUsdtNetwork}
+                    placeholder="e.g. TRC20"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                </>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  (submitting || 
+                   (selectedCurrency === 'NGN' 
+                     ? (parseInt(wdrAmount) < MIN_NGN_WITHDRAWAL || !bankName || !accountNumber || !accountName)
+                     : (parseFloat(wdrAmount) < MIN_USDT_WITHDRAWAL || !withdrawUsdtAddress || !withdrawUsdtNetwork))) && 
+                  styles.submitButtonDisabled,
+                ]}
+                onPress={handleWithdraw}
+                disabled={submitting}
+              >
+                <LinearGradient
+                  colors={['#EF4444', '#F87171']}
+                  style={styles.submitGradient}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.submitButtonText}>Submit Withdrawal Request</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <Text style={styles.modalFooterText}>
+                Withdrawals are processed within 24-48 hours
+              </Text>
+            </ScrollView>
           </View>
         </BlurView>
       </Modal>
@@ -606,9 +1209,38 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginTop: 4,
   },
+  currencySelector: {
+    flexDirection: 'row',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 20,
+  },
+  currencyTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  currencyTabActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  currencyTabText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  currencyTabTextActive: {
+    color: '#4F46E5',
+  },
   cardsContainer: {
     gap: 16,
-    marginBottom: 32,
+    marginBottom: 24,
   },
   balanceCard: {
     backgroundColor: '#FFFFFF',
@@ -649,22 +1281,33 @@ const styles = StyleSheet.create({
     color: '#6B7280',
   },
   balanceAmount: {
-    fontSize: 36,
+    fontSize: 32,
     fontWeight: '800',
     color: '#111827',
     marginBottom: 16,
   },
-  depositButton: {
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  actionButton: {
+    flex: 1,
     height: 48,
     borderRadius: 12,
     overflow: 'hidden',
   },
-  depositGradient: {
+  depositAction: {
+    marginRight: 6,
+  },
+  withdrawAction: {
+    marginLeft: 6,
+  },
+  actionGradient: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  depositButtonText: {
+  actionButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
@@ -673,6 +1316,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     marginTop: 8,
+  },
+  historyTabs: {
+    flexDirection: 'row',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 16,
+  },
+  historyTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  historyTabActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  historyTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  historyTabTextActive: {
+    color: '#4F46E5',
   },
   recentSection: {
     backgroundColor: '#FFFFFF',
@@ -748,7 +1420,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#111827',
-    marginBottom: 4,
+    marginBottom: 2,
+  },
+  depositCurrency: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 2,
   },
   depositDate: {
     fontSize: 12,
@@ -938,6 +1615,92 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#111827',
   },
+  usdtDetailsCard: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  usdtHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  usdtTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  usdtAddressContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  usdtAddressLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  usdtAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  usdtAddress: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+    marginRight: 8,
+  },
+  copyButton: {
+    padding: 4,
+  },
+  usdtWarning: {
+    flexDirection: 'row',
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    gap: 8,
+  },
+  usdtWarningText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#92400E',
+  },
+  usdtAmountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  usdtAmountLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  usdtAmountValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#16A34A',
+  },
+  usdtTxInput: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  usdtNote: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 16,
+  },
   uploadArea: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -1002,5 +1765,25 @@ const styles = StyleSheet.create({
   },
   fileRemoveButton: {
     padding: 4,
+  },
+  label: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  errorText: {
+    color: '#EF4444',
+    fontSize: 14,
+    marginBottom: 16,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  modalFooterText: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 8,
   },
 });

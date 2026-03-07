@@ -1,6 +1,5 @@
-// app/(dashboard)/create_clipping.tsx
-
-import React, { useEffect, useMemo, useState } from 'react';
+// app/(dashboard)/create-clipping.tsx
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,566 +9,1138 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  Dimensions,
   Platform,
-  FlatList,
+  KeyboardAvoidingView,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import * as DocumentPicker from 'expo-document-picker';
 import axios from 'axios';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import Animated, {
+  FadeInDown,
+  FadeInUp,
+  SlideInRight,
+} from 'react-native-reanimated';
 
-const { width } = Dimensions.get('window');
+// Types
+interface WalletData {
+  balance: number;
+  usdtBalance: number;
+  preferredCurrency: 'NGN' | 'USDT';
+}
+
+interface CampaignForm {
+  title: string;
+  videoUrl: string;
+  budget: string;
+  currency: 'NGN' | 'USDT';
+  platforms: string[];
+  hashtags: string;
+  directions: string;
+  categories: string[];
+  ctaUrl: string;
+}
+
+interface FormErrors {
+  title?: string;
+  videoUrl?: string;
+  budget?: string;
+  platforms?: string;
+  categories?: string;
+}
+
+// Constants
 const API_BASE = 'https://clippapay.com/api';
+const NGN_PER_THOUSAND_VIEWS = 3000;
+const USDT_PER_THOUSAND_VIEWS = 1.85; // Approximate USDT equivalent
 
-// Pricing: ₦1.2 per view (adjust as needed)
-const NAIRA_PER_VIEW = 1.2;
+const PLATFORM_OPTIONS = [
+  { id: 'tiktok', label: 'TikTok', icon: 'logo-tiktok' },
+  { id: 'instagram', label: 'Instagram Reels', icon: 'logo-instagram' },
+  { id: 'youtube', label: 'YouTube Shorts', icon: 'logo-youtube' },
+  { id: 'facebook', label: 'Facebook Reels', icon: 'logo-facebook' },
+  // { id: 'snapchat', label: 'Snapchat Spotlight', icon: 'logo-snapchat' },
+  { id: 'twitter', label: 'X (Twitter)', icon: 'logo-twitter' },
+] as const;
 
-const platformOptions = [
-  { label: 'TikTok', value: 'tiktok' },
-  { label: 'Instagram', value: 'instagram' },
-  { label: 'YouTube Shorts', value: 'youtube' },
-  { label: 'Facebook Reels', value: 'facebook' },
-  { label: 'X (Twitter)', value: 'x' },
-  { label: 'WhatsApp Status', value: 'whatsapp' },
-];
-
-const categoryOptions = [
-  'Fashion', 'Science & Tech', 'Gaming', 'Food', 'Travel', 'TV/Movies & Entertainment',
-  'Sports', 'Education', 'Politics', 'Religion', 'Business & Investment', 'Health & Fitness',
-  'Lifestyle', 'News & Media', 'Real Estate', 'Pets & Animals', 'Agriculture',
-  'Music', 'Comedy', 'DIY & Crafts', 'Other',
-];
+const CATEGORY_OPTIONS = [
+  'Fashion & Style',
+  'Beauty & Makeup',
+  'Tech & Gadgets',
+  'Gaming',
+  'Food & Cooking',
+  'Travel & Adventure',
+  'Fitness & Health',
+  'Business & Finance',
+  'Education & Learning',
+  'Entertainment',
+  'Comedy',
+  'Sports',
+  'Music & Dance',
+  'DIY & Crafts',
+  'Lifestyle',
+  'Motivation & Inspiration',
+  'Pets & Animals',
+  'Parenting & Family',
+  'Automotive',
+  'Real Estate',
+] as const;
 
 export default function CreateClippingCampaign() {
   const router = useRouter();
-
-  const [form, setForm] = useState({
+  const [loading, setLoading] = useState(false);
+  const [walletLoading, setWalletLoading] = useState(true);
+  const [wallet, setWallet] = useState<WalletData | null>(null);
+  const [form, setForm] = useState<CampaignForm>({
     title: '',
-    videoFile: null, // the main long video to be clipped
+    videoUrl: '',
     budget: '',
+    currency: 'NGN',
     platforms: [],
     hashtags: '',
     directions: '',
     categories: [],
-    cta_url: '',
+    ctaUrl: '',
   });
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [estimatedViews, setEstimatedViews] = useState(0);
+  const [activeStep, setActiveStep] = useState(1);
 
-  const [walletBalance, setWalletBalance] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState(null);
-  const [error, setError] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [walletLoading, setWalletLoading] = useState(true);
-
-  // Estimated views based on budget
-  const budgetNum = parseInt(form.budget, 10) || 0;
-  const estimatedViews = Math.floor(budgetNum / NAIRA_PER_VIEW);
-
+  // Fetch wallet balance on mount
   useEffect(() => {
-    fetchWalletBalance();
+    fetchWalletData();
   }, []);
 
+  // Calculate estimated views when budget or currency changes
+  useEffect(() => {
+    const budgetNum = parseFloat(form.budget) || 0;
+    if (budgetNum > 0) {
+      const ratePerView = form.currency === 'NGN' 
+        ? NGN_PER_THOUSAND_VIEWS / 1000 
+        : USDT_PER_THOUSAND_VIEWS / 1000;
+      const views = Math.floor(budgetNum / ratePerView);
+      setEstimatedViews(views);
+    } else {
+      setEstimatedViews(0);
+    }
+  }, [form.budget, form.currency]);
+
   const getToken = async () => {
-    if (Platform.OS === 'web') return await AsyncStorage.getItem('userToken');
+    if (Platform.OS === 'web') {
+      return await AsyncStorage.getItem('userToken');
+    }
     let token = await SecureStore.getItemAsync('userToken');
     if (!token) token = await AsyncStorage.getItem('userToken');
     return token;
   };
 
-  const fetchWalletBalance = async () => {
-    setWalletLoading(true);
+  const fetchWalletData = async () => {
     try {
       const token = await getToken();
-      if (!token) throw new Error('No token');
+      if (!token) throw new Error('No authentication token');
 
-      const res = await axios.get(`${API_BASE}/wallet`, {
+      const response = await axios.get(`${API_BASE}/wallet`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      setWalletBalance(res.data.balance || 0);
-    } catch (err) {
-      console.error('Failed to load wallet:', err);
+      setWallet(response.data);
+      // Set preferred currency from wallet
+      setForm(prev => ({ 
+        ...prev, 
+        currency: response.data.preferredCurrency || 'NGN' 
+      }));
+    } catch (error) {
+      console.error('Wallet fetch error:', error);
       Alert.alert('Error', 'Failed to load wallet balance');
     } finally {
       setWalletLoading(false);
     }
   };
 
-  const updateForm = (key, value) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
+  const validateForm = (): boolean => {
+    const newErrors: FormErrors = {};
 
-  const togglePlatform = (value) => {
-    setForm((prev) => {
-      const platforms = prev.platforms.includes(value)
-        ? prev.platforms.filter((p) => p !== value)
-        : [...prev.platforms, value];
-      return { ...prev, platforms };
-    });
-  };
-
-  const toggleCategory = (cat) => {
-    setForm((prev) => {
-      const categories = prev.categories.includes(cat)
-        ? prev.categories.filter((c) => c !== cat)
-        : [...prev.categories, cat];
-      return { ...prev, categories };
-    });
-  };
-
-  const pickVideo = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['video/*'],
-        multiple: false,
-      });
-
-      if (result.assets && result.assets.length > 0) {
-        const video = result.assets[0];
-        updateForm('videoFile', {
-          uri: video.uri,
-          name: video.name,
-          type: video.mimeType,
-        });
-      }
-    } catch (err) {
-      console.error('Video picker error:', err);
-      Alert.alert('Error', 'Failed to select video');
+    if (!form.title.trim()) {
+      newErrors.title = 'Campaign title is required';
+    } else if (form.title.length < 5) {
+      newErrors.title = 'Title must be at least 5 characters';
+    } else if (form.title.length > 100) {
+      newErrors.title = 'Title must be less than 100 characters';
     }
+
+    if (!form.videoUrl.trim()) {
+      newErrors.videoUrl = 'Video URL is required';
+    } else {
+      try {
+        new URL(form.videoUrl);
+        if (!form.videoUrl.match(/\.(mp4|mov|avi|mkv|webm)$/i) && 
+            !form.videoUrl.includes('youtube.com') && 
+            !form.videoUrl.includes('youtu.be') && 
+            !form.videoUrl.includes('vimeo.com') && 
+            !form.videoUrl.includes('drive.google.com')) {
+          newErrors.videoUrl = 'Please enter a valid video URL (MP4, YouTube, Vimeo, or Google Drive)';
+        }
+      } catch {
+        newErrors.videoUrl = 'Please enter a valid URL';
+      }
+    }
+
+    const budgetNum = parseFloat(form.budget);
+    if (!form.budget) {
+      newErrors.budget = 'Budget is required';
+    } else if (isNaN(budgetNum) || budgetNum <= 0) {
+      newErrors.budget = 'Please enter a valid budget amount';
+    } else {
+      const minBudget = form.currency === 'NGN' ? 3000 : 1.85;
+      if (budgetNum < minBudget) {
+        newErrors.budget = `Minimum budget is ${form.currency === 'NGN' ? '₦3,000' : '$1.85 USDT'}`;
+      }
+
+      const availableBalance = form.currency === 'NGN' ? wallet?.balance || 0 : wallet?.usdtBalance || 0;
+      if (budgetNum > availableBalance) {
+        newErrors.budget = `Insufficient ${form.currency} balance`;
+      }
+    }
+
+    if (form.platforms.length === 0) {
+      newErrors.platforms = 'Select at least one platform';
+    }
+
+    if (form.categories.length === 0) {
+      newErrors.categories = 'Select at least one category';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async () => {
-    setError(null);
-    setMessage(null);
-
-    if (!form.title.trim()) return setError('Please enter a campaign title.');
-    if (!form.videoFile) return setError('Please upload a video to be clipped.');
-    if (budgetNum < 1000) return setError('Minimum budget is ₦1,000.');
-    if (budgetNum > walletBalance) return setError('Budget exceeds your wallet balance.');
-    if (estimatedViews < 100) return setError('Budget should generate at least 100 views.');
-    if (form.platforms.length === 0) return setError('Select at least one platform.');
+    if (!validateForm()) {
+      Alert.alert('Validation Error', 'Please fix the errors in the form');
+      return;
+    }
 
     setLoading(true);
 
     try {
       const token = await getToken();
-      if (!token) throw new Error('No auth token');
+      if (!token) throw new Error('No authentication token');
 
-      const fd = new FormData();
-      fd.append('title', form.title);
-      fd.append('kind', 'clipping'); // or whatever your backend expects
-      fd.append('budget', budgetNum.toString());
-      fd.append('viewGoal', estimatedViews.toString());
-      fd.append('cpv', NAIRA_PER_VIEW.toString());
+      const budgetNum = parseFloat(form.budget);
+      const payload = {
+        title: form.title.trim(),
+        videoUrl: form.videoUrl.trim(),
+        budget: budgetNum,
+        currency: form.currency,
+        platforms: form.platforms,
+        hashtags: form.hashtags.split(',').map(tag => tag.trim()).filter(Boolean),
+        directions: form.directions.split('\n').filter(line => line.trim()),
+        categories: form.categories,
+        ctaUrl: form.ctaUrl.trim() || undefined,
+        estimatedViews,
+        costPerThousand: form.currency === 'NGN' ? NGN_PER_THOUSAND_VIEWS : USDT_PER_THOUSAND_VIEWS,
+      };
 
-      // Video file
-      fd.append('video', {
-        uri: form.videoFile.uri,
-        name: form.videoFile.name,
-        type: form.videoFile.type,
-      });
-
-      // Platforms
-      fd.append('platforms', JSON.stringify(form.platforms));
-
-      // Guidelines
-      fd.append('hashtags', JSON.stringify(form.hashtags.split(',').map(s => s.trim()).filter(Boolean)));
-      fd.append('directions', JSON.stringify(form.directions.split('\n').map(s => s.trim()).filter(Boolean)));
-      fd.append('categories', JSON.stringify(form.categories));
-      if (form.cta_url) fd.append('cta_url', form.cta_url);
-
-      await axios.post(`${API_BASE}/campaigns/clipping`, fd, {
+      const response = await axios.post(`${API_BASE}/campaigns/clipping`, payload, {
         headers: {
           Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
+          'Content-Type': 'application/json',
         },
       });
 
-      setMessage('Clipping campaign created successfully!');
-      setTimeout(() => router.back(), 2000);
-    } catch (err) {
-      console.error('Submit error:', err);
-      setError(err.response?.data?.error || 'Failed to create clipping campaign.');
+      Alert.alert(
+        'Success!',
+        'Your clipping campaign has been created successfully.',
+        [
+          {
+            text: 'View Campaign',
+            onPress: () => router.push(`/campaign/${response.data.campaignId}`),
+          },
+          {
+            text: 'Close',
+            style: 'cancel',
+          },
+        ]
+      );
+    } catch (error: any) {
+      console.error('Campaign creation error:', error);
+      Alert.alert(
+        'Error',
+        error.response?.data?.message || 'Failed to create campaign. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  const togglePlatform = (platformId: string) => {
+    setForm(prev => ({
+      ...prev,
+      platforms: prev.platforms.includes(platformId)
+        ? prev.platforms.filter(id => id !== platformId)
+        : [...prev.platforms, platformId],
+    }));
+    if (errors.platforms) {
+      setErrors(prev => ({ ...prev, platforms: undefined }));
+    }
+  };
+
+  const toggleCategory = (category: string) => {
+    setForm(prev => ({
+      ...prev,
+      categories: prev.categories.includes(category)
+        ? prev.categories.filter(c => c !== category)
+        : [...prev.categories, category],
+    }));
+    if (errors.categories) {
+      setErrors(prev => ({ ...prev, categories: undefined }));
+    }
+  };
+
+  const formatCurrency = (amount: number, currency: 'NGN' | 'USDT') => {
+    return currency === 'NGN' 
+      ? `₦${amount.toLocaleString()}`
+      : `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
+  };
+
+  const renderWalletInfo = () => (
+    <Animated.View entering={FadeInDown.delay(100)} style={styles.walletCard}>
+      <LinearGradient
+        colors={['#6366F1', '#8B5CF6']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.walletGradient}
+      >
+        <View style={styles.walletHeader}>
+          <MaterialCommunityIcons name="wallet" size={24} color="#FFF" />
+          <Text style={styles.walletTitle}>Your Wallet</Text>
+        </View>
+        
+        {walletLoading ? (
+          <ActivityIndicator color="#FFF" style={styles.walletLoader} />
+        ) : wallet ? (
+          <View style={styles.walletBalances}>
+            <View style={styles.balanceItem}>
+              <Text style={styles.balanceLabel}>NGN Balance</Text>
+              <Text style={styles.balanceValue}>₦{wallet.balance.toLocaleString()}</Text>
+            </View>
+            <View style={styles.balanceDivider} />
+            <View style={styles.balanceItem}>
+              <Text style={styles.balanceLabel}>USDT Balance</Text>
+              <Text style={styles.balanceValue}>${wallet.usdtBalance.toLocaleString()}</Text>
+            </View>
+          </View>
+        ) : (
+          <Text style={styles.walletError}>Failed to load wallet</Text>
+        )}
+      </LinearGradient>
+    </Animated.View>
+  );
+
+  const renderCurrencySelector = () => (
+    <View style={styles.currencyContainer}>
+      <TouchableOpacity
+        style={[
+          styles.currencyOption,
+          form.currency === 'NGN' && styles.currencyOptionActive,
+        ]}
+        onPress={() => setForm(prev => ({ ...prev, currency: 'NGN' }))}
+      >
+        <Text style={[
+          styles.currencyText,
+          form.currency === 'NGN' && styles.currencyTextActive,
+        ]}>₦ NGN</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[
+          styles.currencyOption,
+          form.currency === 'USDT' && styles.currencyOptionActive,
+        ]}
+        onPress={() => setForm(prev => ({ ...prev, currency: 'USDT' }))}
+      >
+        <Text style={[
+          styles.currencyText,
+          form.currency === 'USDT' && styles.currencyTextActive,
+        ]}>$ USDT</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <LinearGradient
-            colors={['#34D3991A', '#D6CF8D80', '#d8d8d8b2']}
-            style={styles.gradient}
-          >
-    <ScrollView
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
+      colors={['#667eea', '#764ba2', '#6B46C1']}
+      style={styles.container}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
     >
-      {/* Campaign Explanation */}
-      <View style={styles.explanationContainer}>
-        <Text style={styles.explanationTitle}>Clipping Campaign</Text>
-        <Text style={styles.explanationText}>
-          Upload your video and let creators turn it into short, viral clips for TikTok, Instagram Reels, YouTube Shorts, and more.{'\n\n'}
-          • Creators edit, post, and promote your content{'\n'}
-          • You only pay for real views generated{'\n'}
-          • Great way to get massive organic reach from your existing videos
-        </Text>
-      </View>
-
-      {/* Title */}
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Campaign Title *</Text>
-        <TextInput
-          style={styles.input}
-          value={form.title}
-          onChangeText={(v) => updateForm('title', v)}
-          placeholder="e.g. Short Clips for New Sneaker Launch"
-        />
-      </View>
-
-      {/* Video Upload */}
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Upload Your Video *</Text>
-        <TouchableOpacity style={styles.uploadButton} onPress={pickVideo}>
-          <Ionicons name="videocam-outline" size={32} color="#4F46E5" />
-          <Text style={styles.uploadText}>
-            {form.videoFile ? form.videoFile.name : 'Tap to select video'}
-          </Text>
-          <Text style={styles.uploadSubText}>MP4 recommended • Max 500MB</Text>
-        </TouchableOpacity>
-
-        {form.videoFile && (
-          <Text style={styles.fileSelected}>Selected: {form.videoFile.name}</Text>
-        )}
-      </View>
-
-      {/* Budget */}
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Your Budget (₦) *</Text>
-        <TextInput
-          style={styles.input}
-          value={form.budget}
-          onChangeText={(v) => updateForm('budget', v.replace(/[^0-9]/g, ''))}
-          placeholder="Minimum ₦1,000"
-          keyboardType="numeric"
-        />
-        <Text style={styles.helperText}>
-          Estimated views: {estimatedViews.toLocaleString()} (₦{budgetNum.toLocaleString()} total cost)
-        </Text>
-        {walletLoading ? (
-          <Text style={styles.helperText}>Loading wallet...</Text>
-        ) : (
-          <Text style={styles.helperText}>
-            Wallet balance: ₦{walletBalance.toLocaleString()}
-          </Text>
-        )}
-      </View>
-
-      {/* Platforms */}
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Platforms to Post On</Text>
-        <View style={styles.platformsContainer}>
-          {platformOptions.map((p) => (
-            <TouchableOpacity
-              key={p.value}
-              style={[
-                styles.platformItem,
-                form.platforms.includes(p.value) && styles.platformItemSelected,
-              ]}
-              onPress={() => togglePlatform(p.value)}
-            >
-              <Text style={styles.platformText}>{p.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      {/* Hashtags */}
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Hashtags (comma-separated)</Text>
-        <TextInput
-          style={styles.input}
-          value={form.hashtags}
-          onChangeText={(v) => updateForm('hashtags', v)}
-          placeholder="#sneakerhead, #fashion, #viral"
-        />
-        <Text style={styles.helperText}>Helps clips get discovered</Text>
-      </View>
-
-      {/* Directions */}
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Editing Directions</Text>
-        <TextInput
-          style={[styles.input, styles.multilineInput]}
-          value={form.directions}
-          onChangeText={(v) => updateForm('directions', v)}
-          placeholder="e.g.:\nMake 15-30 second clips\nUse trending audio\nAdd text overlays\nFocus on product close-ups"
-          multiline
-          numberOfLines={5}
-        />
-      </View>
-
-      {/* Categories */}
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Categories</Text>
-        <View style={styles.categoriesContainer}>
-          {categoryOptions.map((item) => (
-            <TouchableOpacity
-              key={item}
-              style={[
-                styles.categoryItem,
-                form.categories.includes(item) && styles.categoryItemSelected,
-              ]}
-              onPress={() => toggleCategory(item)}
-            >
-              <View style={[
-                styles.checkbox,
-                form.categories.includes(item) && styles.checkboxSelected,
-              ]}>
-                {form.categories.includes(item) && (
-                  <Ionicons name="checkmark" size={16} color="#FFF" />
-                )}
-              </View>
-              <Text style={styles.categoryText}>{item}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      {/* CTA URL */}
-      <View style={styles.inputGroup}>
-        <Text style={styles.label}>Call-to-Action Link (optional)</Text>
-        <TextInput
-          style={styles.input}
-          value={form.cta_url}
-          onChangeText={(v) => updateForm('cta_url', v)}
-          placeholder="https://your-site.com/shop"
-          keyboardType="url"
-        />
-      </View>
-
-      {/* Submit */}
-      <TouchableOpacity
-        style={[styles.submitButton, loading && styles.disabledButton]}
-        onPress={handleSubmit}
-        disabled={loading}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}
       >
-        {loading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <Text style={styles.submitText}>Create Clipping Campaign</Text>
-        )}
-      </TouchableOpacity>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {/* Header */}
+          <Animated.View entering={FadeInUp} style={styles.header}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.backButton}
+            >
+              <Ionicons name="arrow-back" size={24} color="#FFF" />
+            </TouchableOpacity>
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle}>Create Clipping Campaign</Text>
+              <Text style={styles.headerSubtitle}>
+                Turn your video into viral clips
+              </Text>
+            </View>
+          </Animated.View>
 
-      {message && <Text style={styles.successMessage}>{message}</Text>}
-      {error && <Text style={styles.errorMessage}>{error}</Text>}
+          {/* Wallet Info */}
+          {renderWalletInfo()}
 
-      <View style={{ height: 100 }} />
-    </ScrollView>
+          {/* Campaign Info Card */}
+          <Animated.View entering={FadeInDown.delay(200)} style={styles.infoCard}>
+            <MaterialCommunityIcons name="information" size={20} color="#6366F1" />
+            <Text style={styles.infoText}>
+              Creators will download your video from the provided link and create engaging clips. 
+              You pay {form.currency === 'NGN' ? '₦3,000' : '$1.85 USDT'} per 1,000 views generated.
+            </Text>
+          </Animated.View>
+
+          {/* Main Form */}
+          <Animated.View entering={SlideInRight.delay(300)} style={styles.formCard}>
+            {/* Step Indicator */}
+            <View style={styles.stepIndicator}>
+              {[1, 2, 3].map((step) => (
+                <React.Fragment key={step}>
+                  <View style={[
+                    styles.stepDot,
+                    activeStep >= step && styles.stepDotActive,
+                  ]}>
+                    <Text style={[
+                      styles.stepText,
+                      activeStep >= step && styles.stepTextActive,
+                    ]}>{step}</Text>
+                  </View>
+                  {step < 3 && (
+                    <View style={[
+                      styles.stepLine,
+                      activeStep > step && styles.stepLineActive,
+                    ]} />
+                  )}
+                </React.Fragment>
+              ))}
+            </View>
+
+            {/* Step 1: Basic Info */}
+            {activeStep === 1 && (
+              <Animated.View entering={FadeInDown}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Campaign Title</Text>
+                  <TextInput
+                    style={[styles.input, errors.title && styles.inputError]}
+                    value={form.title}
+                    onChangeText={(text) => {
+                      setForm(prev => ({ ...prev, title: text }));
+                      if (errors.title) setErrors(prev => ({ ...prev, title: undefined }));
+                    }}
+                    placeholder="e.g., Summer Fashion Lookbook Clips"
+                    placeholderTextColor="#9CA3AF"
+                    maxLength={100}
+                  />
+                  {errors.title && (
+                    <Text style={styles.errorText}>{errors.title}</Text>
+                  )}
+                  <Text style={styles.charCount}>
+                    {form.title.length}/100
+                  </Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Video URL</Text>
+                  <View style={styles.urlInputContainer}>
+                    <MaterialCommunityIcons name="link-variant" size={20} color="#9CA3AF" />
+                    <TextInput
+                      style={[styles.urlInput, errors.videoUrl && styles.inputError]}
+                      value={form.videoUrl}
+                      onChangeText={(text) => {
+                        setForm(prev => ({ ...prev, videoUrl: text }));
+                        if (errors.videoUrl) setErrors(prev => ({ ...prev, videoUrl: undefined }));
+                      }}
+                      placeholder="https://youtube.com/watch?v=... or direct video URL"
+                      placeholderTextColor="#9CA3AF"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </View>
+                  {errors.videoUrl && (
+                    <Text style={styles.errorText}>{errors.videoUrl}</Text>
+                  )}
+                  <Text style={styles.helperText}>
+                    Supported: YouTube, Vimeo, Google Drive, or direct MP4 links
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.nextButton}
+                  onPress={() => setActiveStep(2)}
+                >
+                  <Text style={styles.nextButtonText}>Next: Budget & Platforms</Text>
+                  <Ionicons name="arrow-forward" size={20} color="#FFF" />
+                </TouchableOpacity>
+              </Animated.View>
+            )}
+
+            {/* Step 2: Budget & Platforms */}
+            {activeStep === 2 && (
+              <Animated.View entering={FadeInDown}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Payment Currency</Text>
+                  {renderCurrencySelector()}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Budget</Text>
+                  <View style={styles.budgetInputContainer}>
+                    <Text style={styles.currencySymbol}>
+                      {form.currency === 'NGN' ? '₦' : '$'}
+                    </Text>
+                    <TextInput
+                      style={[styles.budgetInput, errors.budget && styles.inputError]}
+                      value={form.budget}
+                      onChangeText={(text) => {
+                        const numeric = text.replace(/[^0-9.]/g, '');
+                        setForm(prev => ({ ...prev, budget: numeric }));
+                        if (errors.budget) setErrors(prev => ({ ...prev, budget: undefined }));
+                      }}
+                      placeholder="0.00"
+                      placeholderTextColor="#9CA3AF"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  {errors.budget && (
+                    <Text style={styles.errorText}>{errors.budget}</Text>
+                  )}
+                  
+                  {estimatedViews > 0 && (
+                    <View style={styles.estimateBox}>
+                      <Text style={styles.estimateLabel}>Estimated Views</Text>
+                      <Text style={styles.estimateValue}>
+                        {estimatedViews.toLocaleString()} views
+                      </Text>
+                      <Text style={styles.estimateRate}>
+                        Rate: {form.currency === 'NGN' ? '₦3,000' : '$1.85 USDT'}/1k views
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Platforms</Text>
+                  <View style={styles.platformsGrid}>
+                    {PLATFORM_OPTIONS.map((platform) => (
+                      <TouchableOpacity
+                        key={platform.id}
+                        style={[
+                          styles.platformButton,
+                          form.platforms.includes(platform.id) && styles.platformButtonActive,
+                        ]}
+                        onPress={() => togglePlatform(platform.id)}
+                      >
+                        <Ionicons 
+                          name={platform.icon as any} 
+                          size={24} 
+                          color={form.platforms.includes(platform.id) ? '#6366F1' : '#6B7280'} 
+                        />
+                        <Text style={[
+                          styles.platformButtonText,
+                          form.platforms.includes(platform.id) && styles.platformButtonTextActive,
+                        ]}>
+                          {platform.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {errors.platforms && (
+                    <Text style={styles.errorText}>{errors.platforms}</Text>
+                  )}
+                </View>
+
+                <View style={styles.buttonRow}>
+                  <TouchableOpacity
+                    style={styles.backButtonStep}
+                    onPress={() => setActiveStep(1)}
+                  >
+                    <Ionicons name="arrow-back" size={20} color="#6B7280" />
+                    <Text style={styles.backButtonText}>Back</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={styles.nextButton}
+                    onPress={() => setActiveStep(3)}
+                  >
+                    <Text style={styles.nextButtonText}>Next: Guidelines</Text>
+                    <Ionicons name="arrow-forward" size={20} color="#FFF" />
+                  </TouchableOpacity>
+                </View>
+              </Animated.View>
+            )}
+
+            {/* Step 3: Guidelines */}
+            {activeStep === 3 && (
+              <Animated.View entering={FadeInDown}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Hashtags</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={form.hashtags}
+                    onChangeText={(text) => setForm(prev => ({ ...prev, hashtags: text }))}
+                    placeholder="#viral, #trending, #fashion"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                  <Text style={styles.helperText}>
+                    Separate hashtags with commas
+                  </Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Editing Directions</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    value={form.directions}
+                    onChangeText={(text) => setForm(prev => ({ ...prev, directions: text }))}
+                    placeholder="• Use trending audio&#10;• Add captions&#10;• Keep clips under 30 seconds&#10;• Highlight key moments"
+                    placeholderTextColor="#9CA3AF"
+                    multiline
+                    numberOfLines={5}
+                    textAlignVertical="top"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Categories</Text>
+                  <View style={styles.categoriesContainer}>
+                    {CATEGORY_OPTIONS.map((category) => (
+                      <TouchableOpacity
+                        key={category}
+                        style={[
+                          styles.categoryChip,
+                          form.categories.includes(category) && styles.categoryChipActive,
+                        ]}
+                        onPress={() => toggleCategory(category)}
+                      >
+                        <Text style={[
+                          styles.categoryChipText,
+                          form.categories.includes(category) && styles.categoryChipTextActive,
+                        ]}>
+                          {category}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {errors.categories && (
+                    <Text style={styles.errorText}>{errors.categories}</Text>
+                  )}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Call-to-Action URL (Optional)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={form.ctaUrl}
+                    onChangeText={(text) => setForm(prev => ({ ...prev, ctaUrl: text }))}
+                    placeholder="https://yourwebsite.com/product"
+                    placeholderTextColor="#9CA3AF"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+
+                <View style={styles.buttonRow}>
+                  <TouchableOpacity
+                    style={styles.backButtonStep}
+                    onPress={() => setActiveStep(2)}
+                  >
+                    <Ionicons name="arrow-back" size={20} color="#6B7280" />
+                    <Text style={styles.backButtonText}>Back</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+                    onPress={handleSubmit}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color="#FFF" />
+                    ) : (
+                      <>
+                        <Text style={styles.submitButtonText}>Create Campaign</Text>
+                        <Ionicons name="checkmark-circle" size={20} color="#FFF" />
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </Animated.View>
+            )}
+          </Animated.View>
+
+          {/* Summary Card */}
+          {estimatedViews > 0 && activeStep === 3 && (
+            <Animated.View entering={FadeInDown.delay(400)} style={styles.summaryCard}>
+              <Text style={styles.summaryTitle}>Campaign Summary</Text>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Budget</Text>
+                <Text style={styles.summaryValue}>
+                  {formatCurrency(parseFloat(form.budget) || 0, form.currency)}
+                </Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Estimated Views</Text>
+                <Text style={styles.summaryValue}>{estimatedViews.toLocaleString()}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Platforms</Text>
+                <Text style={styles.summaryValue}>{form.platforms.length}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Categories</Text>
+                <Text style={styles.summaryValue}>{form.categories.length}</Text>
+              </View>
+            </Animated.View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1, 
+    marginTop: 89,
+  },
+  keyboardView: {
+    flex: 1,
+  },
   scrollContent: {
-    paddingHorizontal: 16,
+    flexGrow: 1,
     paddingBottom: 40,
-    paddingTop: 120,
+   
   },
-
-  explanationContainer: {
-    backgroundColor: '#EFF6FF',
-    borderRadius: 12,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingBottom: 20,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  headerTextContainer: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FFF',
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  walletCard: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+  },
+  walletGradient: {
     padding: 16,
-    marginBottom: 24,
   },
-
-  explanationTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1D4ED8',
-    marginBottom: 8,
-  },
-
-  explanationText: {
-    fontSize: 14,
-    color: '#374151',
-    lineHeight: 20,
-  },
-
-  inputGroup: {
-    marginBottom: 24,
-  },
-
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
-  },
-
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-  },
-
-  multilineInput: {
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-
-  helperText: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginTop: 8,
-  },
-
-  platformsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginTop: 8,
-  },
-
-  platformItem: {
-    backgroundColor: '#F3F4F6',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-  },
-
-  platformItemSelected: {
-    backgroundColor: '#EFF6FF',
-    borderColor: '#3B82F6',
-  },
-
-  platformText: {
-    fontSize: 14,
-    color: '#374151',
-  },
-
-  categoriesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 8,
-    gap: 12,
-  },
-
-  categoryItem: {
+  walletHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F3F4F6',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-  },
-
-  categoryItemSelected: {
-    backgroundColor: '#EFF6FF',
-    borderColor: '#3B82F6',
-  },
-
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    marginRight: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  checkboxSelected: {
-    backgroundColor: '#3B82F6',
-    borderColor: '#3B82F6',
-  },
-
-  categoryText: {
-    fontSize: 14,
-    color: '#374151',
-  },
-
-  uploadButton: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F9FAFB',
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
-    paddingVertical: 32,
     marginBottom: 12,
   },
-
-  uploadText: {
+  walletTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#374151',
-    marginTop: 12,
+    color: '#FFF',
+    marginLeft: 8,
   },
-
-  uploadSubText: {
-    fontSize: 13,
+  walletLoader: {
+    marginVertical: 20,
+  },
+  walletBalances: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  balanceItem: {
+    flex: 1,
+  },
+  balanceLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: 4,
+  },
+  balanceValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
+  balanceDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    marginHorizontal: 16,
+  },
+  walletError: {
+    color: '#FECACA',
+    fontSize: 14,
+    textAlign: 'center',
+    padding: 8,
+  },
+  infoCard: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#4B5563',
+    marginLeft: 12,
+    lineHeight: 20,
+  },
+  formCard: {
+    backgroundColor: '#FFF',
+    marginHorizontal: 20,
+    borderRadius: 16,
+    padding: 20,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+  },
+  stepIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  stepDot: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+  },
+  stepDotActive: {
+    backgroundColor: '#FF6B35',
+    borderColor: '#FF6B35',
+  },
+  stepText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#9CA3AF',
+  },
+  stepTextActive: {
+    color: '#FFF',
+  },
+  stepLine: {
+    flex: 1,
+    height: 2,
+    backgroundColor: '#E5E7EB',
+    marginHorizontal: 8,
+  },
+  stepLineActive: {
+    backgroundColor: '#FF6B35',
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#1F2937',
+  },
+  inputError: {
+    borderColor: '#EF4444',
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#EF4444',
+    marginTop: 4,
+  },
+  charCount: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  urlInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+  },
+  urlInput: {
+    flex: 1,
+    paddingVertical: 12,
+    marginLeft: 8,
+    fontSize: 16,
+    color: '#1F2937',
+  },
+  helperText: {
+    fontSize: 12,
     color: '#6B7280',
     marginTop: 4,
   },
-
-  fileSelected: {
-    fontSize: 14,
-    color: '#16A34A',
+  currencyContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 4,
+  },
+  currencyOption: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  currencyOptionActive: {
+    backgroundColor: '#FFF',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  currencyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  currencyTextActive: {
+    color: '#6366F1',
+  },
+  budgetInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+  },
+  currencySymbol: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#6B7280',
+    marginRight: 8,
+  },
+  budgetInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#1F2937',
+  },
+  estimateBox: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 8,
+    padding: 12,
     marginTop: 8,
+  },
+  estimateLabel: {
+    fontSize: 12,
+    color: '#FF6B35',
+    marginBottom: 4,
+  },
+  estimateValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1E3A8A',
+  },
+  estimateRate: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  platformsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -4,
+  },
+  platformButton: {
+    width: '48%',
+    margin: '1%',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  platformButtonActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#FF6B35',
+  },
+  platformButtonText: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginLeft: 8,
+  },
+  platformButtonTextActive: {
+    color: '#FF6B35',
     fontWeight: '500',
   },
-
-  submitButton: {
-    backgroundColor: '#22C55E',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 32,
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
   },
-
-  disabledButton: {
+  backButtonStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginLeft: 4,
+  },
+  nextButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF6B35',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  nextButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  textArea: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  categoriesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -4,
+  },
+  categoryChip: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    margin: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  categoryChipActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#FF6B35',
+  },
+  categoryChipText: {
+    fontSize: 13,
+    color: '#4B5563',
+  },
+  categoryChipTextActive: {
+    color: '#FF6B35',
+    fontWeight: '500',
+  },
+  submitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#10B981',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  submitButtonDisabled: {
     opacity: 0.7,
   },
-
-  submitText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-
-  successMessage: {
-    color: '#16A34A',
+  submitButtonText: {
     fontSize: 16,
-    textAlign: 'center',
-    marginTop: 16,
-    padding: 12,
-    backgroundColor: '#F0FDF4',
-    borderRadius: 8,
+    fontWeight: '600',
+    color: '#FFF',
   },
-
-  errorMessage: {
-    color: '#EF4444',
-    fontSize: 16,
-    textAlign: 'center',
+  summaryCard: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    marginHorizontal: 20,
     marginTop: 16,
-    padding: 12,
-    backgroundColor: '#FEF2F2',
-    borderRadius: 8,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  summaryTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 12,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  summaryValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1F2937',
   },
 });

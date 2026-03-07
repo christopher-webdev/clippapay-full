@@ -11,7 +11,6 @@ import crypto from 'crypto';
 // Import routes
 import authRouter from './routes/auth.js';
 import adminAuthRouter from './routes/adminAuth.js';
-import campaignsRouter from './routes/campaigns.js';
 import submissionsRouter from './routes/submissions.js';
 import clippersRouter from './routes/clippers.js';
 import walletRouter from './routes/wallet.js';
@@ -20,21 +19,21 @@ import wdrRouter from './routes/withdrawals.js';
 import notificationsRouter from './routes/notifications.js';
 import settingsRouter from './routes/settings.js';
 import advertiserStatsRouter from './routes/advertiserStats.js';
-import plansRouter from './routes/plans.js';
-import subscriptionRouter from './routes/subscription.js';
 import adminSubscriptionsRouter from './routes/adminSubscriptions.js';
 import adminStatsRouter from './routes/adminStats.js';
 import adminDepositsRouter from './routes/adminDeposits.js';
 import adminWithdrawalsRouter from './routes/adminWithdrawals.js';
-import adminSettingsRouter from './routes/adminSettings.js';
 import { ensurePlatformWallet } from './seeds/createPlatformWallet.js';
 import adminSubmissionsRouter from './routes/adminSubmissions.js';
 import userRoutes from './routes/users.js';
 import adminCampaignsRouter from './routes/adminCampaigns.js';
 import clipRoutes from './routes/clips.js';
-import applicationsRoutes from "./routes/applications.js";
-import applicationsScriptRouter from './routes/applicationsScript.js';
-import applicationsVideoRouter from './routes/applicationsVideo.js';
+import campaignsRoute from './routes/campaigns.js';           // ← renamed
+import applicationsRouter from './routes/applications.js';     // ← single file
+import disputesRouter from './routes/disputes.js';             // ← new
+import dRouter from './routes/d.js';
+
+
 
 
 
@@ -44,7 +43,9 @@ import cleanupOldVideos from './scripts/cleanupOldVideos.js';
 import telegramRouter from './routes/telegram.js';
 
 import cron from 'node-cron';
-import { checkExpiredOffers } from './jobs/checkExpiredOffers.js';
+import { startExpirationChecker } from './services/expirationChecker.js';
+
+
 
 
 
@@ -145,6 +146,10 @@ mongoose
         cleanupOldVideos();
       }
     }, 60 * 1000); // Check every minute
+
+    // Start expiration checker (ONLY ONCE)
+    startExpirationChecker();
+    console.log('✅ Expiration checker started (every 5 min)');
     
     // Seed ad-workers
     try {
@@ -157,9 +162,9 @@ mongoose
   .catch(err => console.error('MongoDB connection error:', err));
 
 // 5. API Routes
+app.use('/api/d', dRouter); 
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminAuthRouter);
-app.use('/api/campaigns', campaignsRouter);
 app.use('/api/submissions', submissionsRouter);
 app.use('/api/clippers', clippersRouter);
 app.use('/api/wallet', walletRouter);
@@ -168,8 +173,6 @@ app.use('/api/withdrawals', wdrRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/admin/settings', settingsRouter);
 app.use('/api/advertiser', advertiserStatsRouter);
-app.use('/api/plans', plansRouter);
-app.use('/api/subscriptions', subscriptionRouter);
 app.use('/api/admin/subscriptions', adminSubscriptionsRouter);
 app.use('/api/admin/stats', adminStatsRouter);
 app.use('/api/admin/deposits', adminDepositsRouter);
@@ -179,16 +182,11 @@ app.use('/api/admin/withdrawals', adminWithdrawalsRouter);
 app.use('/api/clip', clipRoutes);
 app.use('/api/user', userRoutes);
 app.use('/telegram', telegramRouter);
-app.use('/api/applications', applicationsRoutes);
-app.use('/api/applications', applicationsScriptRouter);
-app.use('/api/applications', applicationsVideoRouter);
+app.use('/api/campaigns', campaignsRoute);           // UGC Campaigns
+app.use('/api/applications', applicationsRouter);     // All UGC logic
+app.use('/api/disputes', disputesRouter);             // New dispute system
 
 
-
-// Run every 5 minutes
-cron.schedule('*/5 * * * *', async () => {
-  await checkExpiredOffers();
-});
 
 // 6. Error handling middleware (should be last)
 app.use((err, req, res, next) => {

@@ -41,7 +41,7 @@ export default function GetUGCsCard() {
 
           {/* Main title */}
           <Text style={styles.title}>
-            Order custom{'\n'}UGCs{'\n'}for my brand.
+            Order custom{'\n'}UGCs{'\n'}for your brand.
           </Text>
 
           {/* Megaphone guy – positioned on right, overlapping */}

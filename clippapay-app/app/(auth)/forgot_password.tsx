@@ -5,13 +5,13 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
   Dimensions,
   Image,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -19,7 +19,7 @@ import { router } from 'expo-router';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const scale = SCREEN_WIDTH / 403;
 
-const API_BASE = 'https://api.clippapay.com/api';
+const API_BASE = process.env.EXPO_PUBLIC_API_URL;
 
 export default function ForgotPasswordScreen() {
   const [step, setStep] = useState(1); // 1: Email, 2: Reset, 3: Success

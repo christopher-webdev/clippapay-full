@@ -1,18 +1,17 @@
 // app/(dashboard)/advertiser_dashboard.tsx
 import React from 'react';
 import {
-  View,
   ScrollView,
-  SafeAreaView,
   StyleSheet,
   Dimensions,
   StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import ReadyLaunchText from './ReadyLaunchText';
 import GetUGCsCard from './GetUGCsCard';
 import GetUGCsCard_2 from './GetUGCsCard_2';
-import GetUGCsCard_3 from './GetUGCsCard_3';
+
 
 
 
@@ -26,7 +25,7 @@ export default function AdvertiserDashboard() {
 
       {/* Full-screen light gradient background */}
       <LinearGradient
-        colors={['#34D3991A', '#D6CF8D80', '#ffffffb2']} // very light – adjust to match design
+        colors={['#ffffff1a', '#ffffff80', '#ffffffb2']}// very light – adjust to match design
         style={styles.background}
       >
 
@@ -39,20 +38,10 @@ export default function AdvertiserDashboard() {
 
           {/* First card */}
           <GetUGCsCard />
-          <GetUGCsCard_2 />
-          <GetUGCsCard_3 /> 
-        
-
-          {/* Next cards – add when ready */}
-          {/* <ShareClipCard /> */}
-          {/* <PremiumCreatorsCard /> */}
-
-          {/* Bottom padding so last card isn't cut off by bottom nav */}
+          <GetUGCsCard_2 />        
       
         </ScrollView>
 
-
-        {/* Optional: bottom tab bar placeholder if you have one */}
         {/* <BottomTabBar /> */}
       </LinearGradient>
     </SafeAreaView>
@@ -94,7 +83,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   scrollContent: {
-    paddingTop: 120 * scale,     // ← Must be taller than header height (≈107 + safe area + margin)
+    paddingTop: 60 * scale,     // ← Must be taller than header height (≈107 + safe area + margin)
     paddingHorizontal: 12 * scale,
     paddingBottom: 40 * scale,
   },

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+const API_BASE = process.env.EXPO_PUBLIC_API_URL;
 
 interface User {
   _id: string;
@@ -26,7 +27,7 @@ export function useAuth() {
       const token = await SecureStore.getItemAsync('userToken');
       if (token) {
         // Fetch user data
-        const response = await fetch('https://clippapay.com/api/auth/me', {
+        const response = await fetch(`${API_BASE}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (response.ok) {

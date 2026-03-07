@@ -18,8 +18,8 @@ import { AddonBadge } from './AddonBadge';
 import { useRouter } from 'expo-router';
 
 const { width } = Dimensions.get('window');
-const API_BASE = 'https://clippapay.com/api';
-const MEDIA_BASE = 'https://clippapay.com';
+const API_BASE = 'http://192.168.0.16:5000/api' //'https://clippapay.com/api';
+const MEDIA_BASE = 'http://192.168.0.16:5000' //'https://clippapay.com';
 
 interface Application {
   _id: string;
@@ -32,20 +32,20 @@ interface Application {
     approvedVideosCount: number;
     pgcAddons?: string[];
     script?: string;
-    thumb_url?: string;
+    thumb_url?: string | null;
     ugc?: {
       brief: string;
       deliverables: string[];
       assets: string[];
       approvalCriteria: string;
     };
-  };
+  } | null; // Allow campaign to be null
   clipper: {
     _id: string;
     firstName: string;
     lastName: string;
     email: string;
-    profileImage?: string;
+    profileImage?: string | null;
   };
   status: 'pending' | 'shortlisted' | 'offer_sent' | 'accepted' | 'rejected' | 'expired' | 'working' | 'submitted' | 'revision_requested' | 'approved' | 'completed' | 'cancelled';
   offerExpiresAt?: string;
@@ -58,9 +58,11 @@ interface ApplicationCardProps {
   application: Application;
   onPress: () => void;
   onShortlist?: () => void;
-  onUnshortlist?: () => void; // New prop for unshortlisting
+  onUnshortlist?: () => void;
   onSendOffer?: () => void;
+  onViewCreatorProfile?: () => void;
   showActions?: boolean;
+  isLoading?: boolean;
 }
 
 export function ApplicationCard({
@@ -69,12 +71,25 @@ export function ApplicationCard({
   onShortlist,
   onUnshortlist,
   onSendOffer,
-  showActions = true
+  onViewCreatorProfile,
+  showActions = true,
+  isLoading = false
 }: ApplicationCardProps) {
   const router = useRouter();
   const [isShortlisting, setIsShortlisting] = useState(false);
+  const [imageError, setImageError] = useState(false);
   
-  const campaign = application.campaign;
+  // Safely access campaign with fallback
+  const campaign = application.campaign || {
+    _id: '',
+    title: 'Unknown Campaign',
+    kind: '',
+    budget_total: 0,
+    desiredVideos: 0,
+    approvedVideosCount: 0,
+    pgcAddons: [],
+  };
+  
   const clipper = application.clipper;
   const hasOffer = application.status === 'offer_sent';
   const hasSubmitted = application.status === 'submitted' || application.status === 'revision_requested';
@@ -87,17 +102,21 @@ export function ApplicationCard({
     return `₦${amount.toLocaleString()}`;
   };
 
-  const getMediaUrl = (path?: string) => {
+  const getMediaUrl = (path?: string | null) => {
     if (!path) return undefined;
     if (path.startsWith('http')) return path;
     return `${MEDIA_BASE}${path}`;
   };
 
   const handleViewCreatorProfile = () => {
-    router.push({
-      pathname: '/(dashboard_advertiser)/creator/[id]',
-      params: { id: clipper._id }
-    });
+    if (onViewCreatorProfile) {
+      onViewCreatorProfile();
+    } else {
+      router.push({
+        pathname: '/(dashboard_advertiser)/creator/[id]',
+        params: { id: clipper._id }
+      });
+    }
   };
 
   const handleShortlistPress = async () => {
@@ -157,13 +176,14 @@ export function ApplicationCard({
           </Text>
         </View>
 
-        {/* Campaign Info with Thumbnail */}
+        {/* Campaign Info with Thumbnail - Safe handling for null campaign */}
         <View style={styles.campaignInfo}>
           <View style={styles.campaignTitleContainer}>
-            {campaign.thumb_url ? (
+            {campaign.thumb_url && !imageError ? (
               <Image 
                 source={{ uri: getMediaUrl(campaign.thumb_url) }} 
                 style={styles.campaignThumb}
+                onError={() => setImageError(true)}
               />
             ) : (
               <View style={styles.campaignThumbPlaceholder}>
@@ -171,11 +191,11 @@ export function ApplicationCard({
               </View>
             )}
             <Text style={styles.campaignTitle} numberOfLines={2}>
-              {campaign.title}
+              {campaign.title || 'Unknown Campaign'}
             </Text>
           </View>
           
-          {/* Add-ons badges */}
+          {/* Add-ons badges - Safely check if pgcAddons exists */}
           {campaign.pgcAddons && campaign.pgcAddons.length > 0 && (
             <View style={styles.addonsContainer}>
               {campaign.pgcAddons.map((addon, index) => (
@@ -257,9 +277,9 @@ export function ApplicationCard({
             <TouchableOpacity
               style={[styles.actionButton, styles.shortlistButton]}
               onPress={handleShortlistPress}
-              disabled={isShortlisting}
+              disabled={isLoading || isShortlisting}
             >
-              {isShortlisting ? (
+              {(isLoading || isShortlisting) ? (
                 <ActivityIndicator size="small" color="#2563EB" />
               ) : (
                 <>
@@ -272,12 +292,17 @@ export function ApplicationCard({
             <TouchableOpacity
               style={[styles.actionButton, styles.offerButton]}
               onPress={onSendOffer}
+              disabled={isLoading}
             >
               <LinearGradient
                 colors={['#22C55E', '#16A34A']}
                 style={styles.offerButtonGradient}
               >
-                <Text style={styles.offerButtonText}>Offer This Job</Text>
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.offerButtonText}>Offer This Job</Text>
+                )}
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -288,9 +313,9 @@ export function ApplicationCard({
             <TouchableOpacity
               style={[styles.actionButton, styles.unshortlistButton]}
               onPress={handleShortlistPress}
-              disabled={isShortlisting}
+              disabled={isLoading || isShortlisting}
             >
-              {isShortlisting ? (
+              {(isLoading || isShortlisting) ? (
                 <ActivityIndicator size="small" color="#DC2626" />
               ) : (
                 <>
@@ -303,12 +328,17 @@ export function ApplicationCard({
             <TouchableOpacity
               style={[styles.actionButton, styles.offerButton]}
               onPress={onSendOffer}
+              disabled={isLoading}
             >
               <LinearGradient
                 colors={['#22C55E', '#16A34A']}
                 style={styles.offerButtonGradient}
               >
-                <Text style={styles.offerButtonText}>Offer This Job</Text>
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.offerButtonText}>Offer This Job</Text>
+                )}
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -318,6 +348,7 @@ export function ApplicationCard({
   );
 }
 
+// Styles remain the same as before...
 const styles = StyleSheet.create({
   card: {
     borderRadius: 16,

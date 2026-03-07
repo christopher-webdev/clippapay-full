@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
   Dimensions,
@@ -13,16 +12,17 @@ import {
   Image,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useRouter } from 'expo-router';
+import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const scale = SCREEN_WIDTH / 403;
 
-const API_BASE = 'https://api.clippapay.com/api';
+const API_BASE = process.env.EXPO_PUBLIC_API_URL;
 
 // JWT Token Parser
 function parseJwt(token: string) {
@@ -46,10 +46,12 @@ function parseJwt(token: string) {
 // Store token securely
 const storeToken = async (token: string) => {
   try {
-    // Store in SecureStore for security
-    await SecureStore.setItemAsync('userToken', token);
+    // Store in SecureStore for security (mobile only)
+    if (Platform.OS !== 'web') {
+      await SecureStore.setItemAsync('userToken', token);
+    }
     
-    // Also store in AsyncStorage for easier access (non-sensitive data)
+    // Also store in AsyncStorage for easier access
     await AsyncStorage.setItem('userToken', token);
     
     // Store basic user info
@@ -72,7 +74,16 @@ const storeToken = async (token: string) => {
 // Check if user is already logged in
 export const checkExistingSession = async () => {
   try {
-    const token = await SecureStore.getItemAsync('userToken');
+    let token = null;
+    
+    if (Platform.OS !== 'web') {
+      token = await SecureStore.getItemAsync('userToken');
+    }
+    
+    if (!token) {
+      token = await AsyncStorage.getItem('userToken');
+    }
+    
     if (token) {
       // Verify token is still valid
       const decoded = parseJwt(token);
@@ -97,7 +108,9 @@ export const checkExistingSession = async () => {
 // Clear session data
 export const clearSession = async () => {
   try {
-    await SecureStore.deleteItemAsync('userToken');
+    if (Platform.OS !== 'web') {
+      await SecureStore.deleteItemAsync('userToken');
+    }
     await AsyncStorage.multiRemove(['userToken', 'userInfo']);
   } catch (error) {
     console.error('Error clearing session:', error);
@@ -105,7 +118,6 @@ export const clearSession = async () => {
 };
 
 export default function LoginMobileScreen() {
-  const router = useRouter();
   const [credentials, setCredentials] = useState({ email: '', password: '' });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -156,13 +168,11 @@ export default function LoginMobileScreen() {
         const role = decoded?.role;
         
         if (role === 'clipper') {
-          router.replace('(dashboard_clipper)/clipper_dashboard');
+          router.replace('/(dashboard_clipper)/clipper_dashboard');
         } else if (role === 'advertiser') {
-          router.replace('(dashboard_advertiser)/advertiser_dashboard');
-        } else if (role === 'ad-worker') {
-          router.replace('(dashboard_ad_worker)/ad_worker_dashboard');
+          router.replace('/(dashboard_advertiser)/advertiser_dashboard');
         } else {
-          router.replace('/');
+          router.replace('/(auth)/onboarding_1');
         }
       } else {
         throw new Error('No authentication token received');
@@ -209,10 +219,11 @@ export default function LoginMobileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
         style={styles.container}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         <LinearGradient 
           colors={['rgba(93,45,230,0.7)', 'rgba(214,207,141,0.5)', 'rgba(52,211,153,0.1)']} 
@@ -222,18 +233,16 @@ export default function LoginMobileScreen() {
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            bounces={false}
           >
             {/* Logo/Icon */}
             <View style={styles.logoContainer}>
-              <View style={styles.iconContainer}>
-                {/* Replace with actual icon image */}
-                <View style={styles.iconContainer}>
-                    <Image 
-                    source={require('../../assets/images/icon.png')} 
-                    style={styles.iconImage}
-                    resizeMode="contain"
-                    />
-                </View>
+              <View style={styles.iconWrapper}>
+                <Image 
+                  source={require('../../assets/images/icon.png')} 
+                  style={styles.iconImage}
+                  resizeMode="contain"
+                />
               </View>
               <Text style={styles.welcomeText}>Welcome Back</Text>
             </View>
@@ -286,7 +295,7 @@ export default function LoginMobileScreen() {
                       onPress={togglePassword}
                     >
                       <Ionicons 
-                        name={showPassword ? "eye-off" : "eye"} 
+                        name={showPassword ? "eye-off-outline" : "eye-outline"} 
                         size={20} 
                         color="#666" 
                       />
@@ -328,14 +337,6 @@ export default function LoginMobileScreen() {
                     </Text>
                   </LinearGradient>
                 </TouchableOpacity>
-
-                {/* Social Login Options (Optional) */}
-                <View style={styles.socialContainer}>
-                  {/* <Text style={styles.orText}>Or continue with</Text> */}
-                  <View style={styles.socialButtons}>
-                    {/* Add social login buttons here if needed */}
-                  </View>
-                </View>
               </View>
             ) : (
               /* OTP Verification Form */
@@ -348,7 +349,7 @@ export default function LoginMobileScreen() {
                 <View style={styles.inputContainer}>
                   <Text style={styles.inputLabel}>6-digit OTP</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, styles.otpInput]}
                     placeholder="000000"
                     placeholderTextColor="#999"
                     value={otp}
@@ -387,8 +388,8 @@ export default function LoginMobileScreen() {
             <View style={styles.bottomContainer}>
               <Text style={styles.bottomText}>
                 By continuing, you agree to our{' '}
-                <Text style={styles.linkText}>Terms of Service</Text> and{' '}
-                <Text style={styles.linkText}>Privacy Policy</Text>
+                <Text style={styles.linkText} onPress={() => {}}>Terms of Service</Text> and{' '}
+                <Text style={styles.linkText} onPress={() => {}}>Privacy Policy</Text>
               </Text>
             </View>
           </ScrollView>
@@ -411,20 +412,19 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 24 * scale,
-    paddingTop: Platform.OS === 'ios' ? 60 * scale : 40 * scale,
+    paddingHorizontal: 24 * scale,
+    paddingTop: 20 * scale,
     paddingBottom: 40 * scale,
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 40 * scale,
-    marginTop: 20 * scale,
+    marginBottom: 30 * scale,
+    marginTop: 10 * scale,
   },
-  iconContainer: {
+  iconWrapper: {
     width: 80 * scale,
     height: 80 * scale,
     borderRadius: 40 * scale,
-    backgroundColor: '#16a34a',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16 * scale,
@@ -434,24 +434,10 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  iconContainer: {
-    width: 80 * scale,
-    height: 80 * scale,
-    borderRadius: 40 * scale,
-    // backgroundColor: '#16a34a',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16 * scale,
-    // shadowColor: '#000',
-    // shadowOffset: { width: 0, height: 4 },
-    // shadowOpacity: 0.3,
-    // shadowRadius: 8,
-    // elevation: 8,
-  },
   iconImage: {
-    width: 60 * scale,
-    height: 60 * scale,
-    borderRadius: 30 * scale,
+    width: 70 * scale,
+    height: 70 * scale,
+    borderRadius: 35 * scale,
   },
   welcomeText: {
     fontSize: 28 * scale,
@@ -463,7 +449,7 @@ const styles = StyleSheet.create({
   },
   newUserContainer: {
     alignItems: 'center',
-    marginBottom: 30 * scale,
+    marginBottom: 25 * scale,
   },
   newUserText: {
     fontSize: 20 * scale,
@@ -502,7 +488,7 @@ const styles = StyleSheet.create({
     marginBottom: 8 * scale,
   },
   input: {
-    width: 354 * scale,
+    width: '100%',
     height: 56 * scale,
     backgroundColor: '#fff',
     borderRadius: 10 * scale,
@@ -514,6 +500,7 @@ const styles = StyleSheet.create({
   },
   passwordContainer: {
     position: 'relative',
+    width: '100%',
   },
   passwordInput: {
     paddingRight: 50 * scale,
@@ -556,7 +543,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   loginButton: {
-    width: 354 * scale,
+    width: '100%',
     height: 56 * scale,
     borderRadius: 10 * scale,
     overflow: 'hidden',
@@ -572,20 +559,6 @@ const styles = StyleSheet.create({
     fontSize: 16 * scale,
     fontWeight: '700',
   },
-  socialContainer: {
-    alignItems: 'center',
-    marginTop: 20 * scale,
-  },
-  orText: {
-    fontSize: 14 * scale,
-    color: '#fff',
-    marginBottom: 16 * scale,
-  },
-  socialButtons: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 16 * scale,
-  },
   otpTitle: {
     fontSize: 24 * scale,
     fontWeight: '700',
@@ -598,6 +571,11 @@ const styles = StyleSheet.create({
     color: '#d1d5db',
     textAlign: 'center',
     marginBottom: 30 * scale,
+  },
+  otpInput: {
+    textAlign: 'center',
+    fontSize: 20 * scale,
+    letterSpacing: 4 * scale,
   },
   backButton: {
     marginTop: 20 * scale,

@@ -1,13 +1,12 @@
 // app/(dashboard)/advertiser_dashboard.tsx
 import React from 'react';
 import {
-  View,
   ScrollView,
-  SafeAreaView,
   StyleSheet,
   Dimensions,
   StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import ReadyLaunchText from  '../(dashboard_clipper)/ReadyLaunchText_clipper';
 import CreateUGCsCard from   '../(dashboard_clipper)/CreateUGCsCard';
@@ -56,7 +55,6 @@ export default function ClipperDashboard() {
     </SafeAreaView>
   );
 }
-
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -92,7 +90,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   scrollContent: {
-    paddingTop: 120 * scale,     // ← Must be taller than header height (≈107 + safe area + margin)
+    paddingTop: 60 * scale,     // ← Must be taller than header height (≈107 + safe area + margin)
     paddingHorizontal: 12 * scale,
     paddingBottom: 40 * scale,
   },

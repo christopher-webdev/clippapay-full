@@ -1,15 +1,15 @@
-import express from 'express';
-import { requireAuth, requireAdmin } from '../middleware/auth.js';
-import User from '../models/User.js';
-import Campaign from '../models/Campaign.js';
-import Submission from '../models/Submission.js';
-import Withdrawal from '../models/Withdrawal.js';
-import Transaction from '../models/Transaction.js';
-import Subscription from '../models/Subscription.js';
-import Wallet from '../models/Wallet.js';
-import ClipSubmission from '../models/ClipSubmission.js';
-import { requireAdminAuth } from '../middleware/adminAuth.js';
-import DepositRequest from '../models/DepositRequest.js';
+import express from "express";
+import { requireAuth, requireAdmin } from "../middleware/auth.js";
+import User from "../models/User.js";
+import Campaign from "../models/Campaign.js";
+import Submission from "../models/Submission.js";
+import Withdrawal from "../models/WithdrawalRequest.js";
+import Transaction from "../models/Transaction.js";
+import Subscription from "../models/Subscription.js";
+import Wallet from "../models/Wallet.js";
+import ClipSubmission from "../models/ClipSubmission.js";
+import { requireAdminAuth } from "../middleware/adminAuth.js";
+import DepositRequest from "../models/DepositRequest.js";
 
 const router = express.Router();
 
@@ -26,53 +26,64 @@ const router = express.Router();
  *   - totalApprovedPgcVideos (sum of approvedVideosCount for PGC campaigns)
  *   - ...subscriptions stats
  */
-router.get('/', requireAuth, async (req, res) => {
+router.get("/", requireAuth, async (req, res) => {
   try {
     // Users by role
-    const totalClippers = await User.countDocuments({ role: 'clipper' });
-    const totalAdvertisers = await User.countDocuments({ role: 'advertiser' });
-    const totalAdminWorkers = await User.countDocuments({ role: 'admin', isSuperAdmin: false });
+    const totalClippers = await User.countDocuments({ role: "clipper" });
+    const totalAdvertisers = await User.countDocuments({ role: "advertiser" });
+    const totalAdminWorkers = await User.countDocuments({
+      role: "admin",
+      isSuperAdmin: false,
+    });
     const totalSuperAdmins = await User.countDocuments({ isSuperAdmin: true });
 
     // Campaigns
     const totalCampaigns = await Campaign.countDocuments();
-    const activeCampaigns = await Campaign.countDocuments({ status: 'active' });
+    const activeCampaigns = await Campaign.countDocuments({ status: "active" });
 
     // Submissions
     const totalSubmissions = await Submission.countDocuments();
 
     // Withdrawals
-    const pendingWithdrawals = await Withdrawal.countDocuments({ status: 'pending' });
-    const pendingDeposits = await DepositRequest.countDocuments({ status: 'pending' });
+    const pendingWithdrawals = await Withdrawal.countDocuments({
+      status: "pending",
+    });
+    const pendingDeposits = await DepositRequest.countDocuments({
+      status: "pending",
+    });
 
     // Revenue = sum of approved deposits - sum of approved/completed withdrawals
     const approvedDepositResult = await DepositRequest.aggregate([
-      { $match: { status: 'approved' } },
-      { $group: { _id: null, totalDeposits: { $sum: '$amount' } } }
+      { $match: { status: "approved" } },
+      { $group: { _id: null, totalDeposits: { $sum: "$amount" } } },
     ]);
     const totalApprovedDeposits = approvedDepositResult[0]?.totalDeposits || 0;
 
     const withdrawalResult = await Withdrawal.aggregate([
-      { $match: { status: { $in: ['paid', 'completed'] } } },
-      { $group: { _id: null, totalWithdrawals: { $sum: '$amount' } } }
+      { $match: { status: { $in: ["paid", "completed"] } } },
+      { $group: { _id: null, totalWithdrawals: { $sum: "$amount" } } },
     ]);
     const totalWithdrawals = withdrawalResult[0]?.totalWithdrawals || 0;
 
     const totalRevenue = totalApprovedDeposits - totalWithdrawals;
 
     // Subscriptions
-    const pendingSubscriptions = await Subscription.countDocuments({ paymentStatus: 'pending' });
-    const activeClipperPendingApproval = await ClipSubmission.countDocuments({ 'proofs.status': 'pending' });
+    const pendingSubscriptions = await Subscription.countDocuments({
+      paymentStatus: "pending",
+    });
+    const activeClipperPendingApproval = await ClipSubmission.countDocuments({
+      "proofs.status": "pending",
+    });
     const totalSubscriptions = await Subscription.countDocuments();
 
     // TOTAL ESCROW (sum of all users' escrowLocked)
     const escrowResult = await Wallet.aggregate([
-      { $group: { _id: null, totalEscrow: { $sum: "$escrowLocked" } } }
+      { $group: { _id: null, totalEscrow: { $sum: "$escrowLocked" } } },
     ]);
     const totalEscrowLocked = escrowResult[0]?.totalEscrow || 0;
 
     // PLATFORM WALLET BALANCE
-    const platformUser = await User.findOne({ role: 'platform' });
+    const platformUser = await User.findOne({ role: "platform" });
     let platformWalletBalance = 0;
     if (platformUser) {
       const platformWallet = await Wallet.findOne({ user: platformUser._id });
@@ -84,35 +95,38 @@ router.get('/', requireAuth, async (req, res) => {
     // TOTAL VIEWS SOLD
     const totalViewsSoldResult = await Campaign.aggregate([
       {
-        $match: { kind: { $ne: 'pgc' } } // Exclude PGC for views
+        $match: { kind: { $ne: "pgc" } }, // Exclude PGC for views
       },
       {
         $project: {
-          viewsSold: { $subtract: ['$views_purchased', '$views_left'] }
-        }
+          viewsSold: { $subtract: ["$views_purchased", "$views_left"] },
+        },
       },
       {
         $group: {
           _id: null,
-          totalViewsSold: { $sum: '$viewsSold' }
-        }
-      }
+          totalViewsSold: { $sum: "$viewsSold" },
+        },
+      },
     ]);
     const totalViewsSold = totalViewsSoldResult[0]?.totalViewsSold || 0;
 
     // TOTAL APPROVED PGC VIDEOS
     const totalApprovedPgcVideosResult = await Campaign.aggregate([
       {
-        $match: { kind: 'pgc' }
+        $match: { kind: "pgc" },
       },
       {
         $group: {
           _id: null,
-          totalApprovedPgcVideos: { $sum: { $ifNull: ['$approvedVideosCount', 0] } }
-        }
-      }
+          totalApprovedPgcVideos: {
+            $sum: { $ifNull: ["$approvedVideosCount", 0] },
+          },
+        },
+      },
     ]);
-    const totalApprovedPgcVideos = totalApprovedPgcVideosResult[0]?.totalApprovedPgcVideos || 0;
+    const totalApprovedPgcVideos =
+      totalApprovedPgcVideosResult[0]?.totalApprovedPgcVideos || 0;
 
     return res.json({
       totalClippers,
@@ -131,11 +145,11 @@ router.get('/', requireAuth, async (req, res) => {
       totalEscrowLocked,
       platformWalletBalance,
       totalViewsSold,
-      totalApprovedPgcVideos
+      totalApprovedPgcVideos,
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to load admin stats.' });
+    res.status(500).json({ error: "Failed to load admin stats." });
   }
 });
 

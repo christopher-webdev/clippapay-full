@@ -6,11 +6,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
-  SafeAreaView,
   Alert,
   Platform,
   AppState,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname, useSegments } from 'expo-router';
@@ -20,8 +20,7 @@ import axios from 'axios';
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
-const API_BASE = 'https://clippapay.com/api';
-
+const API_BASE = process.env.EXPO_PUBLIC_API_URL;
 // Define the tab items with Applications tab added
 const TAB_ITEMS = [
   {
@@ -30,21 +29,7 @@ const TAB_ITEMS = [
     activeIcon: 'grid',
     routes: [
       '/(dashboard_advertiser)/advertiser_dashboard',
-      '/(dashboard_advertiser)',
-      '/advertiser_dashboard',
-      '/dashboard_advertiser',
-      '/(dashboard_advertiser)/index',
-      '/index',
     ],
-  },
-  {
-    name: 'Applications',
-    icon: 'document-text-outline',
-    activeIcon: 'document-text',
-    routes: [
-      '/(dashboard_advertiser)/applications',
-    ],
-    showBadge: true,
   },
   {
     name: 'My Campaigns',
@@ -52,10 +37,6 @@ const TAB_ITEMS = [
     activeIcon: 'megaphone',
     routes: [
       '/(dashboard_advertiser)/Campaigns',
-      '/Campaigns',
-      '/(dashboard_advertiser)/campaigns',
-      '/campaigns',
-      '/(dashboard_advertiser)/campaigns/',
     ],
   },
   {
@@ -64,11 +45,6 @@ const TAB_ITEMS = [
     activeIcon: 'cash',
     routes: [
       '/(dashboard_advertiser)/WalletScreen',
-      '/WalletScreen',
-      '/(dashboard_advertiser)/walletscreen',
-      '/walletscreen',
-      '/(dashboard_advertiser)/wallet',
-      '/wallet',
     ],
   },
   {
@@ -77,9 +53,6 @@ const TAB_ITEMS = [
     activeIcon: 'person',
     routes: [
       '/(dashboard_advertiser)/Profile',
-      '/Profile',
-      '/(dashboard_advertiser)/profile',
-      '/profile',
     ],
   },
 ];
@@ -126,7 +99,7 @@ export default function Footer() {
     const subscription = AppState.addEventListener('change', nextAppState => {
       if (appState.match(/inactive|background/) && nextAppState === 'active') {
         // App came to foreground - refresh pending count
-        loadPendingApplicationsCount();
+        // loadPendingApplicationsCount();
       }
       setAppState(nextAppState);
     });
@@ -135,13 +108,13 @@ export default function Footer() {
   }, [appState]);
 
   // Initial load and periodic refresh
-  useEffect(() => {
-    loadPendingApplicationsCount();
+  // useEffect(() => {
+  //   loadPendingApplicationsCount();
 
-    // Refresh every 30 seconds
-    const interval = setInterval(loadPendingApplicationsCount, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  //   // Refresh every 30 seconds
+  //   const interval = setInterval(loadPendingApplicationsCount, 30000);
+  //   return () => clearInterval(interval);
+  // }, []);
 
   // Debug logging (remove in production)
   useEffect(() => {

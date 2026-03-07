@@ -13,13 +13,14 @@ import {
   Dimensions,
   Platform,
 } from 'react-native';
+import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import axios from 'axios';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width } = Dimensions.get('window');
-const API_BASE = 'https://clippapay.com/api';
+const API_BASE = process.env.EXPO_PUBLIC_API_URL; 
 
 export default function ProfileScreen() {
   // Profile states
@@ -100,7 +101,7 @@ export default function ProfileScreen() {
       if (!token) throw new Error('No auth token found');
 
       await axios.patch(
-        `${API_BASE}/user/me`,
+        `${API_BASE}/user/profile`,
         {
           company: companyName,
           phone: phoneNumber,
@@ -155,7 +156,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleDeleteAccount = async () => {
+  const deleteAccount = async () => {
     setDeleteMsg(null);
 
     if (deleteInput.trim().toUpperCase() !== 'DELETE') {
@@ -181,10 +182,20 @@ export default function ProfileScreen() {
         [
           {
             text: 'OK',
-            onPress: () => {
-              // Redirect to login (uncomment if using expo-router)
-              // router.replace('/(auth)/login');
-            },
+            onPress: async () => {
+                       try {
+                         if (Platform.OS === 'web') {
+                           await AsyncStorage.removeItem('userToken');
+                         } else {
+                           await SecureStore.deleteItemAsync('userToken');
+                           await AsyncStorage.removeItem('userToken');
+                         }
+                         router.replace('/login');
+                       } catch (error) {
+                         console.error('Logout error:', error);
+                         Alert.alert('Error', 'Failed to sign out. Please try again.');
+                       }
+                     },
           },
         ]
       );
@@ -196,10 +207,7 @@ export default function ProfileScreen() {
   };
 
   return (
-    <LinearGradient
-            colors={['#34D3991A', '#D6CF8D80', '#ffffffb2']}
-            style={styles.background}
-    >
+
     <ScrollView
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
@@ -271,7 +279,7 @@ export default function ProfileScreen() {
       </View>
 
       {/* PASSWORD SECTION */}
-      <View style={[styles.sectionContainer, styles.passwordSection]}>
+      <View style={[styles.sectionContainer]}>
         <LinearGradient
           colors={['#FFFFFF', '#F8FAFC']}
           style={styles.sectionGradient}
@@ -432,7 +440,7 @@ export default function ProfileScreen() {
 
               <TouchableOpacity
                 style={[styles.modalButton, styles.confirmDeleteButton]}
-                onPress={handleDeleteAccount}
+                onPress={deleteAccount}
                 disabled={deleting}
               >
                 {deleting ? (
@@ -448,7 +456,7 @@ export default function ProfileScreen() {
 
       <View style={{ height: 80 }} />
     </ScrollView>
-    </LinearGradient>
+
   );
 }
 

@@ -1,36 +1,29 @@
+// File: express_backend/models/DepositRequest.js
+
 import mongoose from 'mongoose';
 
-// In DepositRequest.js
 const depositRequestSchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  amount: {
-    type: Number,
-    required: true
-  },
-  receiptUrl: {
-    type: String,
-    // Make not required for Paystack payments
-    required: function() { return this.paymentMethod !== 'paystack'; }
-  },
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  amount: { type: Number, required: true },
+  currency: { type: String, enum: ['NGN', 'USDT'], default: 'NGN' },
   status: {
     type: String,
-    enum: ['pending','approved','rejected'],
+    enum: ['pending', 'approved', 'rejected'],
     default: 'pending'
   },
   paymentMethod: {
     type: String,
-    enum: ['bank', 'usdt', 'paystack'],
-    default: 'bank'
+    enum: ['paystack', 'bank_transfer', 'usdt'],
+    required: true
   },
-  reference: {
-    type: String,
-    unique: true,
-    sparse: true // Allows null values but ensures uniqueness for non-null
-  }
+  receiptUrl: String,
+  reference: String, // For Paystack reference
+  txHash: String,    // For USDT transaction hash
+  fromAddress: String, // For USDT sender address
+  network: String,   // For USDT network (TRC20, ERC20, BEP20)
+  adminNotes: String,
+  processedAt: Date,
+  processedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true });
 
 export default mongoose.model('DepositRequest', depositRequestSchema);

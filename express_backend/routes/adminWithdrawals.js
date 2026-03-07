@@ -1,106 +1,445 @@
-// adminWithdrawals.js
+// File: express_backend/routes/adminWithdrawals.js
 
 import express from 'express';
-import Withdrawal from '../models/Withdrawal.js';
+import mongoose from 'mongoose';
+import WithdrawalRequest from '../models/WithdrawalRequest.js';
 import Wallet from '../models/Wallet.js';
-import User from '../models/User.js'; // Make sure User schema has email and name fields
-import { requireAdminAuth } from '../middleware/adminAuth.js'
+import Notification from '../models/Notification.js';
+import Transaction from '../models/Transaction.js';
+import { requireAdminAuth } from '../middleware/adminAuth.js';
 
 const router = express.Router();
 
-// GET /api/admin/withdrawals
-// Returns all withdrawals, mapped for frontend display,
-router.get('/', requireAdminAuth, async (req, res, next) => {
+// Helper function to create notifications
+async function createNotification(userId, type, title, message, data = {}, priority = 'medium') {
   try {
-    // Fetch withdrawals and populate user info with all necessary fields
-    const withdrawals = await Withdrawal.find()
-      .sort({ requestedAt: -1 })
+    const notification = new Notification({
+      user: userId,
+      type,
+      title,
+      message,
+      priority,
+      data,
+      inAppDelivered: true
+    });
+    await notification.save();
+    return notification;
+  } catch (err) {
+    console.error('Error creating notification:', err);
+  }
+}
+
+/**
+ * GET /api/admin/withdrawals
+ * Get all withdrawals with filters
+ * Query params:
+ *   status: pending|completed|declined
+ *   currency: NGN|USDT
+ *   search: search term for user email/name
+ */
+router.get('/', requireAdminAuth, async (req, res) => {
+  try {
+    const { status, currency, search } = req.query;
+    
+    // Build query conditions
+    const conditions = {};
+    
+    // Status filter
+    if (status && ['pending', 'completed', 'declined'].includes(status)) {
+      conditions.status = status;
+    }
+    
+    // Currency filter
+    if (currency && ['NGN', 'USDT'].includes(currency)) {
+      conditions.currency = currency;
+    }
+    
+    // Search filter (if provided)
+    if (search) {
+      const userConditions = {
+        $or: [
+          { email: { $regex: search, $options: 'i' } },
+          { firstName: { $regex: search, $options: 'i' } },
+          { lastName: { $regex: search, $options: 'i' } },
+          { company: { $regex: search, $options: 'i' } }
+        ]
+      };
+      
+      // Find users matching search first
+      const users = await mongoose.model('User').find(userConditions).select('_id');
+      conditions.user = { $in: users.map(u => u._id) };
+    }
+    
+    // Fetch withdrawals with populated user info
+    const withdrawals = await WithdrawalRequest.find(conditions)
+      .sort({ createdAt: -1 })
       .populate({
         path: 'user',
-        select: 'email firstName contactName company role' // Include all needed fields
+        select: 'email firstName lastName company role paymentMethod usdtAddress usdtNetwork payBankName payAccountNumber payAccountName',
+        model: 'User'
       });
 
+    // Format response
     const mapped = withdrawals.map(w => ({
       id: w._id,
-      userEmail: w.user?.email || '',
-      userName: w.user?.firstName || w.user?.contactName || w.user?.company || '',
-      role: w.user?.role || '',
+      user: {
+        id: w.user?._id,
+        email: w.user?.email || '',
+        name: w.user?.firstName 
+          ? `${w.user.firstName}${w.user.lastName ? ' ' + w.user.lastName : ''}`
+          : w.user?.company || 'Unknown',
+        role: w.user?.role || ''
+      },
       amount: w.amount,
+      currency: w.currency || 'NGN',
+      paymentMethod: w.paymentMethod,
+      // Bank details
       bankName: w.bank_name,
       accountNumber: w.account_number,
       accountName: w.account_name,
+      // USDT details
       usdtAddress: w.usdt_address,
       usdtNetwork: w.usdt_network,
-      createdAt: w.requestedAt,
-      processedAt: w.processedAt,
+      // Status and dates
       status: w.status,
-      declineReason: w.declineReason
+      declineReason: w.declineReason,
+      createdAt: w.createdAt,
+      processedAt: w.processedAt,
+      txHash: w.txHash,
+      reference: w.reference
     }));
 
     res.json(mapped);
   } catch (err) {
-    next(err);
+    console.error('Error fetching withdrawals:', err);
+    res.status(500).json({ error: 'Failed to load withdrawals.' });
   }
 });
-// DELETE /api/admin/withdrawals/:id
-// Permanently remove a withdrawal record
-router.delete('/:id', requireAdminAuth, async (req, res, next) => {
+
+/**
+ * GET /api/admin/withdrawals/pending
+ * List all pending withdrawals (maintained for backward compatibility)
+ */
+router.get('/pending', requireAdminAuth, async (req, res) => {
+  try {
+    const withdrawals = await WithdrawalRequest.find({ status: 'pending' })
+      .sort({ createdAt: -1 })
+      .populate({
+        path: 'user',
+        select: 'email firstName lastName company role'
+      });
+
+    res.json(withdrawals);
+  } catch (err) {
+    console.error('Error fetching pending withdrawals:', err);
+    res.status(500).json({ error: 'Failed to load pending withdrawals.' });
+  }
+});
+
+/**
+ * POST /api/admin/withdrawals/:id/approve
+ * Approve a pending withdrawal
+ */
+router.post('/:id/approve', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const withdrawal = await Withdrawal.findById(id);
+    const { txHash } = req.body; // Optional transaction hash for USDT payouts
+    
+    const withdrawal = await WithdrawalRequest.findById(id).populate('user');
+    if (!withdrawal) {
+      return res.status(404).json({ error: 'Withdrawal not found' });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({ error: 'Withdrawal already processed' });
+    }
+
+    const wallet = await Wallet.findOne({ user: withdrawal.user._id });
+    if (!wallet) {
+      return res.status(404).json({ error: 'User wallet not found' });
+    }
+
+    // Verify funds are still in escrow
+    if (withdrawal.currency === 'NGN') {
+      if (wallet.escrowLocked < withdrawal.amount) {
+        return res.status(400).json({ error: 'Insufficient escrow funds' });
+      }
+      // Deduct from escrow permanently
+      wallet.escrowLocked -= withdrawal.amount;
+    } else {
+      if (wallet.usdtEscrowLocked < withdrawal.amount) {
+        return res.status(400).json({ error: 'Insufficient USDT escrow funds' });
+      }
+      // Deduct from escrow permanently
+      wallet.usdtEscrowLocked -= withdrawal.amount;
+    }
+    
+    await wallet.save();
+
+    // Update withdrawal status
+    withdrawal.status = 'completed';
+    withdrawal.processedAt = new Date();
+    withdrawal.processedBy = req.user._id;
+    if (txHash) withdrawal.txHash = txHash;
+    await withdrawal.save();
+
+    // Record transaction
+    await Transaction.create({
+      user: withdrawal.user._id,
+      type: 'withdrawal',
+      amount: withdrawal.amount,
+      currency: withdrawal.currency,
+      status: 'completed',
+      note: `Withdrawal completed by admin`,
+      reference: withdrawal.reference || withdrawal._id.toString(),
+      metadata: {
+        withdrawalId: withdrawal._id,
+        paymentMethod: withdrawal.paymentMethod,
+        processedBy: req.user._id,
+        txHash
+      }
+    });
+
+    // Create notification for completed withdrawal
+    const amountFormatted = withdrawal.currency === 'NGN' 
+      ? `₦${withdrawal.amount.toLocaleString()}`
+      : `${withdrawal.amount} USDT`;
+    
+    await createNotification(
+      withdrawal.user._id,
+      'withdrawal_processed',
+      'Withdrawal Completed',
+      `Your withdrawal of ${amountFormatted} has been processed successfully.`,
+      {
+        withdrawalId: withdrawal._id,
+        amount: withdrawal.amount,
+        currency: withdrawal.currency,
+        status: 'completed',
+        txHash
+      },
+      'high'
+    );
+
+    res.json({ 
+      success: true, 
+      message: 'Withdrawal approved successfully',
+      withdrawal: {
+        id: withdrawal._id,
+        status: withdrawal.status,
+        processedAt: withdrawal.processedAt
+      }
+    });
+  } catch (err) {
+    console.error('Error approving withdrawal:', err);
+    res.status(500).json({ error: 'Failed to approve withdrawal.' });
+  }
+});
+
+/**
+ * POST /api/admin/withdrawals/:id/decline
+ * Decline a pending withdrawal and release funds back to user
+ */
+router.post('/:id/decline', requireAdminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    
+    const withdrawal = await WithdrawalRequest.findById(id).populate('user');
+    if (!withdrawal) {
+      return res.status(404).json({ error: 'Withdrawal not found' });
+    }
+    
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({ error: 'Withdrawal already processed' });
+    }
+
+    const wallet = await Wallet.findOne({ user: withdrawal.user._id });
+    if (!wallet) {
+      return res.status(404).json({ error: 'User wallet not found' });
+    }
+
+    // Release funds back from escrow
+    if (withdrawal.currency === 'NGN') {
+      await wallet.releaseEscrowNGN(withdrawal.amount);
+    } else {
+      await wallet.releaseEscrowUSDT(withdrawal.amount);
+    }
+
+    // Update withdrawal status
+    withdrawal.status = 'declined';
+    withdrawal.declineReason = reason || 'Declined by admin';
+    withdrawal.processedAt = new Date();
+    withdrawal.processedBy = req.user._id;
+    await withdrawal.save();
+
+    // Record transaction
+    await Transaction.create({
+      user: withdrawal.user._id,
+      type: 'withdrawal',
+      amount: withdrawal.amount,
+      currency: withdrawal.currency,
+      status: 'failed',
+      note: `Withdrawal declined: ${reason || 'No reason provided'}`,
+      metadata: {
+        withdrawalId: withdrawal._id,
+        declinedBy: req.user._id,
+        reason
+      }
+    });
+
+    // Create notification for declined withdrawal
+    const amountFormatted = withdrawal.currency === 'NGN' 
+      ? `₦${withdrawal.amount.toLocaleString()}`
+      : `${withdrawal.amount} USDT`;
+    
+    await createNotification(
+      withdrawal.user._id,
+      'withdrawal_rejected',
+      'Withdrawal Declined',
+      `Your withdrawal request of ${amountFormatted} has been declined. ${reason ? `Reason: ${reason}` : 'Please contact support for more information.'}`,
+      {
+        withdrawalId: withdrawal._id,
+        amount: withdrawal.amount,
+        currency: withdrawal.currency,
+        status: 'declined',
+        reason
+      },
+      'high'
+    );
+
+    res.json({ 
+      success: true, 
+      message: 'Withdrawal declined',
+      withdrawal: {
+        id: withdrawal._id,
+        status: withdrawal.status,
+        processedAt: withdrawal.processedAt,
+        declineReason: withdrawal.declineReason
+      }
+    });
+  } catch (err) {
+    console.error('Error declining withdrawal:', err);
+    res.status(500).json({ error: 'Failed to decline withdrawal.' });
+  }
+});
+
+/**
+ * DELETE /api/admin/withdrawals/:id
+ * Permanently remove a withdrawal record (only for non-pending or old records)
+ */
+router.delete('/:id', requireAdminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const withdrawal = await WithdrawalRequest.findById(id);
+    
     if (!withdrawal) {
       return res.status(404).json({ error: 'Withdrawal not found' });
     }
 
-    // Only allow deletes for non-pending records, if you’d like
+    // Only allow deletion of completed/declined withdrawals, or very old pending ones
     if (withdrawal.status === 'pending') {
-      return res.status(400).json({ error: 'Cannot delete a pending withdrawal' });
+      // Check if it's older than 30 days
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      if (withdrawal.createdAt > thirtyDaysAgo) {
+        return res.status(400).json({ 
+          error: 'Cannot delete recent pending withdrawals. Consider declining them instead.' 
+        });
+      }
     }
 
-    await Withdrawal.deleteOne({ _id: id });
-    res.json({ success: true, id });
+    await WithdrawalRequest.deleteOne({ _id: id });
+    
+    res.json({ 
+      success: true, 
+      message: 'Withdrawal deleted successfully',
+      id 
+    });
   } catch (err) {
-    next(err);
+    console.error('Error deleting withdrawal:', err);
+    res.status(500).json({ error: 'Failed to delete withdrawal.' });
   }
 });
 
-
-// Approve a pending withdrawal and debit the user's wallet
-router.post('/:id/approve',requireAdminAuth, async (req, res, next) => {
+/**
+ * GET /api/admin/withdrawals/stats
+ * Get withdrawal statistics for dashboard
+ */
+router.get('/stats', requireAdminAuth, async (req, res) => {
   try {
-    const withdrawal = await Withdrawal.findById(req.params.id);
-    if (!withdrawal) return res.status(404).json({ error: 'Withdrawal not found' });
-    if (withdrawal.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
+    const stats = await WithdrawalRequest.aggregate([
+      {
+        $group: {
+          _id: {
+            status: '$status',
+            currency: '$currency'
+          },
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amount' }
+        }
+      },
+      {
+        $group: {
+          _id: '$_id.status',
+          currencies: {
+            $push: {
+              currency: '$_id.currency',
+              count: '$count',
+              totalAmount: '$totalAmount'
+            }
+          },
+          totalCount: { $sum: '$count' },
+          totalAmountAll: { $sum: '$totalAmount' }
+        }
+      }
+    ]);
 
-    const wallet = await Wallet.findOne({ user: withdrawal.user });
-    if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
+    // Get pending count for quick access
+    const pendingCount = await WithdrawalRequest.countDocuments({ status: 'pending' });
 
-    // Debit user balance
-    try {
-      await wallet.debit(withdrawal.amount);
-    } catch (err) {
-      return res.status(400).json({ error: err.message });
-    }
+    // Format for easier consumption
+    const formatted = {
+      pending: { NGN: { count: 0, amount: 0 }, USDT: { count: 0, amount: 0 }, total: 0 },
+      completed: { NGN: { count: 0, amount: 0 }, USDT: { count: 0, amount: 0 }, total: 0 },
+      declined: { NGN: { count: 0, amount: 0 }, USDT: { count: 0, amount: 0 }, total: 0 },
+      pendingTotal: pendingCount
+    };
 
-    const updated = await withdrawal.markPaid();
-    res.json({ id: updated._id, status: updated.status, processedAt: updated.processedAt });
+    stats.forEach(stat => {
+      const status = stat._id;
+      stat.currencies.forEach(curr => {
+        if (formatted[status] && formatted[status][curr.currency]) {
+          formatted[status][curr.currency].count = curr.count;
+          formatted[status][curr.currency].amount = curr.totalAmount;
+        }
+      });
+      formatted[status].total = stat.totalCount;
+    });
+
+    res.json(formatted);
   } catch (err) {
-    next(err);
+    console.error('Error fetching withdrawal stats:', err);
+    res.status(500).json({ error: 'Failed to fetch withdrawal statistics.' });
   }
 });
 
-// Decline a pending withdrawal
-router.post('/:id/decline', requireAdminAuth, async (req, res, next) => {
+/**
+ * GET /api/admin/withdrawals/user/:userId
+ * Get all withdrawals for a specific user
+ */
+router.get('/user/:userId', requireAdminAuth, async (req, res) => {
   try {
-    const { reason } = req.body;
-    const withdrawal = await Withdrawal.findById(req.params.id);
-    if (!withdrawal) return res.status(404).json({ error: 'Withdrawal not found' });
-    if (withdrawal.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
+    const { userId } = req.params;
+    
+    const withdrawals = await WithdrawalRequest.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .populate('user', 'email firstName lastName');
 
-    const updated = await withdrawal.markDeclined(reason);
-    res.json({ id: updated._id, status: updated.status, processedAt: updated.processedAt, declineReason: updated.declineReason });
+    res.json(withdrawals);
   } catch (err) {
-    next(err);
+    console.error('Error fetching user withdrawals:', err);
+    res.status(500).json({ error: 'Failed to load user withdrawals.' });
   }
 });
 

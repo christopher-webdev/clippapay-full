@@ -43,7 +43,6 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(dashboard_advertiser)" />
         <Stack.Screen name="(dashboard_clipper)" />
-        <Stack.Screen name="(dashboard_ad_worker)" />
       </Stack>
     </>
   );

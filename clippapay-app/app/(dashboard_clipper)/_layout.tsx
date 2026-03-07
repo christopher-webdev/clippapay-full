@@ -1,15 +1,18 @@
 // app/(dashboard)/_layout.tsx
 import { Stack } from 'expo-router';
-import { View, SafeAreaView, StyleSheet, Dimensions } from 'react-native';
-import ProfileHeader from './ProfileHeaderClipper';
+import { View, StyleSheet, Dimensions } from 'react-native';
+import ProfileHeader from './ProfileHeader';
 import Footer from './FooterClipper';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { NotificationsProvider } from '../../hooks/useNotifications';
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
 
 export default function DashboardLayout() {
   return (
+    <NotificationsProvider>
     <SafeAreaView style={styles.safeArea}>
       <LinearGradient
         colors={['#34D3991A', '#D6CF8D80', '#ffffffb2']}
@@ -24,11 +27,13 @@ export default function DashboardLayout() {
         <Stack
           screenOptions={{
             headerShown: false,
-            contentStyle: styles.stackContent
+            contentStyle: styles.stackContent,
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+            gestureDirection: 'horizontal',
           }}
         >
           <Stack.Screen name="clipper_dashboard" />
-          <Stack.Screen name="Campaigns" />
           {/* <Stack.Screen name="advertiser_dashboard" />
           <Stack.Screen name="Campaigns" />
           <Stack.Screen name="WalletScreen" />
@@ -45,6 +50,7 @@ export default function DashboardLayout() {
         </View>
       </LinearGradient>
     </SafeAreaView>
+    </NotificationsProvider>
   );
 }
 

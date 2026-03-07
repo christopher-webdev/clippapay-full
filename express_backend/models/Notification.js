@@ -14,14 +14,15 @@ const notificationSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: [
-      // Application flow
       'new_application',
       'offer_received',
       'offer_accepted',
-      'offer_rejected',
       'offer_expired',
       'submission_received',
       'revision_requested',
+      'payment_received',
+      'dispute_raised',
+      'dispute_resolved',
       'payment_received',
       
       // Campaign updates

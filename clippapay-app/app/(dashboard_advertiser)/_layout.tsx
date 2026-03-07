@@ -1,22 +1,22 @@
 // app/(dashboard)/_layout.tsx
 import { Stack } from 'expo-router';
-import { View, SafeAreaView, StyleSheet, Dimensions, Platform } from 'react-native';
+import { View, StyleSheet, Dimensions, Platform } from 'react-native';
 import ProfileHeader from './ProfileHeader';
 import Footer from './Footer';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { NotificationsProvider } from '../../hooks/useNotifications';
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
 
-// Header height based on platform
-const HEADER_HEIGHT = Platform.OS === 'ios' ? 130 * scale : 120 * scale;
-const FOOTER_HEIGHT = 98 * scale;
 
 export default function DashboardLayout() {
   return (
+    <NotificationsProvider>
     <SafeAreaView style={styles.safeArea}>
       <LinearGradient
-        colors={['#34D3991A', '#D6CF8D80', '#ffffffb2']}
+        colors={['#ffffff1a', '#ffffff80', '#ffffffb2']}
         style={styles.background}
       >
         {/* Fixed Header */}
@@ -38,7 +38,7 @@ export default function DashboardLayout() {
           <Stack.Screen 
             name="advertiser_dashboard" 
             options={{ 
-              title: 'Dashboard',
+              title: 'Browse',
               animation: 'fade' 
             }} 
           />
@@ -202,6 +202,7 @@ export default function DashboardLayout() {
         </View>
       </LinearGradient>
     </SafeAreaView>
+    </NotificationsProvider>
   );
 }
 
@@ -218,37 +219,32 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: HEADER_HEIGHT,
     zIndex: 1000,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 3,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+
   },
   footerContainer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: FOOTER_HEIGHT,
     zIndex: 1000,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 3,
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
   },
   stackContent: {
     flex: 1,
-    paddingTop: HEADER_HEIGHT,
-    paddingBottom: FOOTER_HEIGHT,
     backgroundColor: 'transparent',
+    paddingTop: 25 * scale, // Space for header
+    paddingBottom: 90 * scale, // Space for footer
   },
 });

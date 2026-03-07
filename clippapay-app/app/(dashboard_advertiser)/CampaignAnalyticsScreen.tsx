@@ -19,7 +19,7 @@ import { useRouter } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const API_BASE = "https://clippapay.com/api";
+const API_BASE = 'http://192.168.0.16:5000/api' //"https://clippapay.com/api";
 const CLIPPERS_PER_PAGE = 10;
 
 interface Campaign {
