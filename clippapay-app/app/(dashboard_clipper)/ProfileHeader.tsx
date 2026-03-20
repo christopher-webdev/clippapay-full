@@ -1,36 +1,24 @@
-// app/components/ProfileHeader.tsx
-import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  View, 
-  Text, 
-  Image, 
-  TouchableOpacity, 
-  StyleSheet, 
-  Dimensions, 
-  Platform, 
-  Alert,
-  ActivityIndicator 
+// app/(dashboard_clipper)/ProfileHeader.tsx
+import React, { useState, useCallback } from 'react';
+import {
+  View, Text, Image, TouchableOpacity,
+  StyleSheet, Platform, ActivityIndicator,
 } from 'react-native';
-
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
-
-// Import notification hook
 import { useNotifications } from '../../hooks/useNotifications';
 
-const { width } = Dimensions.get('window');
-const scale = width / 428;
-const API_BASE = process.env.EXPO_PUBLIC_API_URL;
-const DEFAULT_PROFILE = require('../../assets/images/user-default.jpg');
+const API_BASE      = process.env.EXPO_PUBLIC_API_URL;
+const DEFAULT_IMAGE = require('../../assets/images/user-default.jpg');
 
-interface ProfileHeaderProps {
-  onNotificationPress?: () => void;
-}
+// ── Exported so _layout.tsx can consume it ───────────────────────────────────
+export const HEADER_HEIGHT = 72;
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface UserData {
   _id: string;
   email: string;
@@ -41,365 +29,201 @@ interface UserData {
   role: 'clipper' | 'advertiser' | 'admin' | 'ad-worker' | 'platform';
   profileImage?: string | null;
   rating?: number;
-  bio?: string;
-  categories?: string[];
 }
 
-export default function ProfileHeader({ onNotificationPress }: ProfileHeaderProps) {
+interface Props { onNotificationPress?: () => void }
+
+// ─── Role config ──────────────────────────────────────────────────────────────
+const ROLE_CFG: Record<string, { label: string; color: string; bg: string }> = {
+  advertiser:  { label: 'ADVERTISER', color: '#EF4444', bg: '#FEF2F2' },
+  clipper:     { label: 'CREATOR',    color: '#10B981', bg: '#ECFDF5' },
+  admin:       { label: 'ADMIN',      color: '#6366F1', bg: '#EEF2FF' },
+  'ad-worker': { label: 'AD WORKER',  color: '#F59E0B', bg: '#FFFBEB' },
+  platform:    { label: 'PLATFORM',   color: '#8B5CF6', bg: '#F5F3FF' },
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const getToken = async () => {
+  if (Platform.OS === 'web') return AsyncStorage.getItem('userToken');
+  return (await SecureStore.getItemAsync('userToken')) || (await AsyncStorage.getItem('userToken'));
+};
+
+const getGreeting = () => {
+  const h = new Date().getHours();
+  return h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening';
+};
+
+// ─── Component ────────────────────────────────────────────────────────────────
+export default function ProfileHeader({ onNotificationPress }: Props) {
   const router = useRouter();
-  const [user, setUser] = useState<UserData | null>(null);
-  const [profileImage, setProfileImage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [imageError, setImageError] = useState(false);
-  
-  // Use notifications hook
-  const { unreadCount, refresh: refreshNotifications } = useNotifications();
+  const [user, setUser]           = useState<UserData | null>(null);
+  const [imgUri, setImgUri]       = useState<string | null>(null);
+  const [imgErr, setImgErr]       = useState(false);
+  const [loading, setLoading]     = useState(true);
+  const { unreadCount, refresh }  = useNotifications();
 
-  const getToken = async (): Promise<string | null> => {
-    if (Platform.OS === 'web') {
-      return await AsyncStorage.getItem('userToken');
-    }
-    let token = await SecureStore.getItemAsync('userToken');
-    if (!token) token = await AsyncStorage.getItem('userToken');
-    return token;
-  };
-
-  const fetchUserData = async () => {
+  const load = async () => {
     const token = await getToken();
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-
+    if (!token) { setLoading(false); return; }
     try {
       const { data } = await axios.get(`${API_BASE}/user/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      
       setUser(data);
-
-      // Handle profile image
       if (data.profileImage) {
-        // Construct full URL - data.profileImage already starts with /uploads/profiles/
-        const fullUrl = data.profileImage.startsWith('http') 
-          ? data.profileImage 
-          : `${API_BASE}${data.profileImage}`;
-        setProfileImage(fullUrl);
-      } else {
-        setProfileImage(null);
+        setImgUri(
+          data.profileImage.startsWith('http')
+            ? data.profileImage
+            : `${API_BASE}${data.profileImage}`
+        );
       }
-    } catch (err: any) {
-      console.error('Error fetching user data:', err);
-      if (err.response?.status === 401) {
-        // Handle unauthorized - maybe redirect to login
-        router.replace('/(auth)/login');
-      }
+    } catch (e: any) {
+      if (e.response?.status === 401) router.replace('/(auth)/login');
     } finally {
       setLoading(false);
     }
   };
 
-  // Refresh data when screen is focused
-  useFocusEffect(
-    useCallback(() => {
-      fetchUserData();
-      refreshNotifications();
-    }, [])
-  );
+  useFocusEffect(useCallback(() => { load(); refresh(); }, []));
 
-  const handleImageError = () => {
-    console.log('Failed to load profile image');
-    setImageError(true);
-  };
+  // ── Derived ─────────────────────────────────────────────────────────────────
+  const displayName = (() => {
+    if (!user) return 'Guest';
+    if (user.company) return user.company;
+    if (user.contactName) return user.contactName;
+    if (user.firstName) return user.lastName ? `${user.firstName} ${user.lastName}` : user.firstName;
+    return user.email?.split('@')[0] || 'User';
+  })();
 
-  const handleNotificationPress = () => {
-    if (onNotificationPress) {
-      onNotificationPress();
-    } else {
-      // Navigate based on user role
-      const notificationRoutes: Record<string, string> = {
-        advertiser: '/(dashboard_advertiser)/notifications',
-        clipper: '/(dashboard_clipper)/notifications',
+  const roleCfg = ROLE_CFG[user?.role ?? ''] ?? { label: 'USER', color: '#6B7280', bg: '#F3F4F6' };
+  const imgSrc  = imgErr || !imgUri ? DEFAULT_IMAGE : { uri: imgUri };
 
-      };
-      
-      const route = user?.role ? notificationRoutes[user.role] : '/(dashboard)/notifications';
-      router.push(route as any);
-    }
-  };
-
-  const handleProfilePress = () => {
-    // Navigate to profile screen based on role
-    const profileRoutes: Record<string, string> = {
-      advertiser: '/(dashboard_advertiser)/Profile',
-      clipper: '/(dashboard_clipper)/clipper_profile_edit',
+  const goNotifs = () => {
+    if (onNotificationPress) { onNotificationPress(); return; }
+    const routes: Record<string, string> = {
+      advertiser: '/(dashboard_advertiser)/notifications',
+      clipper:    '/(dashboard_clipper)/notifications',
     };
-    
-    const route = user?.role ? profileRoutes[user.role] : '/(dashboard)/clipper_profile_edit';
-    router.push(route as any);
+    router.push((routes[user?.role ?? ''] ?? '/(dashboard)/notifications') as any);
+  };
+
+  const goProfile = () => {
+    const routes: Record<string, string> = {
+      advertiser: '/(dashboard_advertiser)/Profile',
+      clipper:    '/(dashboard_clipper)/clipper_profile_edit',
+    };
+    router.push((routes[user?.role ?? ''] ?? '/(dashboard_clipper)/clipper_profile_edit') as any);
   };
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="small" color="#4F46E5" />
+      <View style={S.container}>
+        <ActivityIndicator size="small" color="#10B981" />
       </View>
     );
   }
 
-  // Generate display name with proper fallbacks
-  const getDisplayName = (): string => {
-    if (!user) return 'Guest';
-    
-    // For advertisers
-    if (user.company) return user.company;
-    if (user.contactName) return user.contactName;
-    
-    // For clippers/users
-    if (user.firstName) {
-      return user.lastName 
-        ? `${user.firstName} ${user.lastName}`
-        : user.firstName;
-    }
-    
-    // Fallback to email
-    return user.email?.split('@')[0] || 'User';
-  };
-
-  // Get role display text
-  const getRoleDisplay = (): string => {
-    if (!user?.role) return 'USER';
-    
-    const roleMap: Record<string, string> = {
-      advertiser: 'ADVERTISER',
-      clipper: 'CREATOR',
-
-    };
-    
-    return roleMap[user.role] || user.role.toUpperCase();
-  };
-
-  // Get role badge color
-  const getRoleBadgeStyle = () => {
-    if (!user?.role) return styles.defaultBadge;
-    
-    const badgeStyles: Record<string, any> = {
-      advertiser: styles.advertiserBadge,
-      clipper: styles.creatorBadge,
-      admin: styles.adminBadge,
-      'ad-worker': styles.workerBadge,
-      platform: styles.platformBadge
-    };
-    
-    return badgeStyles[user.role] || styles.defaultBadge;
-  };
-
-  // Get role text color
-  const getRoleTextStyle = () => {
-    if (!user?.role) return styles.defaultText;
-    
-    const textStyles: Record<string, any> = {
-      advertiser: styles.advertiserText,
-      clipper: styles.creatorText,
-      admin: styles.adminText,
-      'ad-worker': styles.workerText,
-      platform: styles.platformText
-    };
-    
-    return textStyles[user.role] || styles.defaultText;
-  };
-
-  // Get greeting based on time
-  const getGreeting = (): string => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
-    return 'Good Evening';
-  };
-
-  const displayName = getDisplayName();
-  const roleDisplay = getRoleDisplay();
-  const imageSource = imageError || !profileImage
-    ? DEFAULT_PROFILE
-    : { uri: profileImage };
-
   return (
-    <View style={styles.container}>
-      <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+    <View style={S.container}>
+      {/* Avatar */}
+      <TouchableOpacity onPress={goProfile} activeOpacity={0.8} style={S.avatarWrap}>
         <Image
-          source={imageSource}
-          style={styles.profileImage}
-          onError={handleImageError}
-          defaultSource={DEFAULT_PROFILE}
+          source={imgSrc}
+          style={S.avatar}
+          onError={() => setImgErr(true)}
+          defaultSource={DEFAULT_IMAGE}
         />
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.textContainer} onPress={handleProfilePress} activeOpacity={0.7}>
-        <Text style={styles.greeting}>{getGreeting()},</Text>
-        <Text style={styles.name} numberOfLines={1}>
-          {displayName}
-        </Text>
-        <View style={[styles.roleBadge, getRoleBadgeStyle()]}>
-          <Text style={[styles.roleText, getRoleTextStyle()]}>
-            {roleDisplay}
-          </Text>
-          {user?.rating !== undefined && user.rating > 0 && (
-            <View style={styles.ratingContainer}>
-              <Ionicons name="star" size={10} color="#FBBF24" />
-              <Text style={styles.ratingText}>{user.rating.toFixed(1)}</Text>
-            </View>
-          )}
+      {/* Name + role */}
+      <TouchableOpacity style={S.textWrap} onPress={goProfile} activeOpacity={0.7}>
+        <Text style={S.greeting}>Good {getGreeting()}</Text>
+        <View style={S.nameRow}>
+          <Text style={S.name} numberOfLines={1}>{displayName}</Text>
+          <View style={[S.rolePill, { backgroundColor: roleCfg.bg }]}>
+            <Text style={[S.roleLabel, { color: roleCfg.color }]}>{roleCfg.label}</Text>
+          </View>
         </View>
       </TouchableOpacity>
 
-      {/* Notification Bell */}
-      <TouchableOpacity
-        style={styles.notificationContainer}
-        onPress={handleNotificationPress}
-        activeOpacity={0.7}
-      >
-        <Ionicons name="notifications-outline" size={26 * scale} color="#4B5563" />
-
-        {/* Badge with count */}
-        {unreadCount > 0 && (
-          <View style={styles.notificationBadge}>
-            <Text style={styles.notificationCount}>
-              {unreadCount > 99 ? '99+' : unreadCount}
-            </Text>
-          </View>
-        )}
+      {/* Notification bell */}
+      <TouchableOpacity style={S.bellWrap} onPress={goNotifs} activeOpacity={0.75}>
+        <View style={S.bellInner}>
+          <Ionicons name="notifications-outline" size={21} color="#374151" />
+          {unreadCount > 0 && (
+            <View style={S.badge}>
+              <Text style={S.badgeTxt}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+            </View>
+          )}
+        </View>
       </TouchableOpacity>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const S = StyleSheet.create({
+  // Fixed 72px height — matches _layout.tsx paddingTop: 72
   container: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 130 * scale,
-    backgroundColor: '#FFFFFF',
+    height: HEADER_HEIGHT,
+    backgroundColor: '#FFF',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20 * scale,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E7EB',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
     shadowRadius: 4,
     elevation: 3,
-    zIndex: 1000,
   },
-  profileImage: {
-    width: 58 * scale,
-    height: 58 * scale,
-    borderRadius: 29 * scale,
-    backgroundColor: '#f0f0f0',
+
+  // Avatar
+  avatarWrap: { marginRight: 12 },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#ECFDF5',
     borderWidth: 2,
-    borderColor: '#4F46E5',
+    borderColor: '#A7F3D0',
   },
-  textContainer: {
-    marginLeft: 14 * scale,
-    flex: 1,
-  },
-  greeting: {
-    fontSize: 12 * scale,
-    color: '#6B7280',
-    marginBottom: 2,
-  },
-  name: {
-    fontSize: 18 * scale,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  roleBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8 * scale,
-    paddingVertical: 2 * scale,
-    borderRadius: 12 * scale,
-    gap: 4,
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 4,
-    gap: 2,
-  },
-  ratingText: {
-    fontSize: 9 * scale,
-    fontWeight: '600',
-    color: '#FBBF24',
-  },
-  roleText: {
-    fontSize: 10 * scale,
-    fontWeight: '600',
-  },
-  // Role-specific badge colors
-  advertiserBadge: {
-    backgroundColor: '#F8312F20',
-  },
-  creatorBadge: {
-    backgroundColor: '#4F46E520',
-  },
-  adminBadge: {
-    backgroundColor: '#10B98120',
-  },
-  workerBadge: {
-    backgroundColor: '#F59E0B20',
-  },
-  platformBadge: {
-    backgroundColor: '#8B5CF620',
-  },
-  defaultBadge: {
-    backgroundColor: '#6B728020',
-  },
-  // Role-specific text colors
-  advertiserText: {
-    color: '#F8312F',
-  },
-  creatorText: {
-    color: '#4F46E5',
-  },
-  adminText: {
-    color: '#10B981',
-  },
-  workerText: {
-    color: '#F59E0B',
-  },
-  platformText: {
-    color: '#8B5CF6',
-  },
-  defaultText: {
-    color: '#6B7280',
-  },
-  notificationContainer: {
-    position: 'relative',
-    width: 44 * scale,
-    height: 44 * scale,
+
+  // Text block
+  textWrap:  { flex: 1, justifyContent: 'center' },
+  greeting:  { fontSize: 11, color: '#9CA3AF', fontWeight: '500', marginBottom: 2 },
+  nameRow:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  name:      { fontSize: 16, fontWeight: '700', color: '#0F0F1A', flexShrink: 1 },
+  rolePill:  { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 20, flexShrink: 0 },
+  roleLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
+
+  // Bell
+  bellWrap:  { marginLeft: 8 },
+  bellInner: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
   },
-  notificationBadge: {
+  badge: {
     position: 'absolute',
-    top: 4 * scale,
-    right: 4 * scale,
-    minWidth: 20 * scale,
-    height: 20 * scale,
-    borderRadius: 10 * scale,
+    top: 5,
+    right: 5,
+    minWidth: 15,
+    height: 15,
+    borderRadius: 8,
     backgroundColor: '#EF4444',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 4 * scale,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#FFF',
   },
-  notificationCount: {
-    color: '#FFFFFF',
-    fontSize: 10 * scale,
-    fontWeight: '700',
-  },
+  badgeTxt: { color: '#FFF', fontSize: 9, fontWeight: '700' },
 });

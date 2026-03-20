@@ -15,8 +15,6 @@ export default function ReadyLaunchText() {
 const styles = StyleSheet.create({
   text: {
     width: 383 * scale,
-    height: 20 * scale,
-    top: 40 * scale, // Relative positioning; adjust in parent if needed
     left: 15 * scale,
     fontWeight: '400',
     fontSize: 14 * scale,

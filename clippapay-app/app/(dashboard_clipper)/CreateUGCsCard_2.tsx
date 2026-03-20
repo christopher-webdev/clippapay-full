@@ -19,7 +19,7 @@ export default function CreateUGCsCard_2() {
     <TouchableOpacity
       activeOpacity={0.9}
       style={styles.cardOuter}
-      onPress={() => router.push('/creators-or-campaign')} // ← your route
+      onPress={() => router.push('/join_clipping')} // ← your route
     >
       <View style={styles.cardWrapper}>
         {/* Gradient inner card */}

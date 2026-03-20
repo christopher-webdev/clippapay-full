@@ -49,6 +49,13 @@ export default function DashboardLayout() {
               animation: 'slide_from_right'
             }} 
           />
+          <Stack.Screen
+            name="campaigns_hub"
+            options={{
+              title: 'My Campaigns',
+              animation: 'fade'
+            }}
+          />
           <Stack.Screen 
             name="applications" 
             options={{ 
@@ -92,6 +99,27 @@ export default function DashboardLayout() {
               title: 'Create Clipping Campaign',
               animation: 'slide_from_bottom'
             }} 
+          />
+          <Stack.Screen
+            name="create_clipping"
+            options={{
+              title: 'Create Clipping Campaign',
+              animation: 'slide_from_bottom'
+            }}
+          />
+          <Stack.Screen
+            name="my_clipping_campaigns"
+            options={{
+              title: 'My Clipping Campaigns',
+              animation: 'slide_from_right'
+            }}
+          />
+          <Stack.Screen
+            name="clipping_campaign_detail"
+            options={{
+              title: 'Campaign Detail',
+              animation: 'slide_from_right'
+            }}
           />
 
           {/* Onboarding Screens */}
@@ -244,7 +272,7 @@ const styles = StyleSheet.create({
   stackContent: {
     flex: 1,
     backgroundColor: 'transparent',
-    paddingTop: 25 * scale, // Space for header
+    paddingTop: 72,        // matches the new ProfileHeader height (72px fixed)
     paddingBottom: 90 * scale, // Space for footer
   },
 });

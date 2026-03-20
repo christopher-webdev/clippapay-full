@@ -681,7 +681,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
-    marginTop: 40,
   },
   backIcon: {
     width: 40,

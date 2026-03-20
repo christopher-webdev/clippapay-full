@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
   },
   stackContent: {
     flex: 1,
-    paddingTop: 25 * scale, // Space for header
+    paddingTop: 72,            // matches ProfileHeader HEADER_HEIGHT = 72px
     paddingBottom: 90 * scale, // Space for footer
   },
 });

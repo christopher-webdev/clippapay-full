@@ -66,7 +66,7 @@ const styles = StyleSheet.create({
     width: 390 * scale,
     height: 230 * scale,
     alignSelf: 'center',
-    marginTop: 50 * scale, // spacing from "Ready to launch..." text
+    marginTop: 5 * scale, 
   },
   cardWrapper: {
     flex: 1,

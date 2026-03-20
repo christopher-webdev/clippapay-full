@@ -1,1172 +1,544 @@
-// app/(dashboard)/wallet.tsx (complete updated version)
-
-import React, { useEffect, useState } from 'react';
+// app/(dashboard_advertiser)/WalletScreen.tsx
+//
+// Full redesign. Key fixes:
+//  1. Shows BOTH escrowLocked (NGN) AND usdtEscrowLocked (USDT) — not just NGN
+//  2. Dual-currency balance cards shown simultaneously (no hidden tabs)
+//  3. Escrow card explains it runs down as creators/clippers earn
+//  4. Transaction history merges deposits + withdrawals + transactions, all currencies
+//
+import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  Modal,
-  TextInput,
-  Alert,
-  Platform,
-  Dimensions,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  ActivityIndicator, Modal, TextInput, Alert, Platform,
+  Dimensions, RefreshControl,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import axios from 'axios';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
-import { useNotificationsContext } from '../../hooks/useNotifications';
+import { BlurView } from 'expo-blur';
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
 const API_BASE = process.env.EXPO_PUBLIC_API_URL;
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface WalletData {
+  balance: number;
+  usdtBalance: number;
+  escrowLocked: number;
+  usdtEscrowLocked: number;
+}
 interface PlatformDetails {
-  bank: {
-    name: string;
-    accountNumber: string;
-    accountName: string;
-  };
-  usdt: {
-    address: string;
-    network: string;
-    minDeposit: number;
-    minWithdrawal: number;
-  };
-  limits: {
-    ngnMinDeposit: number;
-    ngnMinWithdrawal: number;
-    usdtRate: number;
-  };
+  bank: { name: string; accountNumber: string; accountName: string };
+  usdt: { address: string; network: string; minDeposit: number; minWithdrawal: number };
+  limits: { ngnMinDeposit: number; ngnMinWithdrawal: number; usdtRate: number };
 }
-
+interface TxItem {
+  _id: string; type: string; amount: number;
+  currency: 'NGN' | 'USDT'; status: string;
+  description?: string; createdAt: string;
+}
 interface Deposit {
-  _id: string;
-  amount: number;
-  currency: 'NGN' | 'USDT';
-  status: 'pending' | 'approved' | 'rejected';
-  createdAt: string;
-  receiptUrl?: string;
-  txHash?: string;
+  _id: string; amount: number; currency: 'NGN' | 'USDT';
+  status: 'pending' | 'approved' | 'rejected'; createdAt: string;
 }
-
 interface Withdrawal {
-  _id: string;
-  amount: number;
-  currency: 'NGN' | 'USDT';
-  paymentMethod: 'bank' | 'usdt';
-  bank_name?: string;
-  account_number?: string;
-  account_name?: string;
-  usdt_address?: string;
-  usdt_network?: string;
-  status: 'pending' | 'completed' | 'declined';
-  declineReason?: string;
-  createdAt: string;
+  _id: string; amount: number; currency: 'NGN' | 'USDT';
+  status: 'pending' | 'completed' | 'declined'; createdAt: string;
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const fmtNGN  = (n: number) => `₦${n.toLocaleString('en-NG', { minimumFractionDigits: 0 })}`;
+const fmtUSDT = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt     = (n: number, cur: 'NGN' | 'USDT') => cur === 'NGN' ? fmtNGN(n) : fmtUSDT(n);
+
+const TX_ICONS: Record<string, { icon: string; color: string; bg: string }> = {
+  deposit:          { icon: 'arrow-down-circle', color: '#10B981', bg: '#ECFDF5' },
+  campaign_funding: { icon: 'lock-closed',       color: '#F59E0B', bg: '#FFFBEB' },
+  escrow:           { icon: 'lock-closed',       color: '#F59E0B', bg: '#FFFBEB' },
+  escrow_release:   { icon: 'lock-open',         color: '#6366F1', bg: '#EEF2FF' },
+  clipping_reward:  { icon: 'trending-up',       color: '#10B981', bg: '#ECFDF5' },
+  withdrawal:       { icon: 'arrow-up-circle',   color: '#EF4444', bg: '#FEF2F2' },
+  payment:          { icon: 'cash',              color: '#8B5CF6', bg: '#F5F3FF' },
+  refund:           { icon: 'refresh',           color: '#06B6D4', bg: '#ECFEFF' },
+};
+const txIcon = (type: string) => TX_ICONS[type] || { icon: 'swap-horizontal', color: '#6B7280', bg: '#F3F4F6' };
+
+const getToken = async () => {
+  if (Platform.OS === 'web') return AsyncStorage.getItem('userToken');
+  return (await SecureStore.getItemAsync('userToken')) || (await AsyncStorage.getItem('userToken'));
+};
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function WalletScreen() {
-  const { refresh: refreshNotifications } = useNotificationsContext();
-  const [balance, setBalance] = useState<number>(0);
-  const [usdtBalance, setUsdtBalance] = useState<number>(0);
-  const [escrow, setEscrow] = useState<number>(0);
-  const [deposits, setDeposits] = useState<Deposit[]>([]);
-  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>('deposit');
-  const [platformDetails, setPlatformDetails] = useState<PlatformDetails | null>(null);
-  const [loadingPlatformDetails, setLoadingPlatformDetails] = useState(true);
+  const [wallet, setWallet]             = useState<WalletData>({ balance: 0, usdtBalance: 0, escrowLocked: 0, usdtEscrowLocked: 0 });
+  const [platform, setPlatform]         = useState<PlatformDetails | null>(null);
+  const [deposits, setDeposits]         = useState<Deposit[]>([]);
+  const [withdrawals, setWithdrawals]   = useState<Withdrawal[]>([]);
+  const [transactions, setTransactions] = useState<TxItem[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [refreshing, setRefreshing]     = useState(false);
+  const [historyTab, setHistoryTab]     = useState<'all' | 'deposits' | 'withdrawals'>('all');
 
-  // Currency selection
-  const [selectedCurrency, setSelectedCurrency] = useState<'NGN' | 'USDT'>('NGN');
+  // Deposit modal state
+  const [depositModal, setDepositModal] = useState(false);
+  const [depositCur, setDepositCur]     = useState<'NGN' | 'USDT'>('NGN');
+  const [depositAmt, setDepositAmt]     = useState('');
+  const [receipt, setReceipt]           = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [txHash, setTxHash]             = useState('');
+  const [submitting, setSubmitting]     = useState(false);
 
-  // Deposit flow
-  const [modalVisible, setModalVisible] = useState(false);
-  const [depositAmount, setDepositAmount] = useState('');
-  const [depositMethod, setDepositMethod] = useState<'paystack' | 'manual' | 'usdt'>('paystack');
-  const [email, setEmail] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  // Withdraw modal state
+  const [wdrModal, setWdrModal]         = useState(false);
+  const [wdrCur, setWdrCur]             = useState<'NGN' | 'USDT'>('NGN');
+  const [wdrAmt, setWdrAmt]             = useState('');
+  const [bankName, setBankName]         = useState('');
+  const [accNum, setAccNum]             = useState('');
+  const [accName, setAccName]           = useState('');
+  const [wdrAddr, setWdrAddr]           = useState('');
+  const [wdrNet, setWdrNet]             = useState('');
+  const [wdrErr, setWdrErr]             = useState('');
 
-  // Receipt upload (unified for both NGN and USDT)
-  const [receiptModalVisible, setReceiptModalVisible] = useState(false);
-  const [selectedReceipt, setSelectedReceipt] = useState<ImagePicker.ImagePickerAsset | null>(null);
-  
-  // USDT specific fields
-  const [usdtTxHash, setUsdtTxHash] = useState('');
-  const [usdtNetwork, setUsdtNetwork] = useState('');
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const h = { Authorization: `Bearer ${token}` };
 
-  // Withdrawal flow
-  const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
-  const [wdrAmount, setWdrAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'bank' | 'usdt'>('bank');
-  const [bankName, setBankName] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
-  const [accountName, setAccountName] = useState('');
-  const [withdrawUsdtAddress, setWithdrawUsdtAddress] = useState('');
-  const [withdrawUsdtNetwork, setWithdrawUsdtNetwork] = useState('');
-  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+      const [walletRes, depositsRes, wdrRes, txRes] = await Promise.allSettled([
+        axios.get(`${API_BASE}/wallet`, { headers: h }),
+        axios.get(`${API_BASE}/wallet/deposits`, { headers: h }),
+        axios.get(`${API_BASE}/withdrawals`, { headers: h }),
+        axios.get(`${API_BASE}/transactions`, { headers: h }),
+      ]);
 
-  // Constants (will be overridden by platform details)
-  const [MIN_NGN_DEPOSIT, setMinNgnDeposit] = useState(20000);
-  const [MIN_USDT_DEPOSIT, setMinUsdtDeposit] = useState(10);
-  const [MIN_NGN_WITHDRAWAL, setMinNgnWithdrawal] = useState(1000);
-  const [MIN_USDT_WITHDRAWAL, setMinUsdtWithdrawal] = useState(5);
-  const [USDT_RATE, setUsdtRate] = useState(1500);
-
-  useEffect(() => {
-    loadUserEmail();
-    fetchPlatformDetails();
-    fetchWalletData();
+      if (walletRes.status === 'fulfilled') {
+        const d = walletRes.value.data;
+        setWallet({
+          balance:          d.balance          || 0,
+          usdtBalance:      d.usdtBalance      || 0,
+          escrowLocked:     d.escrowLocked     || 0,
+          usdtEscrowLocked: d.usdtEscrowLocked || 0,
+        });
+      }
+      if (depositsRes.status === 'fulfilled')  setDeposits(depositsRes.value.data  || []);
+      if (wdrRes.status === 'fulfilled')        setWithdrawals(wdrRes.value.data    || []);
+      if (txRes.status === 'fulfilled')         setTransactions(txRes.value.data    || []);
+    } catch (e) {
+      console.error('wallet load error:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  const getToken = async () => {
-    if (Platform.OS === 'web') return await AsyncStorage.getItem('userToken');
-    let token = await SecureStore.getItemAsync('userToken');
-    if (!token) token = await AsyncStorage.getItem('userToken');
-    return token;
-  };
-
-  const loadUserEmail = async () => {
-    const token = await getToken();
-    if (!token) return;
-    try {
-      const res = await axios.get(`${API_BASE}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setEmail(res.data.email || '');
-    } catch (err) {
-      console.log('Could not load user email');
-    }
-  };
-
-  const fetchPlatformDetails = async () => {
-    setLoadingPlatformDetails(true);
+  const loadPlatform = useCallback(async () => {
     try {
       const token = await getToken();
       const res = await axios.get(`${API_BASE}/wallet/platform-details`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setPlatformDetails(res.data);
-      
-      // Update constants
-      setMinNgnDeposit(res.data.limits.ngnMinDeposit);
-      setMinNgnWithdrawal(res.data.limits.ngnMinWithdrawal);
-      setMinUsdtDeposit(res.data.usdt.minDeposit);
-      setMinUsdtWithdrawal(res.data.usdt.minWithdrawal);
-      setUsdtRate(res.data.limits.usdtRate);
-    } catch (err) {
-      console.error('Failed to fetch platform details:', err);
-    } finally {
-      setLoadingPlatformDetails(false);
-    }
-  };
+      setPlatform(res.data);
+    } catch (_) {}
+  }, []);
 
-  const fetchWalletData = async () => {
-    setLoading(true);
-    try {
-      const token = await getToken();
-      if (!token) throw new Error('No token');
+  useEffect(() => { load(); loadPlatform(); }, []);
 
-      const [walletRes, depositsRes, withdrawalsRes] = await Promise.all([
-        axios.get(`${API_BASE}/wallet`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        axios.get(`${API_BASE}/wallet/deposits`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        axios.get(`${API_BASE}/withdrawals`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-      ]);
-
-      setBalance(walletRes.data.balance || 0);
-      setUsdtBalance(walletRes.data.usdtBalance || 0);
-      setEscrow(walletRes.data.escrowLocked || 0);
-      setDeposits(depositsRes.data || []);
-      setWithdrawals(withdrawalsRes.data || []);
-    } catch (err: any) {
-      console.error(err);
-      Alert.alert('Error', 'Failed to load wallet data');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  const handleRefresh = () => {
-    setRefreshing(true);
-    fetchWalletData();
-  };
-
-  const copyToClipboard = async (text: string) => {
-    await Clipboard.setStringAsync(text);
-    Alert.alert('Copied!', 'Address copied to clipboard');
-  };
-
-  // Unified receipt picker
+  // ── Deposit ──────────────────────────────────────────────────────────────
   const pickReceipt = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'We need access to your photo library to upload a receipt.');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'Images',
-        allowsEditing: false,
-        quality: 0.85,
-        base64: false,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        setSelectedReceipt(result.assets[0]);
-      }
-    } catch (err: any) {
-      console.error('ImagePicker error:', err);
-      Alert.alert('Picker Failed', 'Could not open image picker. Please try again.');
-    }
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') { Alert.alert('Permission required'); return; }
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: 'Images' as any, quality: 0.85 });
+    if (!r.canceled && r.assets[0]) setReceipt(r.assets[0]);
   };
 
-  const handleDeposit = async () => {
-    if (selectedCurrency === 'NGN') {
-      const amount = parseInt(depositAmount, 10);
-      if (isNaN(amount) || amount < MIN_NGN_DEPOSIT) {
-        Alert.alert('Invalid Amount', `Minimum deposit is ₦${MIN_NGN_DEPOSIT.toLocaleString()}`);
-        return;
-      }
-
-      setSubmitting(true);
-
-      if (depositMethod === 'paystack') {
-        if (!email) {
-          Alert.alert('Error', 'Coming soon, please use bank deposit or USDT');
-          setSubmitting(false);
-          return;
-        }
-
-        try {
-          const token = await getToken();
-          const initRes = await axios.post(
-            `${API_BASE}/wallet/init-paystack`,
-            { amount, email },
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-
-          const { reference, authorization_url } = initRes.data;
-          Alert.alert('Paystack Payment', `Reference: ${reference}\n\nComplete payment in the browser that will open.`);
-          setModalVisible(false);
-          setDepositAmount('');
-        } catch (err: any) {
-          Alert.alert('Error', err.response?.data?.error || 'Failed to start payment');
-        }
-      } else {
-        // Manual NGN deposit
-        setModalVisible(false);
-        setReceiptModalVisible(true);
-      }
-    } else {
-      // USDT Deposit
-      const amount = parseFloat(depositAmount);
-      if (isNaN(amount) || amount < MIN_USDT_DEPOSIT) {
-        Alert.alert('Invalid Amount', `Minimum deposit is ${MIN_USDT_DEPOSIT} USDT`);
-        return;
-      }
-      setModalVisible(false);
-      setReceiptModalVisible(true); // Use same receipt modal for USDT
-    }
-
-    setSubmitting(false);
-  };
-
-  // Unified deposit submission for both NGN and USDT
   const submitDeposit = async () => {
-    const amount = selectedCurrency === 'NGN' 
-      ? parseInt(depositAmount, 10) 
-      : parseFloat(depositAmount);
-      
-    if (isNaN(amount) || amount < (selectedCurrency === 'NGN' ? MIN_NGN_DEPOSIT : MIN_USDT_DEPOSIT)) {
-      Alert.alert('Error', 'Invalid amount');
-      return;
-    }
-    
-    if (!selectedReceipt) {
-      Alert.alert('Missing Receipt', 'Please select a receipt image');
-      return;
-    }
-
-    // For USDT, validate transaction hash
-    if (selectedCurrency === 'USDT' && !usdtTxHash.trim()) {
-      Alert.alert('Missing Transaction Hash', 'Please provide the USDT transaction hash');
-      return;
-    }
+    const amt = depositCur === 'NGN' ? parseInt(depositAmt) : parseFloat(depositAmt);
+    const min = depositCur === 'NGN' ? (platform?.limits.ngnMinDeposit || 1000) : (platform?.usdt.minDeposit || 10);
+    if (!amt || amt < min) { Alert.alert('Invalid amount', `Minimum: ${depositCur === 'NGN' ? fmtNGN(min) : `$${min} USDT`}`); return; }
+    if (!receipt) { Alert.alert('Receipt required', 'Attach your payment receipt or screenshot'); return; }
+    if (depositCur === 'USDT' && !txHash.trim()) { Alert.alert('TX Hash required', 'Paste your transaction hash'); return; }
 
     setSubmitting(true);
-
     try {
       const token = await getToken();
-      if (!token) throw new Error('No auth token');
+      const form = new FormData();
+      form.append('amount', amt.toString());
+      form.append('currency', depositCur);
+      form.append('paymentMethod', depositCur === 'NGN' ? 'bank_transfer' : 'usdt');
+      form.append('receipt', { uri: receipt.uri, name: receipt.fileName || 'receipt.jpg', type: receipt.mimeType || 'image/jpeg' } as any);
+      if (depositCur === 'USDT') { form.append('txHash', txHash.trim()); form.append('network', platform?.usdt.network || 'TRC20'); }
 
-      const formData = new FormData();
-      formData.append('amount', amount.toString());
-      formData.append('currency', selectedCurrency);
-      formData.append('paymentMethod', selectedCurrency === 'NGN' ? 'bank_transfer' : 'usdt');
-      formData.append('receipt', {
-        uri: selectedReceipt.uri,
-        name: selectedReceipt.fileName || `receipt-${Date.now()}.jpg`,
-        type: selectedReceipt.mimeType || 'image/jpeg',
-      } as any);
-
-      // Add USDT-specific fields
-      if (selectedCurrency === 'USDT') {
-        formData.append('txHash', usdtTxHash.trim());
-        formData.append('network', usdtNetwork || platformDetails?.usdt.network || 'TRC20');
-      }
-
-      await axios.post(`${API_BASE}/wallet/deposits`, formData, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
+      await axios.post(`${API_BASE}/wallet/deposits`, form, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
         timeout: 30000,
       });
 
-      Alert.alert(
-        'Success', 
-        selectedCurrency === 'NGN' 
-          ? 'Receipt uploaded! Your deposit is pending approval.'
-          : 'USDT deposit submitted! Your deposit is pending confirmation.'
-      );
-      
-      // Refresh notifications
-      refreshNotifications();
-      
-      // Reset all states
-      setReceiptModalVisible(false);
-      setSelectedReceipt(null);
-      setUsdtTxHash('');
-      setUsdtNetwork('');
-      setDepositAmount('');
-      setModalVisible(false);
-      
-      // Refresh wallet data
-      fetchWalletData();
-    } catch (err: any) {
-      console.error('Upload error:', err);
-      const msg = err.response?.data?.error || err.message || 'Failed to submit deposit';
-      Alert.alert('Upload Error', msg);
-    } finally {
-      setSubmitting(false);
-    }
+      Alert.alert('✅ Submitted!', 'Your deposit is pending admin approval.');
+      setDepositModal(false); setDepositAmt(''); setReceipt(null); setTxHash('');
+      load(true);
+    } catch (e: any) {
+      Alert.alert('Error', e.response?.data?.error || 'Could not submit deposit');
+    } finally { setSubmitting(false); }
   };
 
-  const handleWithdrawPress = () => {
-    if (selectedCurrency === 'NGN' && balance < MIN_NGN_WITHDRAWAL) {
-      Alert.alert(
-        "Can't Withdraw Yet",
-        `Your NGN balance (₦${balance.toLocaleString()}) is below the minimum withdrawal amount of ₦${MIN_NGN_WITHDRAWAL.toLocaleString()}.`,
-        [{ text: 'OK', style: 'default' }]
-      );
-      return;
-    }
+  // ── Withdraw ─────────────────────────────────────────────────────────────
+  const submitWithdrawal = async () => {
+    setWdrErr('');
+    const amt   = wdrCur === 'NGN' ? parseInt(wdrAmt) : parseFloat(wdrAmt);
+    const avail = wdrCur === 'NGN' ? wallet.balance : wallet.usdtBalance;
+    const minW  = wdrCur === 'NGN' ? (platform?.limits.ngnMinWithdrawal || 500) : (platform?.usdt.minWithdrawal || 5);
 
-    if (selectedCurrency === 'USDT' && usdtBalance < MIN_USDT_WITHDRAWAL) {
-      Alert.alert(
-        "Can't Withdraw Yet",
-        `Your USDT balance (${usdtBalance} USDT) is below the minimum withdrawal amount of ${MIN_USDT_WITHDRAWAL} USDT.`,
-        [{ text: 'OK', style: 'default' }]
-      );
-      return;
-    }
-
-    setWithdrawModalVisible(true);
-  };
-
-  const handleWithdraw = async () => {
-    const amount = selectedCurrency === 'NGN' 
-      ? parseInt(wdrAmount, 10) 
-      : parseFloat(wdrAmount);
-
-    if (isNaN(amount) || amount <= 0) {
-      setWithdrawError('Please enter a valid amount');
-      return;
-    }
-
-    const maxAmount = selectedCurrency === 'NGN' ? balance : usdtBalance;
-    if (amount > maxAmount) {
-      setWithdrawError(`Amount exceeds your ${selectedCurrency} balance`);
-      return;
-    }
-
-    if (selectedCurrency === 'NGN') {
-      if (amount < MIN_NGN_WITHDRAWAL) {
-        setWithdrawError(`Minimum NGN withdrawal is ₦${MIN_NGN_WITHDRAWAL}`);
-        return;
-      }
-    } else {
-      if (amount < MIN_USDT_WITHDRAWAL) {
-        setWithdrawError(`Minimum USDT withdrawal is ${MIN_USDT_WITHDRAWAL} USDT`);
-        return;
-      }
-    }
-
-    if (selectedCurrency === 'NGN' && paymentMethod === 'bank') {
-      if (!bankName || !accountNumber || !accountName) {
-        setWithdrawError('Please fill in all bank details');
-        return;
-      }
-    }
-
-    if (selectedCurrency === 'USDT' && paymentMethod === 'usdt') {
-      if (!withdrawUsdtAddress || !withdrawUsdtNetwork) {
-        setWithdrawError('Please provide USDT address and network');
-        return;
-      }
-    }
+    if (!amt || isNaN(amt) || amt <= 0) { setWdrErr('Enter a valid amount'); return; }
+    if (amt > avail) { setWdrErr(`Exceeds your available ${wdrCur} balance`); return; }
+    if (amt < minW)  { setWdrErr(`Minimum: ${wdrCur === 'NGN' ? fmtNGN(minW) : `$${minW}`}`); return; }
+    if (wdrCur === 'NGN' && (!bankName || !accNum || !accName)) { setWdrErr('Fill in all bank details'); return; }
+    if (wdrCur === 'USDT' && (!wdrAddr || !wdrNet)) { setWdrErr('Fill in USDT address and network'); return; }
 
     setSubmitting(true);
-    setWithdrawError(null);
-
     try {
       const token = await getToken();
-      if (!token) throw new Error('No auth token');
+      await axios.post(`${API_BASE}/withdrawals`, {
+        amount: amt, currency: wdrCur,
+        paymentMethod: wdrCur === 'NGN' ? 'bank' : 'usdt',
+        ...(wdrCur === 'NGN'
+          ? { bank_name: bankName, account_number: accNum, account_name: accName }
+          : { usdt_address: wdrAddr, usdt_network: wdrNet }),
+      }, { headers: { Authorization: `Bearer ${token}` } });
 
-      const payload = {
-        amount,
-        currency: selectedCurrency,
-        paymentMethod: selectedCurrency === 'NGN' ? 'bank' : 'usdt',
-        ...(selectedCurrency === 'NGN'
-          ? { bank_name: bankName, account_number: accountNumber, account_name: accountName }
-          : { usdt_address: withdrawUsdtAddress, usdt_network: withdrawUsdtNetwork }),
-      };
-
-      await axios.post(`${API_BASE}/withdrawals`, payload, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      Alert.alert(
-        'Request Submitted!',
-        'Your withdrawal request has been sent. We’ll process it soon.',
-        [{ text: 'OK' }]
-      );
-
-      // Refresh notifications
-      refreshNotifications();
-
-      setWithdrawModalVisible(false);
-      resetWithdrawForm();
-      fetchWalletData();
-    } catch (err: any) {
-      setWithdrawError(err.response?.data?.error || 'Failed to submit request');
-    } finally {
-      setSubmitting(false);
-    }
+      Alert.alert('✅ Request submitted', "We'll process within 24–48 hours.");
+      setWdrModal(false); setWdrAmt(''); setBankName(''); setAccNum(''); setAccName(''); setWdrAddr(''); setWdrNet('');
+      load(true);
+    } catch (e: any) {
+      setWdrErr(e.response?.data?.error || 'Could not submit withdrawal');
+    } finally { setSubmitting(false); }
   };
 
-  const resetWithdrawForm = () => {
-    setWdrAmount('');
-    setBankName('');
-    setAccountNumber('');
-    setAccountName('');
-    setWithdrawUsdtAddress('');
-    setWithdrawUsdtNetwork('');
-    setWithdrawError(null);
-  };
+  // ── History list ─────────────────────────────────────────────────────────
+  const historyItems = (() => {
+    if (historyTab === 'deposits')    return deposits.map((d) => ({ ...d, _kind: 'deposit'    as const }));
+    if (historyTab === 'withdrawals') return withdrawals.map((w) => ({ ...w, _kind: 'withdrawal' as const }));
+    const merged = [
+      ...transactions.map((t) => ({ ...t, _kind: 'tx' as const })),
+      ...deposits.map((d) => ({ ...d, type: 'deposit', _kind: 'deposit' as const })),
+      ...withdrawals.map((w) => ({ ...w, type: 'withdrawal', _kind: 'withdrawal' as const })),
+    ];
+    const seen = new Set<string>();
+    return merged
+      .filter((x) => { if (seen.has(x._id)) return false; seen.add(x._id); return true; })
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 30);
+  })();
 
-  const formatNaira = (num: number) => `₦${num.toLocaleString()}`;
-  const formatUSDT = (num: number) => `${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
+  const statusColor = (s: string) =>
+    ['approved', 'completed'].includes(s) ? '#10B981'
+    : ['rejected', 'declined'].includes(s) ? '#EF4444'
+    : '#F59E0B';
 
-  const amountNum = selectedCurrency === 'NGN' 
-    ? parseInt(depositAmount, 10) 
-    : parseFloat(depositAmount);
-  const displayAmount = isNaN(amountNum) ? '0' : amountNum.toLocaleString();
-
-  const getStatusConfig = (status: string) => {
-    switch (status) {
-      case 'approved':
-      case 'completed':
-        return { bg: '#DCFCE7', text: '#16A34A', icon: 'checkmark-circle' };
-      case 'rejected':
-      case 'declined':
-        return { bg: '#FEE2E2', text: '#DC2626', icon: 'close-circle' };
-      default:
-        return { bg: '#FEF3C7', text: '#D97706', icon: 'time' };
-    }
-  };
-
-  if (loading || loadingPlatformDetails) {
+  if (loading) {
     return (
-      <View style={styles.centerContainer}>
-        <LinearGradient
-          colors={['#F9FAFB', '#F3F4F6']}
-          style={StyleSheet.absoluteFill}
-        />
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F7' }}>
         <ActivityIndicator size="large" color="#4F46E5" />
-        <Text style={styles.loadingText}>Loading wallet...</Text>
+        <Text style={{ color: '#6B7280', marginTop: 12, fontWeight: '500' }}>Loading wallet…</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={['#F9FAFB', '#F3F4F6', '#E5E7EB']}
-        style={StyleSheet.absoluteFill}
-      />
-
+    <View style={{ flex: 1, backgroundColor: '#F5F5F7' }}>
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor="#4F46E5" />}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Wallet</Text>
-          <Text style={styles.subtitle}>Manage your funds and transactions</Text>
-        </View>
+        {/* ── Hero gradient header ── */}
+        <LinearGradient colors={['#312E81', '#4338CA', '#4F46E5']} style={S.hero}>
+          <Text style={S.heroTitle}>My Wallet</Text>
+          <Text style={S.heroSub}>Campaign budgets & available funds</Text>
 
-        {/* Currency Selector */}
-        <View style={styles.currencySelector}>
-          <TouchableOpacity
-            style={[styles.currencyTab, selectedCurrency === 'NGN' && styles.currencyTabActive]}
-            onPress={() => setSelectedCurrency('NGN')}
-          >
-            <Text style={[styles.currencyTabText, selectedCurrency === 'NGN' && styles.currencyTabTextActive]}>
-              NGN
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.currencyTab, selectedCurrency === 'USDT' && styles.currencyTabActive]}
-            onPress={() => setSelectedCurrency('USDT')}
-          >
-            <Text style={[styles.currencyTabText, selectedCurrency === 'USDT' && styles.currencyTabTextActive]}>
-              USDT
-            </Text>
-          </TouchableOpacity>
-        </View>
+          {/* Side-by-side balance cards */}
+          <View style={S.balanceRow}>
+            <BalanceCard
+              label="NGN Balance"
+              amount={fmtNGN(wallet.balance)}
+              sub={`${fmtNGN(wallet.escrowLocked)} in escrow`}
+              iconName="cash"
+              accentColor="#6EE7B7"
+              subColor="#A7F3D0"
+              onDeposit={() => { setDepositCur('NGN'); setDepositModal(true); }}
+              onWithdraw={() => { setWdrCur('NGN'); setWdrModal(true); }}
+            />
+            <View style={{ width: 12 }} />
+            <BalanceCard
+              label="USDT Balance"
+              amount={fmtUSDT(wallet.usdtBalance)}
+              sub={`$${wallet.usdtEscrowLocked.toFixed(2)} in escrow`}
+              iconName="logo-bitcoin"
+              accentColor="#FCD34D"
+              subColor="#FDE68A"
+              onDeposit={() => { setDepositCur('USDT'); setDepositModal(true); }}
+              onWithdraw={() => { setWdrCur('USDT'); setWdrModal(true); }}
+            />
+          </View>
+        </LinearGradient>
 
-        {/* Balance Cards */}
-        <View style={styles.cardsContainer}>
-          <View style={styles.balanceCard}>
-            <View style={styles.cardHeader}>
-              <View style={[styles.cardIconContainer, { backgroundColor: '#EEF2FF' }]}>
-                <Ionicons name="wallet-outline" size={20} color="#4F46E5" />
+        {/* ── Escrow breakdown ── */}
+        {(wallet.escrowLocked > 0 || wallet.usdtEscrowLocked > 0) && (
+          <View style={S.escrowCard}>
+            <View style={S.escrowHeader}>
+              <View style={S.escrowIconWrap}>
+                <Ionicons name="lock-closed" size={18} color="#D97706" />
               </View>
-              <Text style={styles.cardLabel}>
-                {selectedCurrency === 'NGN' ? 'Available Balance' : 'USDT Balance'}
+              <View style={{ flex: 1 }}>
+                <Text style={S.escrowTitle}>Campaign Escrow</Text>
+                <Text style={S.escrowSub}>Runs down as creators & clippers earn</Text>
+              </View>
+            </View>
+
+            <View style={S.escrowChipsRow}>
+              {wallet.escrowLocked > 0 && (
+                <View style={S.escrowChip}>
+                  <Text style={S.escrowChipLabel}>NGN Locked</Text>
+                  <Text style={S.escrowChipAmt}>{fmtNGN(wallet.escrowLocked)}</Text>
+                </View>
+              )}
+              {wallet.usdtEscrowLocked > 0 && (
+                <View style={[S.escrowChip, { backgroundColor: '#FFFDE7', borderColor: '#FFF176' }]}>
+                  <Text style={S.escrowChipLabel}>USDT Locked</Text>
+                  <Text style={[S.escrowChipAmt, { color: '#B45309' }]}>{fmtUSDT(wallet.usdtEscrowLocked)}</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={S.escrowInfoRow}>
+              <Ionicons name="information-circle-outline" size={14} color="#92400E" />
+              <Text style={S.escrowInfoTxt}>
+                When you fund a campaign, the budget is locked here. Each time admin approves a creator's work, that amount is deducted and paid to the creator. Remaining escrow is refunded if you cancel a campaign.
               </Text>
             </View>
-            <Text style={styles.balanceAmount}>
-              {selectedCurrency === 'NGN' ? formatNaira(balance) : formatUSDT(usdtBalance)}
-            </Text>
+          </View>
+        )}
 
-            {/* Action Buttons */}
-            <View style={styles.actionButtons}>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.depositAction]}
-                onPress={() => {
-                  setActiveTab('deposit');
-                  setModalVisible(true);
-                }}
-              >
-                <LinearGradient
-                  colors={['#4F46E5', '#6366F1']}
-                  style={styles.actionGradient}
-                >
-                  <Text style={styles.actionButtonText}>Deposit</Text>
-                </LinearGradient>
+        {/* ── Transaction history ── */}
+        <View style={S.section}>
+          <Text style={S.sectionTitle}>Transaction History</Text>
+
+          <View style={S.historyTabs}>
+            {(['all', 'deposits', 'withdrawals'] as const).map((t) => (
+              <TouchableOpacity key={t} style={[S.hTab, historyTab === t && S.hTabActive]} onPress={() => setHistoryTab(t)}>
+                <Text style={[S.hTabTxt, historyTab === t && S.hTabTxtActive]}>
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </Text>
               </TouchableOpacity>
-
-              {/* <TouchableOpacity
-                style={[styles.actionButton, styles.withdrawAction]}
-                onPress={() => {
-                  setActiveTab('withdraw');
-                  handleWithdrawPress();
-                }}
-              >
-                <LinearGradient
-                  colors={['#EF4444', '#F87171']}
-                  style={styles.actionGradient}
-                >
-                  <Text style={styles.actionButtonText}>Withdraw</Text>
-                </LinearGradient>
-              </TouchableOpacity> */}
-            </View>
+            ))}
           </View>
 
-          <View style={styles.escrowCard}>
-            <View style={styles.cardHeader}>
-              <View style={[styles.cardIconContainer, { backgroundColor: '#FEF3C7' }]}>
-                <Ionicons name="lock-closed-outline" size={20} color="#D97706" />
-              </View>
-              <Text style={styles.cardLabel}>Escrow Balance</Text>
-            </View>
-            <Text style={[styles.balanceAmount, { color: '#D97706' }]}>
-              {formatNaira(escrow)}
-            </Text>
-            <Text style={styles.escrowHint}>Locked in active campaigns</Text>
-          </View>
-        </View>
-
-        {/* Tabs for Deposits/Withdrawals */}
-        <View style={styles.historyTabs}>
-          <TouchableOpacity
-            style={[styles.historyTab, activeTab === 'deposit' && styles.historyTabActive]}
-            onPress={() => setActiveTab('deposit')}
-          >
-            <Text style={[styles.historyTabText, activeTab === 'deposit' && styles.historyTabTextActive]}>
-              Deposits
-            </Text>
-          </TouchableOpacity>
-          {/* <TouchableOpacity
-            style={[styles.historyTab, activeTab === 'withdraw' && styles.historyTabActive]}
-            onPress={() => setActiveTab('withdraw')}
-          >
-            <Text style={[styles.historyTabText, activeTab === 'withdraw' && styles.historyTabTextActive]}>
-              Withdrawals
-            </Text>
-          </TouchableOpacity> */}
-        </View>
-
-        {/* History List */}
-        <View style={styles.recentSection}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleContainer}>
-              <Ionicons 
-                name={activeTab === 'deposit' ? 'time-outline' : 'arrow-up-outline'} 
-                size={20} 
-                color="#4F46E5" 
-              />
-              <Text style={styles.sectionTitle}>
-                {activeTab === 'deposit' ? 'Recent Deposits' : 'Withdrawal History'}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={handleRefresh}>
-              <Ionicons name="refresh-outline" size={20} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-
-          {activeTab === 'deposit' && deposits.length === 0 ? (
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIconContainer}>
-                <Ionicons name="wallet-outline" size={32} color="#9CA3AF" />
-              </View>
-              <Text style={styles.emptyTitle}>No deposits yet</Text>
-              <Text style={styles.emptyText}>
-                Your deposit history will appear here
-              </Text>
-            </View>
-          ) : activeTab === 'withdraw' && withdrawals.length === 0 ? (
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIconContainer}>
-                <Ionicons name="arrow-up-outline" size={32} color="#9CA3AF" />
-              </View>
-              <Text style={styles.emptyTitle}>No withdrawals yet</Text>
-              <Text style={styles.emptyText}>
-                Your withdrawal history will appear here
-              </Text>
+          {historyItems.length === 0 ? (
+            <View style={S.empty}>
+              <MaterialCommunityIcons name="receipt-outline" size={48} color="#D1D5DB" />
+              <Text style={S.emptyTxt}>No transactions yet</Text>
             </View>
           ) : (
-            (activeTab === 'deposit' ? deposits : withdrawals).slice(0, 10).map((item) => {
-              const config = getStatusConfig(item.status);
-              const isDeposit = activeTab === 'deposit';
-              const deposit = item as Deposit;
-              const withdrawal = item as Withdrawal;
-              
+            historyItems.map((item: any) => {
+              const ic = txIcon(item.type || 'payment');
+              const isCredit = ['deposit', 'clipping_reward', 'escrow_release', 'refund'].includes(item.type);
+              const cur: 'NGN' | 'USDT' = item.currency || 'NGN';
               return (
-                <View key={item._id} style={styles.depositItem}>
-                  <View style={styles.depositInfo}>
-                    <View style={[styles.depositIconContainer, { backgroundColor: isDeposit ? '#EEF2FF' : '#FEE2E2' }]}>
-                      <Ionicons 
-                        name={isDeposit ? "arrow-down-circle" : "arrow-up-circle"} 
-                        size={24} 
-                        color={isDeposit ? "#4F46E5" : "#EF4444"} 
-                      />
-                    </View>
-                    <View>
-                      <Text style={styles.depositAmount}>
-                        {isDeposit 
-                          ? (deposit.currency === 'USDT' ? formatUSDT(deposit.amount) : formatNaira(deposit.amount))
-                          : (withdrawal.currency === 'USDT' ? formatUSDT(withdrawal.amount) : formatNaira(withdrawal.amount))
-                        }
-                      </Text>
-                      <Text style={styles.depositCurrency}>
-                        {isDeposit ? deposit.currency : withdrawal.currency}
-                      </Text>
-                      <Text style={styles.depositDate}>
-                        {new Date(item.createdAt).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
-                      </Text>
-                    </View>
+                <View key={item._id} style={S.txRow}>
+                  <View style={[S.txIcon, { backgroundColor: ic.bg }]}>
+                    <Ionicons name={ic.icon as any} size={20} color={ic.color} />
                   </View>
-                  <View style={[styles.depositStatus, { backgroundColor: config.bg }]}>
-                    <Ionicons name={config.icon as any} size={14} color={config.text} />
-                    <Text style={[styles.statusText, { color: config.text }]}>
-                      {item.status}
+                  <View style={{ flex: 1 }}>
+                    <Text style={S.txDesc} numberOfLines={1}>
+                      {item.description || (item.type || 'Transaction').replace(/_/g, ' ')}
                     </Text>
+                    <Text style={S.txDate}>
+                      {new Date(item.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end', gap: 3 }}>
+                    <Text style={[S.txAmt, { color: isCredit ? '#10B981' : '#EF4444' }]}>
+                      {isCredit ? '+' : '-'}{fmt(item.amount, cur)}
+                    </Text>
+                    <View style={[S.txStatusPill, { backgroundColor: `${statusColor(item.status)}18` }]}>
+                      <Text style={[S.txStatusTxt, { color: statusColor(item.status) }]}>{item.status}</Text>
+                    </View>
                   </View>
                 </View>
               );
             })
           )}
         </View>
-
-        {/* Bottom Padding */}
-        <View style={styles.bottomPadding} />
       </ScrollView>
 
-      {/* Deposit Method Modal */}
-      <Modal
-        visible={modalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <BlurView intensity={20} tint="dark" style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                Deposit {selectedCurrency}
-              </Text>
-              <TouchableOpacity 
-                onPress={() => setModalVisible(false)}
-                style={styles.closeButton}
-              >
-                <Ionicons name="close" size={24} color="#6B7280" />
+      {/* ════════════════════════════════════════════════════════
+          DEPOSIT MODAL
+      ════════════════════════════════════════════════════════ */}
+      <Modal visible={depositModal} animationType="slide" transparent onRequestClose={() => setDepositModal(false)}>
+        <BlurView intensity={20} tint="dark" style={S.overlay}>
+          <View style={S.sheet}>
+            <View style={S.handle} />
+            <View style={S.mHdr}>
+              <Text style={S.mTitle}>Deposit Funds</Text>
+              <TouchableOpacity style={S.mClose} onPress={() => setDepositModal(false)}>
+                <Ionicons name="close" size={20} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
-            <View style={styles.modalBody}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>
-                  Amount ({selectedCurrency === 'NGN' ? '₦' : 'USDT'})
-                </Text>
-                <View style={styles.inputContainer}>
-                  {selectedCurrency === 'NGN' && (
-                    <Text style={styles.inputCurrency}>₦</Text>
-                  )}
-                  <TextInput
-                    style={styles.input}
-                    value={depositAmount}
-                    onChangeText={setDepositAmount}
-                    placeholder={selectedCurrency === 'NGN' ? MIN_NGN_DEPOSIT.toString() : MIN_USDT_DEPOSIT.toString()}
-                    keyboardType="numeric"
-                    placeholderTextColor="#9CA3AF"
-                  />
-                </View>
-                <Text style={styles.inputHint}>
-                  Minimum: {selectedCurrency === 'NGN' ? `₦${MIN_NGN_DEPOSIT.toLocaleString()}` : `${MIN_USDT_DEPOSIT} USDT`}
-                </Text>
+            <ScrollView style={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+              {/* Currency */}
+              <Text style={S.mLabel}>Currency</Text>
+              <View style={S.toggle}>
+                {(['NGN', 'USDT'] as const).map((c) => (
+                  <TouchableOpacity key={c} style={[S.toggleBtn, depositCur === c && S.toggleBtnActive]} onPress={() => setDepositCur(c)}>
+                    <Text style={[S.toggleTxt, depositCur === c && S.toggleTxtActive]}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
-              {selectedCurrency === 'NGN' && (
-                <>
-                  <Text style={styles.methodLabel}>Payment Method</Text>
+              {/* Amount */}
+              <Text style={S.mLabel}>Amount</Text>
+              <View style={S.inputRow}>
+                <Text style={S.inputPrefix}>{depositCur === 'NGN' ? '₦' : '$'}</Text>
+                <TextInput
+                  style={S.bigInput}
+                  value={depositAmt}
+                  onChangeText={setDepositAmt}
+                  keyboardType="numeric"
+                  placeholder={depositCur === 'NGN' ? '20,000' : '10'}
+                  placeholderTextColor="#9CA3AF"
+                />
+              </View>
+              <Text style={S.mHint}>Min: {depositCur === 'NGN' ? fmtNGN(platform?.limits.ngnMinDeposit || 1000) : `$${platform?.usdt.minDeposit || 10} USDT`}</Text>
 
-                  <TouchableOpacity
-                    style={[
-                      styles.methodCard,
-                      depositMethod === 'paystack' && styles.methodCardActive,
-                    ]}
-                    onPress={() => setDepositMethod('paystack')}
-                  >
-                    <View style={styles.methodLeft}>
-                      <View style={[styles.methodIcon, { backgroundColor: '#EEF2FF' }]}>
-                        <MaterialIcons name="payment" size={20} color="#4F46E5" />
-                      </View>
-                      <View>
-                        <Text style={styles.methodTitle}>Paystack</Text>
-                        <Text style={styles.methodDescription}>Instant payment with card or bank</Text>
-                      </View>
+              {/* Payment details */}
+              {depositCur === 'NGN' && platform && (
+                <View style={S.detailCard}>
+                  <Text style={S.detailCardTitle}>Transfer to this account first</Text>
+                  {[['Bank', platform.bank.name], ['Account No.', platform.bank.accountNumber], ['Name', platform.bank.accountName]].map(([l, v]) => (
+                    <View key={l} style={S.detailRow}>
+                      <Text style={S.detailLbl}>{l}</Text>
+                      <Text style={S.detailVal}>{v}</Text>
                     </View>
-                    {depositMethod === 'paystack' && (
-                      <View style={styles.methodSelected}>
-                        <Ionicons name="checkmark-circle" size={24} color="#4F46E5" />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.methodCard,
-                      depositMethod === 'manual' && styles.methodCardActive,
-                    ]}
-                    onPress={() => setDepositMethod('manual')}
-                  >
-                    <View style={styles.methodLeft}>
-                      <View style={[styles.methodIcon, { backgroundColor: '#FEF3C7' }]}>
-                        <Ionicons name="cash-outline" size={20} color="#D97706" />
-                      </View>
-                      <View>
-                        <Text style={styles.methodTitle}>Bank Transfer</Text>
-                        <Text style={styles.methodDescription}>Upload receipt after transfer</Text>
-                      </View>
-                    </View>
-                    {depositMethod === 'manual' && (
-                      <View style={styles.methodSelected}>
-                        <Ionicons name="checkmark-circle" size={24} color="#4F46E5" />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                </>
-              )}
-
-              <TouchableOpacity
-                style={[
-                  styles.submitButton,
-                  ((selectedCurrency === 'NGN' && (isNaN(amountNum) || amountNum < MIN_NGN_DEPOSIT)) ||
-                   (selectedCurrency === 'USDT' && (isNaN(amountNum) || amountNum < MIN_USDT_DEPOSIT)) ||
-                   submitting) && styles.submitButtonDisabled,
-                ]}
-                onPress={handleDeposit}
-                disabled={
-                  (selectedCurrency === 'NGN' && (isNaN(amountNum) || amountNum < MIN_NGN_DEPOSIT)) ||
-                  (selectedCurrency === 'USDT' && (isNaN(amountNum) || amountNum < MIN_USDT_DEPOSIT)) ||
-                  submitting
-                }
-              >
-                <LinearGradient
-                  colors={['#4F46E5', '#6366F1']}
-                  style={styles.submitGradient}
-                >
-                  {submitting ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.submitButtonText}>Continue</Text>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </BlurView>
-      </Modal>
-
-      {/* Unified Receipt Upload Modal for both NGN and USDT */}
-      <Modal
-        visible={receiptModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => {
-          setReceiptModalVisible(false);
-          setSelectedReceipt(null);
-          setUsdtTxHash('');
-          setUsdtNetwork('');
-        }}
-      >
-        <BlurView intensity={20} tint="dark" style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {selectedCurrency === 'NGN' ? 'Upload Receipt' : 'USDT Deposit Details'}
-              </Text>
-              <TouchableOpacity 
-                onPress={() => {
-                  setReceiptModalVisible(false);
-                  setSelectedReceipt(null);
-                  setUsdtTxHash('');
-                  setUsdtNetwork('');
-                }}
-                style={styles.closeButton}
-              >
-                <Ionicons name="close" size={24} color="#6B7280" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.modalBody}>
-              {selectedCurrency === 'NGN' ? (
-                // NGN Bank Transfer Details
-                <View style={styles.bankDetailsCard}>
-                  <View style={styles.bankHeader}>
-                    <Ionicons name="business" size={20} color="#4F46E5" />
-                    <Text style={styles.bankTitle}>Bank Transfer Details</Text>
-                  </View>
-                  <View style={styles.bankDetailsRow}>
-                    <Text style={styles.bankDetailLabel}>Amount:</Text>
-                    <Text style={styles.bankDetailValue}>₦{displayAmount}</Text>
-                  </View>
-                  <View style={styles.bankDetailsRow}>
-                    <Text style={styles.bankDetailLabel}>Bank:</Text>
-                    <Text style={styles.bankDetailValue}>{platformDetails?.bank.name || 'Kuda Microfinance Bank'}</Text>
-                  </View>
-                  <View style={styles.bankDetailsRow}>
-                    <Text style={styles.bankDetailLabel}>Account:</Text>
-                    <Text style={styles.bankDetailValue}>{platformDetails?.bank.accountNumber || '3002830057'}</Text>
-                  </View>
-                  <View style={styles.bankDetailsRow}>
-                    <Text style={styles.bankDetailLabel}>Account Name:</Text>
-                    <Text style={styles.bankDetailValue}>{platformDetails?.bank.accountName || 'Clippa Digital Hub LTD'}</Text>
-                  </View>
-                </View>
-              ) : (
-                // USDT Transfer Details
-                <View style={styles.usdtDetailsCard}>
-                  <View style={styles.usdtHeader}>
-                    <Ionicons name="logo-usd" size={24} color="#16A34A" />
-                    <Text style={styles.usdtTitle}>Send USDT to this address</Text>
-                  </View>
-
-                  <View style={styles.usdtAddressContainer}>
-                    <Text style={styles.usdtAddressLabel}>Network: {platformDetails?.usdt.network || 'TRC20'}</Text>
-                    <View style={styles.usdtAddressRow}>
-                      <Text style={styles.usdtAddress} numberOfLines={1}>
-                        {platformDetails?.usdt.address || 'TXmz7jY7yY9Zy9Zy9Zy9Zy9Zy9Zy9Zy9Zy9'}
-                      </Text>
-                      <TouchableOpacity 
-                        onPress={() => copyToClipboard(platformDetails?.usdt.address || '')}
-                        style={styles.copyButton}
-                      >
-                        <Ionicons name="copy-outline" size={20} color="#4F46E5" />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  <View style={styles.usdtWarning}>
-                    <Ionicons name="alert-circle-outline" size={16} color="#D97706" />
-                    <Text style={styles.usdtWarningText}>
-                      Only send USDT on {platformDetails?.usdt.network || 'TRC20'} network. Sending on other networks may result in loss of funds.
-                    </Text>
-                  </View>
-
-                  <View style={styles.usdtAmountRow}>
-                    <Text style={styles.usdtAmountLabel}>Amount to send:</Text>
-                    <Text style={styles.usdtAmountValue}>{displayAmount} USDT</Text>
-                  </View>
+                  ))}
                 </View>
               )}
 
-              {selectedCurrency === 'USDT' && (
-                // USDT Transaction Hash Input
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Transaction Hash / TXID</Text>
+              {depositCur === 'USDT' && platform && (
+                <View style={S.detailCard}>
+                  <Text style={S.detailCardTitle}>Send USDT ({platform.usdt.network}) to:</Text>
+                  <View style={S.addrRow}>
+                    <Text style={S.addrTxt} numberOfLines={1}>{platform.usdt.address}</Text>
+                    <TouchableOpacity onPress={() => { Clipboard.setStringAsync(platform.usdt.address); Alert.alert('Copied!'); }}>
+                      <Ionicons name="copy-outline" size={18} color="#4F46E5" />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={S.warningRow}>
+                    <Ionicons name="alert-circle-outline" size={14} color="#D97706" />
+                    <Text style={S.warningTxt}>Only send on {platform.usdt.network}. Wrong network = lost funds.</Text>
+                  </View>
+
+                  <Text style={[S.mLabel, { marginTop: 14 }]}>Transaction Hash (TXID) *</Text>
                   <TextInput
-                    style={[styles.input, styles.usdtTxInput]}
-                    value={usdtTxHash}
-                    onChangeText={setUsdtTxHash}
-                    placeholder="Enter the transaction hash from your wallet"
+                    style={S.txHashInput}
+                    value={txHash}
+                    onChangeText={setTxHash}
+                    placeholder="Paste transaction hash from your wallet"
                     placeholderTextColor="#9CA3AF"
                     multiline
                   />
-                  <Text style={styles.inputHint}>
-                    You'll find this in your wallet after sending USDT
-                  </Text>
                 </View>
               )}
 
-              {/* Receipt Upload Section (for both currencies) */}
-              <Text style={[styles.methodLabel, { marginTop: 16 }]}>
-                {selectedCurrency === 'NGN' ? 'Upload Payment Receipt' : 'Upload Transaction Screenshot'}
+              {/* Receipt */}
+              <Text style={[S.mLabel, { marginTop: 16 }]}>
+                {depositCur === 'NGN' ? 'Upload Bank Receipt *' : 'Upload Screenshot *'}
               </Text>
-              
-              <TouchableOpacity style={styles.uploadArea} onPress={pickReceipt}>
-                <View style={styles.uploadIconContainer}>
-                  <Ionicons name="cloud-upload" size={32} color="#4F46E5" />
-                </View>
-                <Text style={styles.uploadTitle}>Tap to upload {selectedCurrency === 'NGN' ? 'receipt' : 'screenshot'}</Text>
-                <Text style={styles.uploadHint}>
-                  {selectedCurrency === 'NGN' ? 'PNG, JPG or PDF' : 'PNG or JPG'} (max 5MB)
+              <TouchableOpacity style={S.uploadBox} onPress={pickReceipt}>
+                <Ionicons name={receipt ? 'checkmark-circle' : 'cloud-upload-outline'} size={28} color={receipt ? '#10B981' : '#4F46E5'} />
+                <Text style={[S.uploadTxt, receipt && { color: '#10B981' }]}>
+                  {receipt ? (receipt.fileName || 'File attached ✓') : 'Tap to attach'}
                 </Text>
               </TouchableOpacity>
 
-              {selectedReceipt && (
-                <View style={styles.selectedFileCard}>
-                  <View style={styles.fileIconContainer}>
-                    <Ionicons name="document-text" size={24} color="#10B981" />
-                  </View>
-                  <View style={styles.fileInfo}>
-                    <Text style={styles.fileName} numberOfLines={1}>
-                      {selectedReceipt.fileName || 'receipt.jpg'}
-                    </Text>
-                    <Text style={styles.fileSize}>
-                      {Math.round((selectedReceipt.fileSize || 0) / 1024)} KB
-                    </Text>
-                  </View>
-                  <TouchableOpacity 
-                    onPress={() => setSelectedReceipt(null)}
-                    style={styles.fileRemoveButton}
-                  >
-                    <Ionicons name="close-circle" size={20} color="#EF4444" />
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              <TouchableOpacity
-                style={[
-                  styles.submitButton,
-                  (!selectedReceipt || 
-                   (selectedCurrency === 'USDT' && !usdtTxHash.trim()) ||
-                   submitting) && styles.submitButtonDisabled,
-                ]}
-                onPress={submitDeposit}
-                disabled={!selectedReceipt || (selectedCurrency === 'USDT' && !usdtTxHash.trim()) || submitting}
-              >
-                <LinearGradient
-                  colors={['#4F46E5', '#6366F1']}
-                  style={styles.submitGradient}
-                >
-                  {submitting ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.submitButtonText}>
-                      {selectedCurrency === 'NGN' ? 'Submit for Verification' : 'Submit Deposit'}
-                    </Text>
-                  )}
+              <TouchableOpacity style={[S.submitBtn, submitting && { opacity: 0.6 }]} onPress={submitDeposit} disabled={submitting}>
+                <LinearGradient colors={['#4338CA', '#4F46E5']} style={S.submitGrad}>
+                  {submitting ? <ActivityIndicator color="#FFF" /> : <Text style={S.submitTxt}>Submit Deposit Request</Text>}
                 </LinearGradient>
               </TouchableOpacity>
-
-              {selectedCurrency === 'USDT' && (
-                <Text style={styles.usdtNote}>
-                  Your deposit will be credited after {platformDetails?.usdt.network || 'TRC20'} network confirmations
-                </Text>
-              )}
             </ScrollView>
           </View>
         </BlurView>
       </Modal>
 
-      {/* Withdrawal Modal */}
-      <Modal
-        visible={withdrawModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setWithdrawModalVisible(false)}
-      >
-        <BlurView intensity={20} tint="dark" style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                Withdraw {selectedCurrency}
-              </Text>
-              <TouchableOpacity 
-                onPress={() => {
-                  setWithdrawModalVisible(false);
-                  resetWithdrawForm();
-                }}
-                style={styles.closeButton}
-              >
-                <Ionicons name="close" size={24} color="#6B7280" />
+      {/* ════════════════════════════════════════════════════════
+          WITHDRAWAL MODAL
+      ════════════════════════════════════════════════════════ */}
+      <Modal visible={wdrModal} animationType="slide" transparent onRequestClose={() => setWdrModal(false)}>
+        <BlurView intensity={20} tint="dark" style={S.overlay}>
+          <View style={S.sheet}>
+            <View style={S.handle} />
+            <View style={S.mHdr}>
+              <Text style={S.mTitle}>Withdraw Funds</Text>
+              <TouchableOpacity style={S.mClose} onPress={() => setWdrModal(false)}>
+                <Ionicons name="close" size={20} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.modalBody}>
-              {withdrawError && (
-                <Text style={styles.errorText}>{withdrawError}</Text>
-              )}
+            <ScrollView style={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+              {wdrErr ? <Text style={S.errTxt}>{wdrErr}</Text> : null}
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>
-                  Amount ({selectedCurrency === 'NGN' ? '₦' : 'USDT'})
-                </Text>
-                <View style={styles.inputContainer}>
-                  {selectedCurrency === 'NGN' && (
-                    <Text style={styles.inputCurrency}>₦</Text>
-                  )}
-                  <TextInput
-                    style={styles.input}
-                    value={wdrAmount}
-                    onChangeText={setWdrAmount}
-                    placeholder={selectedCurrency === 'NGN' ? MIN_NGN_WITHDRAWAL.toString() : MIN_USDT_WITHDRAWAL.toString()}
-                    keyboardType="numeric"
-                    placeholderTextColor="#9CA3AF"
-                  />
-                </View>
-                <Text style={styles.inputHint}>
-                  Available: {selectedCurrency === 'NGN' ? formatNaira(balance) : formatUSDT(usdtBalance)}
-                </Text>
-                <Text style={styles.inputHint}>
-                  Minimum: {selectedCurrency === 'NGN' ? `₦${MIN_NGN_WITHDRAWAL}` : `${MIN_USDT_WITHDRAWAL} USDT`}
-                </Text>
+              <Text style={S.mLabel}>Currency</Text>
+              <View style={S.toggle}>
+                {(['NGN', 'USDT'] as const).map((c) => (
+                  <TouchableOpacity key={c} style={[S.toggleBtn, wdrCur === c && S.toggleBtnActive]} onPress={() => setWdrCur(c)}>
+                    <Text style={[S.toggleTxt, wdrCur === c && S.toggleTxtActive]}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
-              {selectedCurrency === 'NGN' ? (
+              <Text style={S.mLabel}>Amount</Text>
+              <View style={S.inputRow}>
+                <Text style={S.inputPrefix}>{wdrCur === 'NGN' ? '₦' : '$'}</Text>
+                <TextInput style={S.bigInput} value={wdrAmt} onChangeText={setWdrAmt} keyboardType="numeric" placeholder="0" placeholderTextColor="#9CA3AF" />
+              </View>
+              <Text style={S.mHint}>Available: {wdrCur === 'NGN' ? fmtNGN(wallet.balance) : fmtUSDT(wallet.usdtBalance)}</Text>
+
+              {wdrCur === 'NGN' ? (
                 <>
-                  <Text style={styles.label}>Bank Name</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={bankName}
-                    onChangeText={setBankName}
-                    placeholder="e.g. Zenith Bank"
-                    placeholderTextColor="#9CA3AF"
-                  />
-
-                  <Text style={styles.label}>Account Number</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={accountNumber}
-                    onChangeText={setAccountNumber}
-                    placeholder="10-digit account number"
-                    keyboardType="numeric"
-                    maxLength={10}
-                    placeholderTextColor="#9CA3AF"
-                  />
-
-                  <Text style={styles.label}>Account Name</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={accountName}
-                    onChangeText={setAccountName}
-                    placeholder="Account holder's name"
-                    placeholderTextColor="#9CA3AF"
-                  />
+                  {([['Bank Name', bankName, setBankName, 'e.g. Zenith Bank', 'default'],
+                     ['Account Number', accNum, setAccNum, '10-digit number', 'numeric'],
+                     ['Account Name', accName, setAccName, 'Account holder name', 'default']] as any[]).map(([lbl, val, setter, ph, kb]) => (
+                    <View key={lbl} style={{ marginTop: 14 }}>
+                      <Text style={S.mLabel}>{lbl}</Text>
+                      <TextInput style={S.fieldInput} value={val} onChangeText={setter} placeholder={ph} placeholderTextColor="#9CA3AF" keyboardType={kb} />
+                    </View>
+                  ))}
                 </>
               ) : (
                 <>
-                  <Text style={styles.label}>USDT Wallet Address</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={withdrawUsdtAddress}
-                    onChangeText={setWithdrawUsdtAddress}
-                    placeholder="Enter your USDT address"
-                    placeholderTextColor="#9CA3AF"
-                  />
-
-                  <Text style={styles.label}>Network (TRC20 / ERC20 / BEP20)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={withdrawUsdtNetwork}
-                    onChangeText={setWithdrawUsdtNetwork}
-                    placeholder="e.g. TRC20"
-                    placeholderTextColor="#9CA3AF"
-                  />
+                  <View style={{ marginTop: 14 }}>
+                    <Text style={S.mLabel}>USDT Wallet Address</Text>
+                    <TextInput style={S.fieldInput} value={wdrAddr} onChangeText={setWdrAddr} placeholder="Your USDT address" placeholderTextColor="#9CA3AF" />
+                  </View>
+                  <View style={{ marginTop: 14 }}>
+                    <Text style={S.mLabel}>Network</Text>
+                    <TextInput style={S.fieldInput} value={wdrNet} onChangeText={setWdrNet} placeholder="TRC20 / ERC20 / BEP20" placeholderTextColor="#9CA3AF" />
+                  </View>
                 </>
               )}
 
-              <TouchableOpacity
-                style={[
-                  styles.submitButton,
-                  (submitting || 
-                   (selectedCurrency === 'NGN' 
-                     ? (parseInt(wdrAmount) < MIN_NGN_WITHDRAWAL || !bankName || !accountNumber || !accountName)
-                     : (parseFloat(wdrAmount) < MIN_USDT_WITHDRAWAL || !withdrawUsdtAddress || !withdrawUsdtNetwork))) && 
-                  styles.submitButtonDisabled,
-                ]}
-                onPress={handleWithdraw}
-                disabled={submitting}
-              >
-                <LinearGradient
-                  colors={['#EF4444', '#F87171']}
-                  style={styles.submitGradient}
-                >
-                  {submitting ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.submitButtonText}>Submit Withdrawal Request</Text>
-                  )}
+              <TouchableOpacity style={[S.submitBtn, { marginTop: 24 }, submitting && { opacity: 0.6 }]} onPress={submitWithdrawal} disabled={submitting}>
+                <LinearGradient colors={['#DC2626', '#EF4444']} style={S.submitGrad}>
+                  {submitting ? <ActivityIndicator color="#FFF" /> : <Text style={S.submitTxt}>Submit Withdrawal</Text>}
                 </LinearGradient>
               </TouchableOpacity>
-
-              <Text style={styles.modalFooterText}>
-                Withdrawals are processed within 24-48 hours
-              </Text>
+              <Text style={S.footerNote}>Processed within 24–48 hours</Text>
             </ScrollView>
           </View>
         </BlurView>
@@ -1175,615 +547,123 @@ export default function WalletScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  centerContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 120,
-    paddingBottom: 100,
-  },
-  header: {
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#111827',
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 4,
-  },
-  currencySelector: {
-    flexDirection: 'row',
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 20,
-  },
-  currencyTab: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  currencyTabActive: {
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  currencyTabText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  currencyTabTextActive: {
-    color: '#4F46E5',
-  },
-  cardsContainer: {
-    gap: 16,
-    marginBottom: 24,
-  },
-  balanceCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  escrowCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  cardIconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  cardLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  balanceAmount: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#111827',
-    marginBottom: 16,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  depositAction: {
-    marginRight: 6,
-  },
-  withdrawAction: {
-    marginLeft: 6,
-  },
-  actionGradient: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  escrowHint: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginTop: 8,
-  },
-  historyTabs: {
-    flexDirection: 'row',
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 16,
-  },
-  historyTab: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  historyTabActive: {
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  historyTabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  historyTabTextActive: {
-    color: '#4F46E5',
-  },
-  recentSection: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  sectionTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 32,
-  },
-  emptyIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  depositItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  depositInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  depositIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#EEF2FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  depositAmount: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 2,
-  },
-  depositCurrency: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 2,
-  },
-  depositDate: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  depositStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 6,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  bottomPadding: {
-    height: 40,
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    maxHeight: '90%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#111827',
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalBody: {
-    padding: 24,
-  },
-  inputGroup: {
-    marginBottom: 24,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 16,
-    backgroundColor: '#F9FAFB',
-    paddingHorizontal: 16,
-  },
-  inputCurrency: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#6B7280',
-    marginRight: 8,
-  },
-  input: {
-    flex: 1,
-    paddingVertical: 16,
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  inputHint: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 8,
-  },
-  methodLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 12,
-  },
-  methodCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 16,
-    marginBottom: 12,
-    backgroundColor: '#FFFFFF',
-  },
-  methodCardActive: {
-    borderColor: '#4F46E5',
-    backgroundColor: '#EEF2FF',
-  },
-  methodLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  methodIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  methodTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  methodDescription: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  methodSelected: {
-    marginLeft: 12,
-  },
-  submitButton: {
-    height: 56,
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginTop: 24,
-  },
-  submitGradient: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
-  submitButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  bankDetailsCard: {
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  bankHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-  },
-  bankTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  bankDetailsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-  },
-  bankDetailLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  bankDetailValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  usdtDetailsCard: {
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  usdtHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-  },
-  usdtTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  usdtAddressContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  usdtAddressLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  usdtAddressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  usdtAddress: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-    marginRight: 8,
-  },
-  copyButton: {
-    padding: 4,
-  },
-  usdtWarning: {
-    flexDirection: 'row',
-    backgroundColor: '#FEF3C7',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    gap: 8,
-  },
-  usdtWarningText: {
-    flex: 1,
-    fontSize: 12,
-    color: '#92400E',
-  },
-  usdtAmountRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-  },
-  usdtAmountLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  usdtAmountValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#16A34A',
-  },
-  usdtTxInput: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  usdtNote: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 16,
-  },
-  uploadArea: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: '#E5E7EB',
-    borderRadius: 16,
-    padding: 32,
-    backgroundColor: '#F9FAFB',
-    marginBottom: 16,
-  },
-  uploadIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#EEF2FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  uploadTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  uploadHint: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  selectedFileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F0FDF4',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#86EFAC',
-  },
-  fileIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: '#DCFCE7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  fileInfo: {
-    flex: 1,
-  },
-  fileName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#166534',
-    marginBottom: 2,
-  },
-  fileSize: {
-    fontSize: 12,
-    color: '#16A34A',
-  },
-  fileRemoveButton: {
-    padding: 4,
-  },
-  label: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  errorText: {
-    color: '#EF4444',
-    fontSize: 14,
-    marginBottom: 16,
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  modalFooterText: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 16,
-    marginBottom: 8,
-  },
+// ─── BalanceCard sub-component ────────────────────────────────────────────────
+function BalanceCard({ label, amount, sub, iconName, accentColor, subColor, onDeposit, onWithdraw }: {
+  label: string; amount: string; sub: string; iconName: string;
+  accentColor: string; subColor: string; onDeposit: () => void; onWithdraw: () => void;
+}) {
+  return (
+    <View style={BC.card}>
+      <View style={BC.topRow}>
+        <Ionicons name={iconName as any} size={14} color={accentColor} />
+        <Text style={[BC.label, { color: accentColor }]}>{label}</Text>
+      </View>
+      <Text style={BC.amount} numberOfLines={1} adjustsFontSizeToFit>{amount}</Text>
+      <Text style={[BC.sub, { color: subColor }]} numberOfLines={1}>{sub}</Text>
+      <View style={BC.btnRow}>
+        <TouchableOpacity style={BC.fundBtn} onPress={onDeposit}>
+          <Ionicons name="add" size={13} color="#FFF" />
+          <Text style={BC.fundTxt}>Fund</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={BC.wdrBtn} onPress={onWithdraw}>
+          <Ionicons name="arrow-up" size={13} color="#4338CA" />
+          <Text style={BC.wdrTxt}>Withdraw</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const BC = StyleSheet.create({
+  card:    { flex: 1, backgroundColor: 'rgba(255,255,255,0.13)', borderRadius: 18, padding: 14,},
+  topRow:  { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
+  label:   { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  amount:  { fontSize: 19, fontWeight: '800', color: '#FFF', marginBottom: 3 },
+  sub:     { fontSize: 10, marginBottom: 14 },
+  btnRow:  { flexDirection: 'row', gap: 7 },
+  fundBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 9, paddingVertical: 8 },
+  fundTxt: { fontSize: 12, fontWeight: '700', color: '#FFF' },
+  wdrBtn:  { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 9, paddingVertical: 8 },
+  wdrTxt:  { fontSize: 12, fontWeight: '700', color: '#4338CA' },
+});
+
+const S = StyleSheet.create({
+  hero:       { paddingTop: 60, paddingBottom: 28, paddingHorizontal: 20 },
+  heroTitle:  { fontSize: 26, fontWeight: '800', color: '#FFF', marginBottom: 3 },
+  heroSub:    { fontSize: 13, color: 'rgba(255,255,255,0.65)', marginBottom: 22 },
+  balanceRow: { flexDirection: 'row' },
+
+  escrowCard:     { margin: 16, marginTop: 16, backgroundColor: '#FFF', borderRadius: 20, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },
+  escrowHeader:   { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 14 },
+  escrowIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#FEF3C7', justifyContent: 'center', alignItems: 'center' },
+  escrowTitle:    { fontSize: 15, fontWeight: '700', color: '#111827' },
+  escrowSub:      { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
+  escrowChipsRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  escrowChip:     { flex: 1, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 12, padding: 12, alignItems: 'center' },
+  escrowChipLabel:{ fontSize: 11, fontWeight: '600', color: '#92400E' },
+  escrowChipAmt:  { fontSize: 18, fontWeight: '800', color: '#D97706', marginTop: 4 },
+  escrowInfoRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#FFFBEB', borderRadius: 10, padding: 10 },
+  escrowInfoTxt:  { flex: 1, fontSize: 12, color: '#92400E', lineHeight: 17 },
+
+  section:      { margin: 16, backgroundColor: '#FFF', borderRadius: 20, padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: '#111827', marginBottom: 14 },
+
+  historyTabs:   { flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 10, padding: 3, marginBottom: 16 },
+  hTab:          { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8 },
+  hTabActive:    { backgroundColor: '#FFF', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  hTabTxt:       { fontSize: 13, fontWeight: '500', color: '#6B7280' },
+  hTabTxtActive: { color: '#4F46E5', fontWeight: '700' },
+
+  empty:    { alignItems: 'center', paddingVertical: 32, gap: 10 },
+  emptyTxt: { fontSize: 14, color: '#9CA3AF', fontWeight: '500' },
+
+  txRow:      { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F9FAFB', gap: 12 },
+  txIcon:     { width: 42, height: 42, borderRadius: 13, justifyContent: 'center', alignItems: 'center' },
+  txDesc:     { fontSize: 13, fontWeight: '600', color: '#1F2937', textTransform: 'capitalize' },
+  txDate:     { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
+  txAmt:      { fontSize: 14, fontWeight: '700' },
+  txStatusPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  txStatusTxt:  { fontSize: 10, fontWeight: '600', textTransform: 'capitalize' },
+
+  // Modals
+  overlay:  { flex: 1, justifyContent: 'flex-end' },
+  sheet:    { backgroundColor: '#FFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '92%' },
+  handle:   { width: 40, height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  mHdr:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  mTitle:   { fontSize: 18, fontWeight: '800', color: '#111827' },
+  mClose:   { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  mLabel:   { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 8 },
+  mHint:    { fontSize: 11, color: '#9CA3AF', marginTop: 5, marginBottom: 4 },
+
+  toggle:         { flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 10, padding: 3, marginBottom: 18 },
+  toggleBtn:      { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 8 },
+  toggleBtnActive:{ backgroundColor: '#FFF', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, elevation: 2 },
+  toggleTxt:      { fontSize: 14, fontWeight: '600', color: '#6B7280' },
+  toggleTxtActive:{ color: '#4F46E5', fontWeight: '700' },
+
+  inputRow:    { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 14, backgroundColor: '#FAFAFA', paddingHorizontal: 14 },
+  inputPrefix: { fontSize: 22, fontWeight: '700', color: '#9CA3AF', marginRight: 6 },
+  bigInput:    { flex: 1, paddingVertical: 14, fontSize: 22, fontWeight: '700', color: '#111' },
+  fieldInput:  { borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, fontSize: 15, color: '#111', backgroundColor: '#FAFAFA' },
+
+  detailCard:     { backgroundColor: '#F9FAFB', borderRadius: 14, padding: 14, marginTop: 16, borderWidth: 1, borderColor: '#E5E7EB' },
+  detailCardTitle:{ fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 10 },
+  detailRow:      { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  detailLbl:      { fontSize: 13, color: '#6B7280' },
+  detailVal:      { fontSize: 13, fontWeight: '600', color: '#111827' },
+
+  addrRow:   { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 10, padding: 10, gap: 8, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
+  addrTxt:   { flex: 1, fontSize: 12, fontWeight: '600', color: '#111', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  warningRow:{ flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FFFBEB', borderRadius: 8, padding: 8, gap: 6 },
+  warningTxt:{ flex: 1, fontSize: 12, color: '#92400E' },
+  txHashInput:{ borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 12, padding: 12, fontSize: 13, color: '#111', minHeight: 70, textAlignVertical: 'top', backgroundColor: '#FAFAFA', marginTop: 8 },
+
+  uploadBox: { alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderStyle: 'dashed', borderColor: '#C7D2FE', borderRadius: 14, paddingVertical: 22, backgroundColor: '#F5F3FF', gap: 8, marginBottom: 4 },
+  uploadTxt: { fontSize: 14, fontWeight: '600', color: '#4F46E5' },
+
+  submitBtn:  { height: 54, borderRadius: 14, overflow: 'hidden', marginTop: 20 },
+  submitGrad: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  submitTxt:  { fontSize: 16, fontWeight: '700', color: '#FFF' },
+  errTxt:     { color: '#EF4444', fontSize: 13, fontWeight: '600', textAlign: 'center', backgroundColor: '#FEF2F2', borderRadius: 10, padding: 12, marginBottom: 16 },
+  footerNote: { fontSize: 12, color: '#9CA3AF', textAlign: 'center', marginTop: 12 },
 });

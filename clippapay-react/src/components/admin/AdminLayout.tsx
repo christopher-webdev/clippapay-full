@@ -24,7 +24,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { name: 'Overview', to: '/dashboard/admin', icon: <HiOutlineChartBar className="w-5 h-5" /> },
   { name: 'Users', to: '/dashboard/admin/users', icon: <HiOutlineUsers className="w-5 h-5" /> },
-  // { name: 'Manage Subscriptions', to: '/dashboard/admin/subscriptions', icon: <HiOutlineUsers className="w-5 h-5" /> },
+  { name: 'Manage Clippings', to: '/dashboard/admin/clippings', icon: <HiOutlineUsers className="w-5 h-5" /> },
   { name: 'Campaigns', to: '/dashboard/admin/campaigns', icon: <HiClipboardList className="w-5 h-5" /> },
   { name: 'Submissions', to: '/dashboard/admin/submissions', icon: <HiOutlineDocument className="w-5 h-5" /> },
   { name: 'Wallets', to: '/dashboard/admin/wallets', icon: <HiOutlineCash className="w-5 h-5" /> },

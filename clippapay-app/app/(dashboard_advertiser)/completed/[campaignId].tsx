@@ -617,7 +617,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
-    marginTop: 80,
   },
   backIcon: {
     width: 40,

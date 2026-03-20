@@ -52,7 +52,15 @@ interface FormErrors {
 }
 
 // Constants
-const API_BASE = 'https://clippapay.com/api';
+// const API_BASE = 'https://clippapay.com/api';
+const API_BASE = process.env.EXPO_PUBLIC_API_URL;
+
+if (!API_BASE) {
+  console.warn(
+    'EXPO_PUBLIC_API_URL is not defined. ' +
+    'Make sure it exists in your app.json / app.config.js or .env file.'
+  );
+}
 const NGN_PER_THOUSAND_VIEWS = 3000;
 const USDT_PER_THOUSAND_VIEWS = 1.85; // Approximate USDT equivalent
 
@@ -251,12 +259,19 @@ export default function CreateClippingCampaign() {
       });
 
       Alert.alert(
-        'Success!',
-        'Your clipping campaign has been created successfully.',
+        '🎉 Campaign Created!',
+        'Your clipping campaign is now active. Clippers can start joining and submitting proofs.',
         [
           {
-            text: 'View Campaign',
-            onPress: () => router.push(`/campaign/${response.data.campaignId}`),
+            text: 'Manage Campaign',
+            onPress: () => router.push({
+              pathname: '/(dashboard_advertiser)/clipping_campaign_detail',
+              params: { id: response.data.campaignId },
+            }),
+          },
+          {
+            text: 'View All Campaigns',
+            onPress: () => router.push('/(dashboard_advertiser)/my_clipping_campaigns'),
           },
           {
             text: 'Close',
@@ -721,21 +736,21 @@ export default function CreateClippingCampaign() {
 const styles = StyleSheet.create({
   container: {
     flex: 1, 
-    marginTop: 89,
   },
   keyboardView: {
     flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 40,
+    paddingBottom: 80,
+    marginBottom: 90,
    
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 60,
+    paddingTop: 20,
     paddingBottom: 20,
   },
   backButton: {

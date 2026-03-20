@@ -36,7 +36,10 @@ const TAB_ITEMS = [
     icon: 'megaphone-outline',
     activeIcon: 'megaphone',
     routes: [
+      '/(dashboard_advertiser)/campaigns_hub',
       '/(dashboard_advertiser)/Campaigns',
+      '/(dashboard_advertiser)/my_clipping_campaigns',
+      '/(dashboard_advertiser)/clipping_campaign_detail',
     ],
   },
   {
@@ -165,7 +168,11 @@ export default function Footer() {
 
   // Handle navigation
   const handleNavigation = (item: typeof TAB_ITEMS[0]) => {
-    const targetRoute = item.routes[0];
+    let targetRoute = item.routes[0];
+    // Always land on the hub when tapping My Campaigns from footer
+    if (item.name === 'My Campaigns') {
+      targetRoute = '/(dashboard_advertiser)/campaigns_hub';
+    }
     console.log('Navigating to:', targetRoute);
     setActiveTab(item.name);
     router.push(targetRoute);

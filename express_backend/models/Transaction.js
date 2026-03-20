@@ -6,7 +6,18 @@ const transactionSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   type: { 
     type: String, 
-    enum: ['deposit', 'withdrawal', 'payment', 'refund', 'commission'],
+    enum: [
+      'deposit',
+      'withdrawal',
+      'payment',
+      'refund',
+      'commission',
+      'campaign_funding',   // advertiser funds a clipping campaign (escrow)
+      'clipping_reward',    // clipper earns from verified views
+      'campaign_payment',   // generic campaign spend
+      'escrow',             // escrow hold
+      'escrow_release',     // escrow released to clipper/platform
+    ],
     required: true 
   },
   amount: { type: Number, required: true },
@@ -18,6 +29,7 @@ const transactionSchema = new mongoose.Schema({
   },
   reference: String,
   note: String,
+  description: String,     // used by clipping_reward logs
   metadata: mongoose.Schema.Types.Mixed
 }, { timestamps: true });
 
