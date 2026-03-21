@@ -30,11 +30,10 @@ import adminCampaignsRouter from './routes/adminCampaigns.js';
 import clipRoutes from './routes/clips.js';
 import campaignsRoute from './routes/campaigns.js';
 import applicationsRouter from './routes/applications.js';
-import disputesRouter from './routes/disputes.js';
 import dRouter from './routes/d.js';
 import clippingRouter from './routes/clipping.js';                        // clipper-side browse/submit
 import advertiserClippingRouter from './routes/advertiser_clipping.js';   // ← NEW advertiser-side
-
+import disputeRouter from './routes/disputes.js';
 
 // Model for seeding
 import seedAdWorkers from './seeds/createAdWorkers.js';
@@ -157,7 +156,8 @@ app.use('/api/clip', clipRoutes);
 app.use('/api/user', userRoutes);
 app.use('/telegram', telegramRouter);
 app.use('/api/applications', applicationsRouter);
-app.use('/api/disputes', disputesRouter);
+app.use('/api/disputes', disputeRouter);
+
 
 // 6. Error handling
 app.use((err, req, res, next) => {

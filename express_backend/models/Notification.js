@@ -48,7 +48,11 @@ const notificationSchema = new mongoose.Schema({
       // Admin
       'admin_action_required',
       'user_reported',
-      'dispute_raised'
+      'dispute_raised',
+      'new_ugc_pending',
+      'campaign_auto_completed',
+      'clipping_joined',
+      'clipping_approved,'
     ],
     required: true
   },

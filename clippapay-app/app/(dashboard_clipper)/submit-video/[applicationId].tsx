@@ -1,465 +1,325 @@
-// app/(dashboard)/clipper/submit-video/[applicationId].tsx
+// app/(dashboard_clipper)/submit-video/[applicationId].tsx
+// Rebuilt: clean design, thumbnail & note fields uncommented, 
+// fixed ImagePicker deprecation, deadline countdown, proper error handling
 import React, { useState, useEffect } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  Image,
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  SafeAreaView,
-  Platform,
+  View, Text, ScrollView, TextInput, TouchableOpacity, Image,
+  ActivityIndicator, Alert, StyleSheet, Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import * as SecureStore from 'expo-secure-store';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-const UPLOADS_BASE_URL = process.env.EXPO_PUBLIC_UPLOADS_BASE_URL;
+const API_URL   = process.env.EXPO_PUBLIC_API_URL;
+const UPLOADS   = process.env.EXPO_PUBLIC_UPLOADS_BASE_URL || '';
 
-// Add the missing toFullUrl function
-const toFullUrl = (path: string | null) => {
-  if (!path) return null;
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  return `${UPLOADS_BASE_URL}${path.startsWith('/') ? path : '/' + path}`;
+const toUrl = (p?: string | null) =>
+  !p ? null : p.startsWith('http') ? p : `${UPLOADS}${p.startsWith('/') ? p : '/' + p}`;
+
+const getToken = async () => {
+  try {
+    if (Platform.OS === 'web') return AsyncStorage.getItem('userToken');
+    return (await SecureStore.getItemAsync('userToken')) || (await AsyncStorage.getItem('userToken'));
+  } catch { return null; }
+};
+
+const fmtDeadline = (d?: string) => {
+  if (!d) return null;
+  const date = new Date(d);
+  const diff = date.getTime() - Date.now();
+  if (diff <= 0) return 'Deadline passed';
+  const hrs = Math.floor(diff / 3600000);
+  if (hrs < 24) return `${hrs}h remaining`;
+  const days = Math.floor(diff / 86400000);
+  return `${days}d ${Math.floor((diff % 86400000) / 3600000)}h remaining`;
 };
 
 export default function SubmitVideoScreen() {
   const { applicationId } = useLocalSearchParams<{ applicationId: string }>();
   const router = useRouter();
 
-  const [application, setApplication] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [app, setApp]           = useState<any>(null);
+  const [loading, setLoading]   = useState(true);
   const [uploading, setUploading] = useState(false);
 
-  // Submission fields
-  const [videoFile, setVideoFile] = useState<any>(null);
-  const [thumbnailFile, setThumbnailFile] = useState<any>(null);
-  const [thumbnailPreview, setThumbnailPreview] = useState<string | null>(null);
-  const [note, setNote] = useState('');
-
-  const fetchApplication = async () => {
-    setLoading(true);
-    try {
-      const token = await SecureStore.getItemAsync('userToken');
-      if (!token) throw new Error('Not authenticated');
-
-      const res = await fetch(`${API_URL}/applications/${applicationId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load');
-
-      const appData = data.application || data;
-      setApplication(appData);
-
-      // Safety check
-      if (appData.status !== 'accepted') {
-        Alert.alert('Not ready', 'You can only submit after accepting the offer.');
-        router.back();
-      }
-
-    } catch (err: any) {
-      Alert.alert('Error', err.message || 'Could not load job details');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [videoFile, setVideoFile]       = useState<any>(null);
+  const [thumbFile, setThumbFile]       = useState<any>(null);
+  const [thumbPreview, setThumbPreview] = useState<string | null>(null);
+  const [note, setNote]                 = useState('');
 
   useEffect(() => {
-    if (applicationId) fetchApplication();
+    (async () => {
+      const token = await getToken();
+      if (!token) { router.replace('/(auth)/login'); return; }
+      try {
+        const res  = await fetch(`${API_URL}/applications/${applicationId}`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+        const a = data.application || data;
+        setApp(a);
+        if (a.status !== 'accepted') {
+          Alert.alert('Not ready', 'You can only submit after accepting the offer.');
+          router.back();
+        }
+      } catch (err: any) {
+        Alert.alert('Error', err.message);
+      } finally { setLoading(false); }
+    })();
   }, [applicationId]);
 
   const pickVideo = async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission denied', 'We need access to your media library.');
-        return;
-      }
-
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['video/mp4', 'video/quicktime', 'video/webm', 'video/mpeg'],
+      const r = await DocumentPicker.getDocumentAsync({
+        type: ['video/mp4','video/quicktime','video/webm'],
         copyToCacheDirectory: true,
       });
-
-      if (!result.canceled && result.assets && result.assets[0]) {
-        const asset = result.assets[0];
-        setVideoFile({
-          uri: asset.uri,
-          name: asset.name || `video-${Date.now()}.mp4`,
-          type: asset.mimeType || 'video/mp4',
-          size: asset.size,
-        });
-        Alert.alert('Video selected', asset.name || 'Video ready to upload');
+      if (!r.canceled && r.assets?.[0]) {
+        const a = r.assets[0];
+        setVideoFile({ uri: a.uri, name: a.name || `video-${Date.now()}.mp4`, type: a.mimeType || 'video/mp4', size: a.size });
       }
-    } catch (err: any) {
-      Alert.alert('Error', 'Failed to pick video: ' + err.message);
-    }
+    } catch (err: any) { Alert.alert('Error', err.message); }
   };
 
   const pickThumbnail = async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [16, 9],
-        quality: 0.85,
-      });
-
-      if (!result.canceled && result.assets?.[0]) {
-        const asset = result.assets[0];
-        setThumbnailFile({
-          uri: asset.uri,
-          name: asset.fileName || `thumb-${Date.now()}.jpg`,
-          type: asset.mimeType || 'image/jpeg',
-        });
-        setThumbnailPreview(asset.uri);
-      }
-    } catch (err: any) {
-      Alert.alert('Error', 'Failed to pick thumbnail: ' + err.message);
+    const r = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'] as any,
+      allowsEditing: true, aspect: [16, 9], quality: 0.85,
+    });
+    if (!r.canceled && r.assets?.[0]) {
+      const a = r.assets[0];
+      setThumbFile({ uri: a.uri, name: a.fileName || `thumb-${Date.now()}.jpg`, type: a.mimeType || 'image/jpeg' });
+      setThumbPreview(a.uri);
     }
   };
 
   const handleSubmit = async () => {
-    if (!videoFile) {
-      Alert.alert('Missing video', 'Please select a video file to submit.');
-      return;
-    }
-
+    if (!videoFile) { Alert.alert('Missing video', 'Please select a video file.'); return; }
     setUploading(true);
-
     try {
-      const token = await SecureStore.getItemAsync('userToken');
-
-      const formData = new FormData();
-
-      // Video file
-      formData.append('video', {
-        uri: Platform.OS === 'ios' ? videoFile.uri.replace('file://', '') : videoFile.uri,
-        name: videoFile.name,
-        type: videoFile.type,
+      const token = await getToken();
+      const fd    = new FormData();
+      fd.append('video', {
+        uri:  Platform.OS === 'ios' ? videoFile.uri.replace('file://', '') : videoFile.uri,
+        name: videoFile.name, type: videoFile.type,
       } as any);
-
-      // Optional thumbnail
-      if (thumbnailFile) {
-        formData.append('thumbnail', {
-          uri: Platform.OS === 'ios' ? thumbnailFile.uri.replace('file://', '') : thumbnailFile.uri,
-          name: thumbnailFile.name,
-          type: thumbnailFile.type,
+      if (thumbFile) {
+        fd.append('thumbnail', {
+          uri:  Platform.OS === 'ios' ? thumbFile.uri.replace('file://', '') : thumbFile.uri,
+          name: thumbFile.name, type: thumbFile.type,
         } as any);
       }
+      if (note.trim()) fd.append('note', note.trim());
 
-      // Optional note
-      if (note.trim()) {
-        formData.append('note', note.trim());
-      }
-
-      console.log('Submitting to:', `${API_URL}/applications/${applicationId}/submit`);
-      
-      const res = await fetch(`${API_URL}/applications/${applicationId}/submit`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          // Do NOT set Content-Type — fetch sets multipart boundary automatically
-        },
-        body: formData,
+      const res  = await fetch(`${API_URL}/applications/${applicationId}/submit`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Submission failed');
 
-      // Check if response is JSON
-      const contentType = res.headers.get('content-type');
-      let data;
-      if (contentType && contentType.includes('application/json')) {
-        data = await res.json();
-      } else {
-        const text = await res.text();
-        console.error('Non-JSON response:', text.substring(0, 200));
-        throw new Error('Server returned invalid response');
-      }
-
-      if (!res.ok) {
-        throw new Error(data.error || data.message || 'Submission failed');
-      }
-
-      Alert.alert(
-        'Success',
-        'Video submitted successfully! The advertiser will review it soon.',
-        [{ text: 'OK', onPress: () => router.push('/(dashboard_clipper)/my-applications') }]
-      );
-
+      Alert.alert('✅ Submitted!', 'Your video has been sent for review. The advertiser will respond within the campaign timeline.', [
+        { text: 'View Applications', onPress: () => router.replace('/(dashboard_clipper)/my-applications' as any) },
+      ]);
     } catch (err: any) {
-      console.error('Submit error:', err);
-      Alert.alert('Error', err.message || 'Failed to submit video');
-    } finally {
-      setUploading(false);
-    }
+      Alert.alert('Error', err.message || 'Could not submit video');
+    } finally { setUploading(false); }
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <ActivityIndicator size="large" color="#6366f1" style={{ flex: 1 }} />
+      <SafeAreaView style={S.safe}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color="#7C3AED" />
+        </View>
       </SafeAreaView>
     );
   }
 
-  if (!application) {
+  if (!app) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.center}>
-          <Text style={styles.errorText}>Application not found</Text>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Text style={styles.backBtnText}>Go Back</Text>
+      <SafeAreaView style={S.safe}>
+        <View style={S.center}>
+          <Ionicons name="alert-circle-outline" size={56} color="#EF4444" />
+          <Text style={{ color: '#EF4444', marginTop: 12, fontSize: 16 }}>Application not found</Text>
+          <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16, backgroundColor: '#7C3AED', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12 }}>
+            <Text style={{ color: '#FFF', fontWeight: '600' }}>Go Back</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
+
+  const deadline     = fmtDeadline(app.submissionDeadline);
+  const deadlinePast = app.submissionDeadline && new Date(app.submissionDeadline) < new Date();
+  const thumb        = toUrl(app.campaign?.thumbnailUrl);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#1e293b" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Submit Video</Text>
-          <View style={{ width: 24 }} />
-        </View>
+    <SafeAreaView style={S.safe}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
-        {/* Campaign Info */}
-        <View style={styles.campaignCard}>
-          <Image
-            source={{ uri: toFullUrl(application?.campaign?.thumbnailUrl) || 'https://via.placeholder.com/400' }}
-            style={styles.campaignThumb}
-          />
-          <View style={styles.campaignInfo}>
-            <Text style={styles.campaignTitle}>{application?.campaign?.title}</Text>
-            <Text style={styles.campaignMeta}>
-              {application?.campaign?.category} • {application?.campaign?.preferredLength}
-            </Text>
-            <Text style={styles.deadline}>
-              Submit by: {new Date(application?.submissionDeadline).toLocaleDateString()}
-            </Text>
+        {/* Header */}
+        <LinearGradient colors={['#7C3AED','#5B21B6']} style={S.header}>
+          <TouchableOpacity style={S.hdrBack} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={22} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={S.hdrTitle}>Submit Video</Text>
+          <View style={{ width: 40 }} />
+        </LinearGradient>
+
+        {/* Campaign card */}
+        <View style={S.campaignCard}>
+          {thumb ? (
+            <Image source={{ uri: thumb }} style={S.campThumb} resizeMode="cover" />
+          ) : (
+            <View style={[S.campThumb, { backgroundColor: '#EDE9FE', justifyContent: 'center', alignItems: 'center' }]}>
+              <MaterialCommunityIcons name="briefcase-outline" size={28} color="#C4B5FD" />
+            </View>
+          )}
+          <View style={S.campInfo}>
+            <Text style={S.campTitle} numberOfLines={2}>{app.campaign?.title}</Text>
+            <Text style={S.campMeta}>{app.campaign?.category} · {app.campaign?.preferredLength}</Text>
+            {deadline && (
+              <View style={[S.deadlinePill, deadlinePast && S.deadlinePillRed]}>
+                <Ionicons name="timer-outline" size={12} color={deadlinePast ? '#EF4444' : '#F97316'} />
+                <Text style={[S.deadlineTxt, deadlinePast && { color: '#EF4444' }]}>
+                  {deadline}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
-        {/* Upload Video */}
-        <View style={styles.uploadSection}>
-          <Text style={styles.sectionTitle}>Upload Video</Text>
-          <Text style={styles.sectionHelp}>MP4, MOV or WebM – max 200MB recommended</Text>
-
-          <TouchableOpacity style={styles.uploadButton} onPress={pickVideo}>
-            <Ionicons name="videocam" size={32} color="#6366f1" />
-            <Text style={styles.uploadText}>
-              {videoFile ? 'Change Video' : 'Select Video File'}
+        {/* Payment reminder */}
+        {app.paymentAmount && (
+          <View style={S.paymentBanner}>
+            <Ionicons name="cash-outline" size={18} color="#059669" />
+            <Text style={S.paymentTxt}>
+              {app.paymentCurrency === 'NGN' ? '₦' : '$'}{app.paymentAmount.toLocaleString()} {app.paymentCurrency} will be released once accepted
             </Text>
-          </TouchableOpacity>
+          </View>
+        )}
 
-          {videoFile && (
-            <View style={styles.fileInfo}>
-              <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-              <Text style={styles.fileName} numberOfLines={1}>
-                {videoFile.name}
-              </Text>
-              {videoFile.size && (
-                <Text style={styles.fileSize}>
-                  {Math.round(videoFile.size / (1024 * 1024))} MB
-                </Text>
-              )}
-            </View>
-          )}
+        {/* Upload video */}
+        <View style={S.section}>
+          <Text style={S.sectionTitle}>Video File <Text style={S.req}>*</Text></Text>
+          <Text style={S.sectionSub}>MP4, MOV or WebM · max 200 MB</Text>
+
+          <TouchableOpacity style={[S.uploadBox, videoFile && S.uploadBoxDone]} onPress={pickVideo}>
+            <Ionicons name={videoFile ? 'checkmark-circle' : 'videocam-outline'} size={32} color={videoFile ? '#059669' : '#7C3AED'} />
+            <Text style={[S.uploadTxt, videoFile && { color: '#059669' }]}>
+              {videoFile ? videoFile.name : 'Tap to select video file'}
+            </Text>
+            {videoFile?.size && (
+              <Text style={S.uploadSub}>{(videoFile.size / 1048576).toFixed(1)} MB</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
-        {/* Optional Thumbnail */}
-        {/* <View style={styles.uploadSection}>
-          <Text style={styles.sectionTitle}>Thumbnail (optional)</Text>
-          <Text style={styles.sectionHelp}>Recommended 16:9 ratio</Text>
+        {/* Thumbnail */}
+        <View style={S.section}>
+          <Text style={S.sectionTitle}>Thumbnail <Text style={S.opt}>(optional)</Text></Text>
+          <Text style={S.sectionSub}>16:9 ratio — helps advertisers find your video</Text>
 
-          <TouchableOpacity style={styles.thumbnailButton} onPress={pickThumbnail}>
-            {thumbnailPreview ? (
-              <Image source={{ uri: thumbnailPreview }} style={styles.thumbPreview} />
+          <TouchableOpacity style={S.thumbBox} onPress={pickThumbnail}>
+            {thumbPreview ? (
+              <Image source={{ uri: thumbPreview }} style={S.thumbImg} resizeMode="cover" />
             ) : (
-              <View style={styles.thumbPlaceholder}>
-                <Ionicons name="image-outline" size={32} color="#94a3b8" />
-                <Text style={styles.thumbText}>Tap to select thumbnail</Text>
+              <View style={S.thumbEmpty}>
+                <Ionicons name="image-outline" size={28} color="#C4B5FD" />
+                <Text style={S.thumbEmptyTxt}>Add thumbnail</Text>
+              </View>
+            )}
+            {thumbPreview && (
+              <View style={S.thumbEditBadge}>
+                <Ionicons name="pencil" size={13} color="#FFF" />
               </View>
             )}
           </TouchableOpacity>
-          
-          {thumbnailFile && (
-            <Text style={styles.fileName} numberOfLines={1}>
-              Selected: {thumbnailFile.name}
-            </Text>
-          )}
-        </View> */}
+        </View>
 
         {/* Note */}
-        {/* <View style={styles.noteSection}>
-          <Text style={styles.sectionTitle}>Submission Note (optional)</Text>
+        <View style={S.section}>
+          <Text style={S.sectionTitle}>Note to Advertiser <Text style={S.opt}>(optional)</Text></Text>
+          <Text style={S.sectionSub}>Any context about creative choices or revision info</Text>
           <TextInput
-            style={styles.textArea}
-            placeholder="Any context, revisions needed, or special instructions..."
+            style={S.textarea}
+            placeholder="e.g. I followed the brief closely. Let me know if you'd like any tweaks..."
+            placeholderTextColor="#9CA3AF"
             value={note}
             onChangeText={setNote}
             multiline
-            numberOfLines={5}
+            numberOfLines={4}
             textAlignVertical="top"
           />
-        </View> */}
+        </View>
 
         {/* Submit */}
         <TouchableOpacity
-          style={[styles.submitButton, (uploading || !videoFile) && styles.disabled]}
+          style={[S.submitBtn, (!videoFile || uploading || deadlinePast) && { opacity: 0.5 }]}
           onPress={handleSubmit}
-          disabled={uploading || !videoFile}
+          disabled={!videoFile || uploading || !!deadlinePast}
         >
-          {uploading ? (
-            <View style={styles.gradient}>
-              <ActivityIndicator color="#fff" />
-            </View>
-          ) : (
-            <LinearGradient
-              colors={['#6366f1', '#4f46e5']}
-              style={styles.gradient}
-            >
-              <Text style={styles.submitText}>Submit Video for Review</Text>
-            </LinearGradient>
-          )}
+          <LinearGradient colors={['#7C3AED','#5B21B6']} style={S.submitGrad}>
+            {uploading ? (
+              <><ActivityIndicator color="#FFF" /><Text style={S.submitTxt}>Uploading…</Text></>
+            ) : (
+              <><Ionicons name="cloud-upload-outline" size={20} color="#FFF" /><Text style={S.submitTxt}>Submit Video for Review</Text></>
+            )}
+          </LinearGradient>
         </TouchableOpacity>
 
-        <View style={{ height: 60 }} />
+        {deadlinePast && (
+          <Text style={S.deadlineWarning}>⚠️ Your submission deadline has passed. Contact the advertiser for an extension.</Text>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#f8fafc' },
-  scrollContent: { paddingBottom: 40 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 20,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: '#1e293b' },
-  campaignCard: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    margin: 20,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  campaignThumb: { width: 120, height: 120 },
-  campaignInfo: { flex: 1, padding: 16 },
-  campaignTitle: { fontSize: 18, fontWeight: '600', marginBottom: 4 },
-  campaignMeta: { fontSize: 14, color: '#64748b' },
-  deadline: { fontSize: 13, color: '#ef4444', marginTop: 8, fontWeight: '500' },
-  uploadSection: {
-    backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 8, color: '#1e293b' },
-  sectionHelp: { fontSize: 14, color: '#64748b', marginBottom: 16 },
-  uploadButton: {
-    borderWidth: 2,
-    borderColor: '#6366f1',
-    borderStyle: 'dashed',
-    borderRadius: 12,
-    padding: 24,
-    alignItems: 'center',
-  },
-  uploadText: { marginTop: 12, fontSize: 16, color: '#6366f1', fontWeight: '600' },
-  fileInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    backgroundColor: '#f0fdf4',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#86efac',
-  },
-  fileName: { 
-    flex: 1, 
-    fontSize: 14, 
-    color: '#166534', 
-    marginLeft: 8,
-    marginRight: 8,
-  },
-  fileSize: {
-    fontSize: 12,
-    color: '#166534',
-    fontWeight: '500',
-  },
-  thumbnailButton: {
-    height: 160,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#f1f5f9',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  thumbPreview: { width: '100%', height: '100%' },
-  thumbPlaceholder: { alignItems: 'center' },
-  thumbText: { marginTop: 8, color: '#94a3b8', fontSize: 14 },
-  noteSection: {
-    backgroundColor: '#fff',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  textArea: {
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    minHeight: 120,
-    textAlignVertical: 'top',
-    backgroundColor: '#f8fafc',
-  },
-  submitButton: {
-    marginHorizontal: 20,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  disabled: { opacity: 0.5 },
-  gradient: {
-    paddingVertical: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  submitText: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  errorText: { fontSize: 18, color: '#ef4444', marginBottom: 20 },
-  backBtn: {
-    backgroundColor: '#6366f1',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-  },
-  backBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+const S = StyleSheet.create({
+  safe:    { flex: 1, backgroundColor: '#F5F5F7' },
+  center:  { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  hdrBack: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+  hdrTitle:{ fontSize: 18, fontWeight: '700', color: '#FFF' },
+
+  campaignCard: { flexDirection: 'row', backgroundColor: '#FFF', margin: 16, borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 6, elevation: 2 },
+  campThumb:    { width: 90, height: 90 },
+  campInfo:     { flex: 1, padding: 12, gap: 3 },
+  campTitle:    { fontSize: 14, fontWeight: '700', color: '#111827' },
+  campMeta:     { fontSize: 12, color: '#9CA3AF' },
+  deadlinePill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFF7ED', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start' },
+  deadlinePillRed: { backgroundColor: '#FEF2F2' },
+  deadlineTxt:  { fontSize: 11, fontWeight: '600', color: '#F97316' },
+
+  paymentBanner:{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ECFDF5', marginHorizontal: 16, marginBottom: 8, borderRadius: 12, padding: 12 },
+  paymentTxt:   { flex: 1, fontSize: 13, fontWeight: '600', color: '#065F46' },
+
+  section:      { backgroundColor: '#FFF', marginHorizontal: 16, marginBottom: 12, borderRadius: 16, padding: 16 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#1F2937', marginBottom: 3 },
+  sectionSub:   { fontSize: 12, color: '#9CA3AF', marginBottom: 14 },
+  req:          { color: '#EF4444' },
+  opt:          { fontSize: 12, color: '#9CA3AF', fontWeight: '400' },
+
+  uploadBox:    { borderWidth: 2, borderColor: '#DDD6FE', borderStyle: 'dashed', borderRadius: 14, padding: 24, alignItems: 'center', gap: 8, backgroundColor: '#FAFAFA' },
+  uploadBoxDone:{ borderColor: '#6EE7B7', backgroundColor: '#F0FDF4', borderStyle: 'solid' },
+  uploadTxt:    { fontSize: 14, fontWeight: '600', color: '#7C3AED', textAlign: 'center' },
+  uploadSub:    { fontSize: 12, color: '#9CA3AF' },
+
+  thumbBox:     { height: 140, borderRadius: 14, overflow: 'hidden', backgroundColor: '#F5F3FF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#EDE9FE' },
+  thumbImg:     { width: '100%', height: '100%' },
+  thumbEmpty:   { alignItems: 'center', gap: 8 },
+  thumbEmptyTxt:{ fontSize: 13, color: '#A78BFA' },
+  thumbEditBadge:{ position: 'absolute', bottom: 10, right: 10, width: 30, height: 30, borderRadius: 15, backgroundColor: '#7C3AED', justifyContent: 'center', alignItems: 'center' },
+
+  textarea:     { borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 12, padding: 14, fontSize: 14, color: '#1F2937', minHeight: 100, textAlignVertical: 'top', backgroundColor: '#FAFAFA' },
+
+  submitBtn:    { marginHorizontal: 16, marginTop: 8, borderRadius: 16, overflow: 'hidden' },
+  submitGrad:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 17 },
+  submitTxt:    { fontSize: 17, fontWeight: '700', color: '#FFF' },
+  deadlineWarning: { fontSize: 13, color: '#EF4444', textAlign: 'center', marginTop: 12, paddingHorizontal: 20 },
 });

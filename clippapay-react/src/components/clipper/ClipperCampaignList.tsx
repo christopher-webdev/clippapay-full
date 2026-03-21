@@ -66,7 +66,7 @@ export default function ClipperCampaignList() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
             </span>
-            Coming March 2nd, 2024
+            Coming April 20th, 2026
           </div>
 
           {/* Main headline */}

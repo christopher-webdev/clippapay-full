@@ -285,72 +285,6 @@ router.post(
   }
 );
 
-// ────────────────────────────────────────────────
-//      CLIPPER SUBMITS VIDEO (or resubmits after revision)
-// ────────────────────────────────────────────────
-// POST /api/applications/:id/submit
-// router.post(
-//   '/:id/submit',
-//   requireAuth,
-//   requireClipper,
-//   videoUpload.fields([
-//     { name: 'video', maxCount: 1 },
-//     { name: 'thumbnail', maxCount: 1 },
-//   ]),
-//   async (req, res) => {
-//     try {
-//       const application = await Application.findById(req.params.id)
-//         .populate('campaign');
-
-//       if (!application) return res.status(404).json({ error: 'Not found' });
-
-//       if (application.clipper.toString() !== req.user._id.toString()) {
-//         return res.status(403).json({ error: 'Not your application' });
-//       }
-
-//       if (application.status !== 'accepted') {
-//         return res.status(400).json({ error: 'Can only submit after accepting offer' });
-//       }
-
-//       if (!req.files?.video?.[0]) {
-//         return res.status(400).json({ error: 'Video file is required' });
-//       }
-
-//       const videoPath = `/uploads/videos/${req.files.video[0].filename}`;
-//       let thumbnailPath = null;
-
-//       if (req.files.thumbnail?.[0]) {
-//         thumbnailPath = `/uploads/videos/${req.files.thumbnail[0].filename}`;
-//       }
-
-//       // Optional note
-//       const submissionNote = req.body.note?.trim();
-
-//       await application.submitVideo(videoPath, thumbnailPath);
-
-//       // Notify advertiser
-//       await new Notification({
-//         user: application.campaign.advertiser,
-//         type: 'submission_received',
-//         title: 'Video Submitted',
-//         message: `Clipper submitted video for "${application.campaign.title}"`,
-//         data: {
-//           campaignId: application.campaign._id,
-//           applicationId: application._id,
-//           videoUrl: videoPath,
-//           note: submissionNote,
-//         },
-//         priority: 'high',
-//       }).save();
-
-//       res.json({ success: true, message: 'Video submitted successfully' });
-//     } catch (err) {
-//       console.error(err);
-//       res.status(500).json({ error: 'Failed to submit video' });
-//     }
-//   }
-// );
-// routes/applications.js - Update the submit endpoint
 
 // POST /api/applications/:id/submit
 router.post(
@@ -597,46 +531,6 @@ router.get('/my', requireAuth, requireClipper, async (req, res) => {
   }
 });
 
-// Add this to routes/applications.js
-
-// ────────────────────────────────────────────────
-//      GET SINGLE APPLICATION BY ID
-// ────────────────────────────────────────────────
-// router.get(
-//   '/:id',
-//   requireAuth,
-//   async (req, res) => {
-//     try {
-//       const application = await Application.findById(req.params.id)
-//         .populate({
-//           path: 'campaign',
-//           select: 'title thumbnailUrl category preferredLength applicationDeadline advertiser',
-//           populate: {
-//             path: 'advertiser',
-//             select: 'firstName lastName company profileImage',
-//           },
-//         })
-//         .populate('clipper', 'firstName lastName profileImage');
-
-//       if (!application) {
-//         return res.status(404).json({ error: 'Application not found' });
-//       }
-
-//       // Check if user is either the clipper or the advertiser
-//       const isClipper = application.clipper._id.toString() === req.user._id.toString();
-//       const isAdvertiser = application.campaign?.advertiser?._id?.toString() === req.user._id.toString();
-
-//       if (!isClipper && !isAdvertiser) {
-//         return res.status(403).json({ error: 'Access denied' });
-//       }
-
-//       res.json({ success: true, application });
-//     } catch (err) {
-//       console.error('Error fetching application:', err);
-//       res.status(500).json({ error: 'Failed to load application' });
-//     }
-//   }
-// );
 router.get(
   '/:id',
   requireAuth,
@@ -732,6 +626,88 @@ router.post(
     } catch (err) {
       console.error('Reject error:', err);
       res.status(500).json({ error: err.message || 'Failed to reject offer' });
+    }
+  }
+);
+// ─────────────────────────────────────────────────────────────────────────────
+// ADD THESE TWO ENDPOINTS to routes/applications.js
+// Paste both blocks BEFORE the final `export default router;` line
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────
+//  RAISE DISPUTE — available to both advertiser and clipper
+//  POST /api/applications/:id/dispute
+// ────────────────────────────────────────────────
+router.post(
+  '/:id/dispute',
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { reason } = req.body;
+      if (!reason?.trim()) {
+        return res.status(400).json({ error: 'Please describe the issue.' });
+      }
+
+      const application = await Application.findById(req.params.id)
+        .populate('campaign clipper');
+
+      if (!application) return res.status(404).json({ error: 'Application not found' });
+
+      const isClipper    = application.clipper._id.toString() === req.user._id.toString();
+      const isAdvertiser = application.campaign.advertiser.toString() === req.user._id.toString();
+
+      if (!isClipper && !isAdvertiser) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      if (application.disputeRaised) {
+        return res.status(400).json({ error: 'A dispute has already been raised on this application.' });
+      }
+
+      // Mark as disputed
+      application.disputeRaised = true;
+      application.status = 'disputed';
+      await application.save();
+
+      // Determine who raised and who receives counter-notification
+      const raisedBy = isClipper ? 'creator' : 'advertiser';
+      const otherParty = isClipper ? application.campaign.advertiser : application.clipper._id;
+
+      // Notify the other party
+      await new Notification({
+        user: otherParty,
+        type: 'dispute_raised',
+        title: '⚠️ Dispute Raised',
+        message: `A dispute has been raised on "${application.campaign.title}". Our team will review and contact both parties.`,
+        data: { campaignId: application.campaign._id, applicationId: application._id },
+        priority: 'high',
+      }).save();
+
+      // Notify all admins/adworkers
+      const admins = await User.find({ role: { $in: ['admin', 'adworker'] } }).select('_id').lean();
+      if (admins.length) {
+        await Notification.insertMany(admins.map((a) => ({
+          user: a._id,
+          type: 'dispute_raised',
+          title: '🚨 New Dispute',
+          message: `Dispute raised by ${raisedBy} on "${application.campaign.title}". Reason: ${reason.trim()}`,
+          data: {
+            campaignId: application.campaign._id,
+            applicationId: application._id,
+            raisedBy,
+            reason: reason.trim(),
+          },
+          priority: 'urgent',
+        })));
+      }
+
+      res.json({
+        success: true,
+        message: 'Dispute raised. Our team will review within 24-48 hours and contact both parties.',
+      });
+    } catch (err) {
+      console.error('Dispute error:', err);
+      res.status(500).json({ error: err.message || 'Failed to raise dispute' });
     }
   }
 );

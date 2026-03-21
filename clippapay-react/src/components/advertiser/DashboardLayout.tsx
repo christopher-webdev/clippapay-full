@@ -1,5 +1,5 @@
 // src/components/advertiser/AdvertiserDashboardLayout.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, ReactNode } from 'react';
 import { NavLink, Link, Outlet, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -9,11 +9,11 @@ import {
   HiClipboardList,
   HiEye,
   HiCurrencyDollar,
-  HiOutlineBell,
   HiCog,
   HiOutlineBadgeCheck,
-  HiOutlineCreditCard,
   HiOutlineInformationCircle,
+  HiCollection,
+  HiFilm,
 } from 'react-icons/hi';
 import { getUserFromToken } from '@/utils/getUserFromToken';
 
@@ -24,27 +24,26 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { name: 'Overview', to: '', icon: <HiOutlineChartBar className="w-5 h-5" /> },
-  // { name: 'Subscription Plans', to: 'subscription-plan', icon: <HiOutlineBadgeCheck className="w-5 h-5" /> },
-  { name: 'Campaigns', to: 'campaigns', icon: <HiClipboardList className="w-5 h-5" /> },
-  { name: 'Analytics', to: 'analytics', icon: <HiEye className="w-5 h-5" /> },
-  { name: 'PGC Videos', to: 'pgc-videos', icon: <HiEye className="w-5 h-5" /> },
-  { name: 'Wallet', to: 'wallet', icon: <HiCurrencyDollar className="w-5 h-5" /> },
-  // { name: 'Notifications', to: 'notifications', icon: <HiOutlineBell className="w-5 h-5" /> },
-  { name: 'Settings', to: 'settings', icon: <HiCog className="w-5 h-5" /> },
-  { name: 'How to Use', to: 'how-to', icon: <HiOutlineInformationCircle className="w-5 h-5" /> },
+  { name: 'Overview',            to: '',                  icon: <HiOutlineChartBar className="w-5 h-5" /> },
+  { name: 'My Campaigns',        to: 'my-campaigns',      icon: <HiCollection className="w-5 h-5" /> },
+  // { name: 'UGC Campaigns',       to: 'campaigns',         icon: <HiClipboardList className="w-5 h-5" /> },
+  { name: 'Clipping Campaigns',  to: 'clipping-campaigns',icon: <HiFilm className="w-5 h-5" /> },
+  // { name: 'Analytics',           to: 'analytics',         icon: <HiEye className="w-5 h-5" /> },
+  // { name: 'PGC Videos',          to: 'pgc-videos',        icon: <HiEye className="w-5 h-5" /> },
+  { name: 'Wallet',              to: 'wallet',            icon: <HiCurrencyDollar className="w-5 h-5" /> },
+  { name: 'Settings',            to: 'settings',          icon: <HiCog className="w-5 h-5" /> },
+  { name: 'How to Use',          to: 'how-to',            icon: <HiOutlineInformationCircle className="w-5 h-5" /> },
 ];
 
 export default function AdvertiserDashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
 
-  // Get user
   const user = getUserFromToken();
 
   useEffect(() => {
     if (!user) {
-      navigate('/login'); // Redirect if not logged in
+      navigate('/login');
     }
   }, [user, navigate]);
 
@@ -53,9 +52,8 @@ export default function AdvertiserDashboardLayout() {
     navigate('/login');
   };
 
-
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-gray-50">
       {/* Mobile header */}
       <header className="md:hidden flex items-center justify-between bg-white p-4 shadow w-full fixed top-0 z-50">
         <button onClick={() => setMobileOpen(true)}>
@@ -71,7 +69,7 @@ export default function AdvertiserDashboardLayout() {
             transition={{ duration: 0.5 }}
           />
           <motion.span
-            className="text-2xl font-extrabold text-blue-600 dark:text-blue-400"
+            className="text-2xl font-extrabold text-emerald-600"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
@@ -83,33 +81,35 @@ export default function AdvertiserDashboardLayout() {
 
       {/* Sidebar overlay (mobile) */}
       <div
-        className={`fixed inset-0 z-40 transition-transform duration-300 md:hidden ${mobileOpen ? 'translate-x-0' : '-translate-x-full'
-          }`}
+        className={`fixed inset-0 z-40 transition-transform duration-300 md:hidden ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
       >
         <div
           className="absolute inset-0 bg-black opacity-50"
           onClick={() => setMobileOpen(false)}
         />
-        <nav className="relative z-50 w-64 h-full bg-white shadow-lg p-4">
+        <nav className="relative z-50 w-64 h-full bg-white shadow-lg p-4 overflow-y-auto">
           <button className="mb-6" onClick={() => setMobileOpen(false)}>
             <HiX className="w-6 h-6 text-gray-700" />
           </button>
-          <ul className="space-y-4">
+          <ul className="space-y-1">
             {navItems.map((item) => (
               <li key={item.to}>
                 <NavLink
-                  end
+                  end={item.to === ''}
                   to={item.to}
                   className={({ isActive }) =>
-                    `flex items-center space-x-2 px-3 py-2 rounded-lg transition ${isActive
-                      ? 'bg-indigo-500 text-white'
-                      : 'text-gray-700 hover:bg-gray-100'
+                    `flex items-center space-x-2 px-3 py-2 rounded-lg transition ${
+                      isActive
+                        ? 'bg-emerald-500 text-white'
+                        : 'text-gray-700 hover:bg-gray-100'
                     }`
                   }
                   onClick={() => setMobileOpen(false)}
                 >
                   {item.icon}
-                  <span>{item.name}</span>
+                  <span className="text-sm font-medium">{item.name}</span>
                 </NavLink>
               </li>
             ))}
@@ -119,25 +119,29 @@ export default function AdvertiserDashboardLayout() {
 
       {/* Desktop sidebar */}
       <aside className="hidden md:flex md:flex-shrink-0">
-        <div className="flex flex-col w-64 bg-white border-r">
-          <div className="h-16 flex items-center justify-center border-b">
-            <h1 className="text-xl font-bold">ClippaPay - Advertiser</h1>
+        <div className="flex flex-col w-64 bg-white border-r border-gray-200">
+          <div className="h-16 flex items-center justify-center border-b border-gray-200">
+            <div className="flex items-center gap-2">
+              <img src="/ClippaPaye.svg" alt="ClippaPay Logo" className="h-8 w-auto" />
+              <h1 className="text-lg font-bold text-gray-800">ClippaPay</h1>
+            </div>
           </div>
-          <nav className="flex-1 overflow-y-auto p-6 space-y-4">
+          <nav className="flex-1 overflow-y-auto p-4 space-y-1">
             {navItems.map((item) => (
               <NavLink
                 key={item.to}
-                end
+                end={item.to === ''}
                 to={item.to}
                 className={({ isActive }) =>
-                  `flex items-center space-x-2 px-4 py-2 rounded-lg transition ${isActive
-                    ? 'bg-indigo-500 text-white'
-                    : 'text-gray-700 hover:bg-gray-100'
+                  `flex items-center space-x-3 px-4 py-2.5 rounded-lg transition ${
+                    isActive
+                      ? 'bg-emerald-500 text-white shadow-sm'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`
                 }
               >
                 {item.icon}
-                <span>{item.name}</span>
+                <span className="text-sm font-medium">{item.name}</span>
               </NavLink>
             ))}
           </nav>
@@ -145,25 +149,31 @@ export default function AdvertiserDashboardLayout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 bg-gray-0 overflow-y-auto p-6 pt-20 md:pt-6">
-        <div className="flex justify-between items-center mb-6">
-          <div className="mb-6">
-            <h2 className="text-2xl font-bold flex items-center gap-2">
-              💼 Welcome, <span className="text-cp-blue">{user?.company || user?.name || 'Advertiser'}</span>
-            </h2>
-            <div className="text-sm text-gray-500 mt-1">
-              Ready to launch your next viral campaign?
+      <main className="flex-1 overflow-y-auto bg-gray-50">
+        <div className="p-6">
+          {/* Header */}
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                Welcome,{' '}
+                <span className="text-emerald-600">
+                  {user?.company || user?.name || 'Advertiser'}
+                </span>
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Ready to launch your next viral campaign?
+              </p>
             </div>
+            <button
+              onClick={handleLogout}
+              className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              Logout
+            </button>
           </div>
 
-          <button
-            onClick={handleLogout}
-            className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm"
-          >
-            Logout
-          </button>
+          <Outlet />
         </div>
-        <Outlet />
       </main>
     </div>
   );

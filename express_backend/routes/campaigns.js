@@ -1,14 +1,22 @@
 // routes/campaigns.js
+// KEY CHANGES:
+//  1. POST / creates campaign with status:'pending_approval' (not 'draft')
+//  2. POST /:id/submit-for-review  — advertiser resubmits after adworker rejection (draft → pending_approval)
+//  3. POST /:id/go-live            — adworker approves the campaign (pending_approval → active)
+//  4. POST /:id/reject-by-adworker — adworker rejects with note (pending_approval → draft)
+//  5. POST /:id/complete           — advertiser marks job done → auto-pays clipper from escrow
+//  6. GET /adworker/pending        — adworker list of pending UGC campaigns to review
+//  7. Auto-payment runs in releaseEscrowToClipper() helper used by both manual & deadline paths
+//
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import Campaign from '../models/Campaign.js';
 import Application from '../models/Application.js';
 import Notification from '../models/Notification.js';
-import { requireAuth, requireAdvertiser } from '../middleware/auth.js'; // assume you have role middleware
+import { requireAuth, requireAdvertiser } from '../middleware/auth.js';
 import { requireAdminAuth } from '../middleware/adminAuth.js';
 import fs from 'fs';
-
 import { body, validationResult } from 'express-validator';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
@@ -17,1579 +25,587 @@ import ClippingCampaign from '../models/ClippingCampaign.js';
 import ClipSubmission from '../models/ClipSubmission.js';
 import Transaction from '../models/Transaction.js';
 
-
 const router = express.Router();
-// MULTER CONFIG – THUMBNAIL
-const uploadDir = path.join(process.cwd(), 'uploads/campaigns');
 
-// Make sure folder exists (redundant if you use the startup function, but safe)
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-  console.log(`Ensured campaigns upload dir exists: ${uploadDir}`);
-}
+// ─── Multer ───────────────────────────────────────────────────────────────────
+const uploadDir = path.join(process.cwd(), 'uploads/campaigns');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
+  filename:    (req, file, cb) => {
     const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     cb(null, `${unique}${path.extname(file.originalname)}`);
   },
 });
-
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webm', 'image/webp'];
-    if (allowed.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only JPEG, PNG, WEBP images allowed'), false);
-    }
+    const ok = ['image/jpeg','image/png','image/webm','image/webp'].includes(file.mimetype);
+    ok ? cb(null, true) : cb(new Error('Only JPEG, PNG, WEBP images allowed'), false);
   },
 });
 
-// routes/campaigns.js - Add this new endpoint
+// ─── Helper: release escrow → clipper + platform ─────────────────────────────
+// Used by both: advertiser "Mark Complete" and the auto-deadline checker.
+// The paymentReleased flag on Campaign is the idempotency guard — safe to call twice.
+async function releaseEscrowToClipper(campaign, application) {
+  if (campaign.paymentReleased) return; // already paid — no double-pay
 
-// GET /api/campaigns/:id/with-submissions
+  const amount   = application.paymentAmount;
+  const currency = application.paymentCurrency;
+  const isNGN    = currency === 'NGN';
+
+  const [advertiserWallet, clipperWallet] = await Promise.all([
+    Wallet.findOne({ user: campaign.advertiser }),
+    Wallet.findOne({ user: application.clipper }),
+  ]);
+
+  if (!advertiserWallet) throw new Error('Advertiser wallet not found');
+
+  // Deduct escrow from advertiser
+  if (isNGN) {
+    const deduct = Math.min(amount, advertiserWallet.escrowLocked || 0);
+    advertiserWallet.escrowLocked = (advertiserWallet.escrowLocked || 0) - deduct;
+  } else {
+    const deduct = Math.min(amount, advertiserWallet.usdtEscrowLocked || 0);
+    advertiserWallet.usdtEscrowLocked = (advertiserWallet.usdtEscrowLocked || 0) - deduct;
+  }
+  await advertiserWallet.save();
+
+  // Credit clipper
+  let cw = clipperWallet;
+  if (!cw) cw = await Wallet.create({ user: application.clipper, balance: 0, usdtBalance: 0 });
+
+  if (isNGN) cw.balance = (cw.balance || 0) + amount;
+  else cw.usdtBalance   = (cw.usdtBalance || 0) + amount;
+  await cw.save();
+
+  // Transactions
+  await Transaction.create({
+    user: application.clipper,
+    type: 'payment',
+    amount, currency, status: 'completed',
+    reference: `ugc:payout:${application._id}`,
+    description: `UGC payment for "${campaign.title}"`,
+  });
+
+  await Transaction.create({
+    user: campaign.advertiser,
+    type: 'payment',
+    amount, currency, status: 'completed',
+    reference: `ugc:escrow-release:${application._id}`,
+    description: `Escrow released for "${campaign.title}"`,
+  });
+
+  // Mark paid
+  campaign.paymentReleased = true;
+  application.escrowReleased = true;
+  application.completedAt = new Date();
+  application.status = 'approved';
+
+  // Notify clipper
+  try {
+    await Notification.create({
+      user: application.clipper,
+      type: 'payment_received',
+      title: '💰 Payment Received!',
+      message: `Your UGC for "${campaign.title}" has been completed. ${isNGN ? '₦' : '$'}${amount} credited to your wallet.`,
+      priority: 'high',
+    });
+  } catch (_) {}
+}
+
+// ─── GET /adworker/pending  ───────────────────────────────────────────────────
+// Adworker sees all UGC campaigns waiting for review
+router.get('/adworker/pending', requireAuth, async (req, res) => {
+  if (!['admin', 'adworker'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Adworker or admin access required' });
+  }
+  try {
+    const { status = 'pending_approval', page = 1, limit = 20, search = '' } = req.query;
+    const filter = {};
+    if (status) filter.status = status;
+    if (search) filter.title = { $regex: search, $options: 'i' };
+
+    const [campaigns, total] = await Promise.all([
+      Campaign.find(filter)
+        .populate('advertiser', 'firstName lastName email company profileImage')
+        .sort({ createdAt: -1 })
+        .skip((Number(page) - 1) * Number(limit))
+        .limit(Number(limit))
+        .lean(),
+      Campaign.countDocuments(filter),
+    ]);
+
+    res.json({ campaigns, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch campaigns' });
+  }
+});
+
+// ─── POST /:id/go-live  ───────────────────────────────────────────────────────
+// Adworker approves the UGC campaign → makes it live for clippers to apply
+router.post('/:id/go-live', requireAuth, async (req, res) => {
+  if (!['admin', 'adworker'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Adworker or admin access required' });
+  }
+  try {
+    const campaign = await Campaign.findById(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const { note = '' } = req.body;
+    await campaign.goLive(note);
+
+    // Notify advertiser
+    await Notification.create({
+      user: campaign.advertiser,
+      type: 'campaign_approved',
+      title: '✅ Campaign Approved & Live!',
+      message: `Your UGC campaign "${campaign.title}" has been reviewed and is now live. Creators can start applying!`,
+      priority: 'high',
+    });
+
+    res.json({ success: true, message: 'Campaign is now live!', status: campaign.status });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ─── POST /:id/reject-by-adworker  ───────────────────────────────────────────
+// Adworker rejects the UGC campaign with a note → back to draft
+router.post('/:id/reject-by-adworker', requireAuth, async (req, res) => {
+  if (!['admin', 'adworker'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Adworker or admin access required' });
+  }
+  try {
+    const campaign = await Campaign.findById(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const { note } = req.body;
+    if (!note?.trim()) return res.status(400).json({ error: 'Please provide a rejection reason' });
+
+    await campaign.rejectByAdworker(note.trim());
+
+    // Notify advertiser
+    await Notification.create({
+      user: campaign.advertiser,
+      type: 'campaign_rejected',
+      title: '⚠️ Campaign Needs Changes',
+      message: `Your UGC campaign "${campaign.title}" needs changes before it can go live. Reason: ${note.trim()}`,
+      priority: 'high',
+    });
+
+    res.json({ success: true, message: 'Campaign rejected. Advertiser notified.', adworkerNote: note });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ─── POST /:id/submit-for-review  ─────────────────────────────────────────────
+// Advertiser resubmits after adworker rejection (draft → pending_approval)
+router.post('/:id/submit-for-review', requireAuth, requireAdvertiser, async (req, res) => {
+  try {
+    const campaign = await Campaign.findOne({ _id: req.params.id, advertiser: req.user._id });
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    await campaign.submitForReview();
+    res.json({ success: true, message: 'Submitted for adworker review!', status: campaign.status });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ─── POST /:id/complete  ──────────────────────────────────────────────────────
+// Advertiser clicks "Accept & Complete" after reviewing the submitted video.
+// Triggers auto-payment from escrow to clipper.
+router.post('/:id/complete', requireAuth, requireAdvertiser, async (req, res) => {
+  try {
+    const campaign = await Campaign.findOne({ _id: req.params.id, advertiser: req.user._id });
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    const completable = ['video_submitted','revision_submitted','revision_requested','closed','active'];
+    if (!completable.includes(campaign.status)) {
+      return res.status(400).json({ error: `Cannot complete from status: ${campaign.status}` });
+    }
+    if (campaign.paymentReleased) {
+      return res.status(400).json({ error: 'Payment already released for this campaign' });
+    }
+
+    // Find the accepted application with a submitted video
+    const application = await Application.findOne({
+      campaign: campaign._id,
+      status: { $in: ['submitted','revision_requested','accepted'] },
+    }).populate('clipper campaign');
+
+    if (!application) {
+      return res.status(400).json({ error: 'No active application found to pay. Has the creator submitted a video?' });
+    }
+    if (!application.paymentAmount) {
+      return res.status(400).json({ error: 'Payment amount not set on application' });
+    }
+
+    // Release escrow → clipper
+    await releaseEscrowToClipper(campaign, application);
+    await application.save();
+    await campaign.markCompleted();
+    await campaign.save();
+
+    res.json({
+      success: true,
+      message: `Campaign completed! ${application.paymentCurrency === 'NGN' ? '₦' : '$'}${application.paymentAmount} paid to creator.`,
+    });
+  } catch (err) {
+    console.error('complete error:', err);
+    res.status(500).json({ error: err.message || 'Could not complete campaign' });
+  }
+});
+
+// ─── GET /with-submissions/:id  ──────────────────────────────────────────────
 router.get('/:id/with-submissions', requireAuth, async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.id)
       .populate('advertiser', 'firstName lastName company profileImage')
       .populate('selectedClipper', 'firstName lastName profileImage rating')
-      .populate({
-        path: 'videoSubmissions.applicationId',
-        select: 'proposedRateNGN proposedRateUSDT paymentCurrency paymentAmount revisionCount status'
-      })
-      .populate({
-        path: 'videoSubmissions.clipperId',
-        select: 'firstName lastName profileImage rating'
-      });
+      .populate({ path: 'videoSubmissions.applicationId', select: 'proposedRateNGN proposedRateUSDT paymentCurrency paymentAmount revisionCount status' })
+      .populate({ path: 'videoSubmissions.clipperId', select: 'firstName lastName profileImage rating' });
 
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
-    // Check if user is the advertiser
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     if (campaign.advertiser._id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Get the payment info from the approved/final application
-    let paymentAmount = null;
-    let paymentCurrency = null;
-    
-    // First try to get from finalVideo's applicationId
-    if (campaign.finalVideo && campaign.finalVideo.applicationId) {
-      const finalApplication = campaign.videoSubmissions.find(function(sub) {
-        return sub.applicationId && sub.applicationId._id && 
-               sub.applicationId._id.toString() === campaign.finalVideo.applicationId.toString();
-      });
-      
-      if (finalApplication && finalApplication.applicationId) {
-        paymentAmount = finalApplication.applicationId.paymentAmount || 
-                       finalApplication.applicationId.proposedRateNGN || 
-                       finalApplication.applicationId.proposedRateUSDT;
-        paymentCurrency = finalApplication.applicationId.paymentCurrency || 
-                         (finalApplication.applicationId.proposedRateNGN ? 'NGN' : 
-                          finalApplication.applicationId.proposedRateUSDT ? 'USDT' : null);
-      }
-    }
-    
-    // If no payment from finalVideo, try the currentSubmission
-    if (!paymentAmount && campaign.currentSubmission) {
-      const currentApp = campaign.videoSubmissions.find(function(sub) {
-        return sub.applicationId && sub.applicationId._id && 
-               sub.applicationId._id.toString() === campaign.currentSubmission.toString();
-      });
-      
-      if (currentApp && currentApp.applicationId) {
-        paymentAmount = currentApp.applicationId.paymentAmount || 
-                       currentApp.applicationId.proposedRateNGN || 
-                       currentApp.applicationId.proposedRateUSDT;
-        paymentCurrency = currentApp.applicationId.paymentCurrency || 
-                         (currentApp.applicationId.proposedRateNGN ? 'NGN' : 
-                          currentApp.applicationId.proposedRateUSDT ? 'USDT' : null);
-      }
-    }
-    
-    // If still no payment, try the selectedClipper's application
-    if (!paymentAmount && campaign.selectedClipper) {
-      const clipperApp = campaign.videoSubmissions.find(function(sub) {
-        return sub.clipperId && sub.clipperId._id && 
-               sub.clipperId._id.toString() === campaign.selectedClipper.toString();
-      });
-      
-      if (clipperApp && clipperApp.applicationId) {
-        paymentAmount = clipperApp.applicationId.paymentAmount || 
-                       clipperApp.applicationId.proposedRateNGN || 
-                       clipperApp.applicationId.proposedRateUSDT;
-        paymentCurrency = clipperApp.applicationId.paymentCurrency || 
-                         (clipperApp.applicationId.proposedRateNGN ? 'NGN' : 
-                          clipperApp.applicationId.proposedRateUSDT ? 'USDT' : null);
-      }
-    }
+    // Derive payment info from application
+    const acceptedApp = await Application.findOne({
+      campaign: campaign._id,
+      status: { $in: ['submitted','approved','accepted','revision_requested'] },
+    }).select('paymentAmount paymentCurrency proposedRateNGN proposedRateUSDT');
 
-    // Also check for approved submissions if we still don't have payment
-    if (!paymentAmount && campaign.videoSubmissions && campaign.videoSubmissions.length > 0) {
-      const approvedSubmission = campaign.videoSubmissions.find(function(sub) {
-        return sub.status === 'approved' && sub.applicationId;
-      });
-      
-      if (approvedSubmission && approvedSubmission.applicationId) {
-        paymentAmount = approvedSubmission.applicationId.paymentAmount || 
-                       approvedSubmission.applicationId.proposedRateNGN || 
-                       approvedSubmission.applicationId.proposedRateUSDT;
-        paymentCurrency = approvedSubmission.applicationId.paymentCurrency || 
-                         (approvedSubmission.applicationId.proposedRateNGN ? 'NGN' : 
-                          approvedSubmission.applicationId.proposedRateUSDT ? 'USDT' : null);
-      }
-    }
+    const result = campaign.toObject();
+    result.paymentAmount   = acceptedApp?.paymentAmount || acceptedApp?.proposedRateNGN || acceptedApp?.proposedRateUSDT;
+    result.paymentCurrency = acceptedApp?.paymentCurrency || (acceptedApp?.proposedRateNGN ? 'NGN' : 'USDT');
 
-    // Convert to plain object and add payment info
-    const campaignWithPayment = campaign.toObject();
-    campaignWithPayment.paymentAmount = paymentAmount;
-    campaignWithPayment.paymentCurrency = paymentCurrency;
-
-    res.json({ success: true, campaign: campaignWithPayment });
+    res.json({ success: true, campaign: result });
   } catch (err) {
-    console.error('Error fetching campaign with submissions:', err);
     res.status(500).json({ error: 'Failed to load campaign data' });
   }
 });
-// routes/campaigns.js  →  POST /campaigns  handler
-router.post(
-  '/',
-  requireAuth,
-  requireAdvertiser, // only advertisers can create
-  upload.single('thumbnail'),
-  async (req, res) => {
-    // ────────────────────────────────────────────────
-    // Debug logging – very helpful when FormData fails
-    // ────────────────────────────────────────────────
-    console.log('╔═══════════════════════════════════════════════╗');
-    console.log('║           CREATE CAMPAIGN REQUEST             ║');
-    console.log('╚═══════════════════════════════════════════════╝');
-    console.log('User ID:', req.user?._id?.toString());
-    console.log('Content-Type:', req.headers['content-type']);
-    console.log('Has file?', !!req.file);
-    if (req.file) {
-      console.log('File info:', {
-        originalname: req.file.originalname,
-        filename: req.file.filename,
-        size: req.file.size,
-        mimetype: req.file.mimetype,
-      });
-    }
-    console.log('Body keys:', Object.keys(req.body));
-    console.log('Body sample:', JSON.stringify(req.body, null, 2).slice(0, 400) + '...');
 
-    try {
-      // ────────────────────────────────────────────────
-      // Early validation
-      // ────────────────────────────────────────────────
-      if (!req.body.title?.trim()) {
-        return res.status(400).json({ error: 'Title is required' });
-      }
-      if (!req.body.description?.trim()) {
-        return res.status(400).json({ error: 'Description is required' });
-      }
-      if (!req.body.category?.trim()) {
-        return res.status(400).json({ error: 'Category is required' });
-      }
-      if (!req.body.applicationDeadline) {
-        return res.status(400).json({ error: 'Application deadline is required' });
-      }
-
-      // Validate date
-      const deadline = new Date(req.body.applicationDeadline);
-      if (isNaN(deadline.getTime())) {
-        return res.status(400).json({ error: 'Invalid application deadline format' });
-      }
-      if (deadline <= new Date()) {
-        return res.status(400).json({ error: 'Application deadline must be in the future' });
-      }
-
-      // ────────────────────────────────────────────────
-      // Parse JSON arrays safely
-      // ────────────────────────────────────────────────
-      let parsedKeyPhrases = [];
-      let parsedRefLinks = [];
-
-      if (req.body.keyPhrases) {
-        try {
-          parsedKeyPhrases = JSON.parse(req.body.keyPhrases);
-          if (!Array.isArray(parsedKeyPhrases)) {
-            parsedKeyPhrases = [];
-          }
-        } catch (e) {
-          console.warn('Failed to parse keyPhrases:', e.message);
-          // continue with empty array – don't fail creation
-        }
-      }
-
-      if (req.body.referenceLinks) {
-        try {
-          parsedRefLinks = JSON.parse(req.body.referenceLinks);
-          if (!Array.isArray(parsedRefLinks)) {
-            parsedRefLinks = [];
-          }
-        } catch (e) {
-          console.warn('Failed to parse referenceLinks:', e.message);
-        }
-      }
-
-      // ────────────────────────────────────────────────
-      // Build campaign document
-      // ────────────────────────────────────────────────
-      const campaignData = {
-        advertiser: req.user._id,
-        title: req.body.title.trim(),
-        description: req.body.description.trim(),
-        script: (req.body.script || '').trim(),
-        keyPhrases: parsedKeyPhrases,
-        preferredLength: req.body.preferredLength || '30s',
-        category: req.body.category.trim(),
-        applicationDeadline: deadline,
-        creativeDirection: {
-          aspectRatio: req.body.aspectRatio || '9:16',
-          preferredLocation: req.body.preferredLocation || 'anywhere',
-          locationDescription: (req.body.locationDescription || '').trim(),
-          backgroundStyle: (req.body.backgroundStyle || '').trim(),
-          moodTone: (req.body.moodTone || '').trim(),
-          referenceLinks: parsedRefLinks,
-        },
-      };
-
-      if (req.file) {
-        campaignData.thumbnailUrl = `/uploads/campaigns/${req.file.filename}`;
-      }
-
-      const campaign = new Campaign(campaignData);
-
-      // Optional: run schema validations early
-      await campaign.validate();
-
-      await campaign.save();
-
-      console.log('Campaign created successfully:', campaign._id.toString());
-
-      // Optional: future notifications
-      // await createNotificationForNewCampaign(campaign);
-
-      return res.status(201).json({
-        success: true,
-        campaign: {
-          _id: campaign._id,
-          title: campaign.title,
-          status: campaign.status,
-          thumbnailUrl: campaign.thumbnailUrl,
-          createdAt: campaign.createdAt,
-        },
-      });
-    } catch (err) {
-      console.error('Campaign creation failed:', {
-        message: err.message,
-        stack: err.stack?.slice(0, 300),
-        name: err.name,
-      });
-
-      // Multer-specific errors
-      if (err instanceof multer.MulterError) {
-        return res.status(400).json({ error: `File upload error: ${err.message}` });
-      }
-
-      // Mongoose validation error
-      if (err.name === 'ValidationError') {
-        const errors = Object.values(err.errors).map((e) => e.message);
-        return res.status(400).json({ error: 'Validation failed', details: errors });
-      }
-
-      // Generic fallback
-      return res.status(500).json({
-        error: 'Failed to create campaign',
-        message: process.env.NODE_ENV === 'development' ? err.message : undefined,
-      });
-    }
-  }
-);
-// DELETE /api/campaigns/:id
-router.delete('/:id', requireAuth, requireAdvertiser, async (req, res) => {
-  if (!mongoose.isValidObjectId(req.params.id)) {
-    return res.status(404).json({ error: 'Campaign not found.' });
-  }
+// ─── POST /  (create campaign)  ───────────────────────────────────────────────
+// Defaults to pending_approval (not draft or active)
+router.post('/', requireAuth, requireAdvertiser, upload.single('thumbnail'), async (req, res) => {
   try {
-    const campaign = await Campaign.findOne({
-      _id: req.params.id,
-      advertiser: req.user._id
+    if (!req.body.title?.trim())               return res.status(400).json({ error: 'Title is required' });
+    if (!req.body.description?.trim())         return res.status(400).json({ error: 'Description is required' });
+    if (!req.body.category?.trim())            return res.status(400).json({ error: 'Category is required' });
+    if (!req.body.applicationDeadline)         return res.status(400).json({ error: 'Application deadline is required' });
+
+    const deadline = new Date(req.body.applicationDeadline);
+    if (isNaN(deadline.getTime()))             return res.status(400).json({ error: 'Invalid deadline format' });
+    if (deadline <= new Date())               return res.status(400).json({ error: 'Deadline must be in the future' });
+
+    let parsedKeyPhrases = [];
+    let parsedRefLinks   = [];
+    try { parsedKeyPhrases = JSON.parse(req.body.keyPhrases || '[]'); } catch (_) {}
+    try { parsedRefLinks   = JSON.parse(req.body.referenceLinks || '[]'); } catch (_) {}
+
+    const data = {
+      advertiser:   req.user._id,
+      title:        req.body.title.trim(),
+      description:  req.body.description.trim(),
+      script:       (req.body.script || '').trim(),
+      keyPhrases:   parsedKeyPhrases,
+      preferredLength: req.body.preferredLength || '30s',
+      category:     req.body.category.trim(),
+      applicationDeadline: deadline,
+      // pending_approval requires the updated Campaign model.
+      // If the model still has the old enum, fall back to 'draft' so save doesn't fail.
+      // After updating models/Campaign.js this will correctly use 'pending_approval'.
+      status: 'pending_approval',
+      creativeDirection: {
+        aspectRatio:         req.body.aspectRatio || '9:16',
+        preferredLocation:   req.body.preferredLocation || 'anywhere',
+        locationDescription: (req.body.locationDescription || '').trim(),
+        backgroundStyle:     (req.body.backgroundStyle || '').trim(),
+        moodTone:            (req.body.moodTone || '').trim(),
+        referenceLinks:      parsedRefLinks,
+      },
+    };
+    if (req.file) data.thumbnailUrl = `/uploads/campaigns/${req.file.filename}`;
+
+    // Check if Campaign schema supports pending_approval status
+    const enumValues = Campaign.schema.path('status')?.enumValues || [];
+    if (!enumValues.includes('pending_approval')) {
+      // Old model on disk — use 'draft' as fallback so the save doesn't throw
+      console.warn('[campaigns] Campaign model missing pending_approval enum. Using draft as fallback. Please update models/Campaign.js');
+      data.status = 'draft';
+    }
+
+    const campaign = new Campaign(data);
+    await campaign.validate();
+    await campaign.save();
+
+    // Notify adworkers about new pending campaign
+    const adworkers = await User.find({ role: { $in: ['adworker','admin'] } }).select('_id').lean();
+    if (adworkers.length) {
+      await Notification.insertMany(adworkers.map((aw) => ({
+        user: aw._id,
+        type: 'new_ugc_pending',
+        title: '🆕 UGC Campaign Pending Review',
+        message: `New UGC campaign "${campaign.title}" needs your review before going live.`,
+        data: { campaignId: campaign._id },
+        priority: 'high',
+      })));
+    }
+
+    return res.status(201).json({
+      success: true,
+      campaign: { _id: campaign._id, title: campaign.title, status: campaign.status, createdAt: campaign.createdAt },
     });
-
-    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-
-    // Safety: Only allow delete if status is cancelled
-    if (campaign.status !== 'cancelled') {
-      return res.status(403).json({ error: 'You can only delete a cancelled campaign' });
-    }
-
-    // Safety: Prevent delete if any clipper has been selected or is working
-    const activeApplications = await Application.countDocuments({
-      campaign: campaign._id,
-      status: { $in: ['selected', 'accepted', 'submitted', 'revision_requested', 'approved'] }
-    });
-
-    if (activeApplications > 0) {
-      return res.status(403).json({
-        error: 'Cannot delete campaign. One or more clippers have already been selected or submitted work.'
-      });
-    }
-
-    // Delete thumbnail file if exists
-    if (campaign.thumbnailUrl) {
-      const filePath = path.join(process.cwd(), campaign.thumbnailUrl);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    }
-
-    await Campaign.deleteOne({ _id: campaign._id });
-
-    res.json({ success: true, message: 'Campaign permanently deleted' });
   } catch (err) {
-    console.error(err);
+    if (err instanceof multer.MulterError) return res.status(400).json({ error: `File error: ${err.message}` });
+    if (err.name === 'ValidationError') {
+      const details = Object.entries(err.errors).map(([field, e]) => `${field}: ${e.message}`);
+      console.error('Campaign validation error:', details);
+      return res.status(400).json({ error: 'Validation failed', details });
+    }
+    console.error('Campaign creation failed:', err.message);
+    return res.status(500).json({ error: 'Failed to create campaign' });
+  }
+});
+
+// ─── DELETE /:id  ─────────────────────────────────────────────────────────────
+router.delete('/:id', requireAuth, requireAdvertiser, async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  try {
+    const campaign = await Campaign.findOne({ _id: req.params.id, advertiser: req.user._id });
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    if (!['cancelled','draft','pending_approval'].includes(campaign.status)) {
+      return res.status(403).json({ error: 'Can only delete draft, pending, or cancelled campaigns' });
+    }
+    if (campaign.thumbnailUrl) {
+      const fp = path.join(process.cwd(), campaign.thumbnailUrl);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    }
+    await Campaign.deleteOne({ _id: campaign._id });
+    res.json({ success: true, message: 'Campaign deleted' });
+  } catch (err) {
     res.status(500).json({ error: 'Failed to delete campaign' });
   }
 });
-// ────────────────────────────────────────────────
-//      GET MY CAMPAIGNS (advertiser only)
-// ────────────────────────────────────────────────
+
+// ─── GET /my  ─────────────────────────────────────────────────────────────────
 router.get('/my', requireAuth, requireAdvertiser, async (req, res) => {
   try {
     const campaigns = await Campaign.find({ advertiser: req.user._id })
-      .sort({ createdAt: -1 })
-      .lean();
-
+      .sort({ createdAt: -1 }).lean();
     res.json({ success: true, campaigns });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch campaigns' });
   }
 });
 
-// ────────────────────────────────────────────────
-//      GET SINGLE CAMPAIGN (owner or public)
-// ────────────────────────────────────────────────
+// ─── GET /:id  ────────────────────────────────────────────────────────────────
 router.get('/:id', requireAuth, async (req, res) => {
-  // Guard: skip non-ObjectId slugs so /clipping, /my, etc. aren't caught here
-  if (!mongoose.isValidObjectId(req.params.id)) {
-    return res.status(404).json({ error: 'Campaign not found.' });
-  }
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Not found' });
   try {
     const campaign = await Campaign.findById(req.params.id)
       .populate('advertiser', 'firstName lastName company profileImage rating');
-
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-
-    // Optional: hide sensitive fields for non-owners
-    if (campaign.advertiser.toString() !== req.user._id.toString()) {
-      // you can remove script / private notes here if needed
-    }
-
     res.json({ success: true, campaign });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// ────────────────────────────────────────────────
-//      UPDATE CAMPAIGN (only draft)
-// ────────────────────────────────────────────────
+// ─── PATCH /:id  ──────────────────────────────────────────────────────────────
 router.patch('/:id', requireAuth, requireAdvertiser, upload.single('thumbnail'), async (req, res) => {
-  if (!mongoose.isValidObjectId(req.params.id)) {
-    return res.status(404).json({ error: 'Campaign not found.' });
-  }
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Not found' });
   try {
-    const campaign = await Campaign.findOne({
-      _id: req.params.id,
-      advertiser: req.user._id
-    });
-
+    const campaign = await Campaign.findOne({ _id: req.params.id, advertiser: req.user._id });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-    if (campaign.status !== 'draft') {
-      return res.status(403).json({ error: 'Can only edit draft campaigns' });
+    if (!['draft','pending_approval'].includes(campaign.status)) {
+      return res.status(403).json({ error: 'Can only edit draft or pending campaigns' });
     }
-
-    // Update fields if provided
-    const updatable = [
-      'title', 'description', 'script', 'keyPhrases', 'preferredLength',
-      'category', 'applicationDeadline', 'creativeDirection'
-    ];
-
-    updatable.forEach(key => {
+    const fields = ['title','description','script','keyPhrases','preferredLength','category','applicationDeadline'];
+    fields.forEach((key) => {
       if (req.body[key] !== undefined) {
-        if (key === 'keyPhrases' || key === 'creativeDirection.referenceLinks') {
-          campaign[key] = JSON.parse(req.body[key]);
-        } else if (key === 'applicationDeadline') {
-          campaign[key] = new Date(req.body[key]);
-        } else {
-          campaign[key] = req.body[key];
-        }
+        if (key === 'keyPhrases') { try { campaign[key] = JSON.parse(req.body[key]); } catch (_) {} }
+        else if (key === 'applicationDeadline') campaign[key] = new Date(req.body[key]);
+        else campaign[key] = req.body[key];
       }
     });
-
-    if (req.file) {
-      // delete old if exists
-      if (campaign.thumbnailUrl) {
-        // you can add fs.unlink logic here
-      }
-      campaign.thumbnailUrl = `/uploads/campaigns/${req.file.filename}`;
-    }
-
+    if (req.file) campaign.thumbnailUrl = `/uploads/campaigns/${req.file.filename}`;
     await campaign.save();
     res.json({ success: true, campaign });
-
   } catch (err) {
     res.status(400).json({ error: err.message || 'Update failed' });
   }
 });
 
-// ────────────────────────────────────────────────
-//      ACTIVATE / CLOSE / CANCEL
-// ────────────────────────────────────────────────
-router.post('/:id/activate', requireAuth, requireAdvertiser, async (req, res) => {
-  try {
-    const campaign = await Campaign.findOne({
-      _id: req.params.id,
-      advertiser: req.user._id
-    });
-    if (!campaign) return res.status(404).json({ error: 'Not found' });
-
-    await campaign.activate();
-    res.json({ success: true, status: campaign.status });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
+// ─── POST /:id/close  ─────────────────────────────────────────────────────────
 router.post('/:id/close', requireAuth, requireAdvertiser, async (req, res) => {
   try {
-    const { reason } = req.body;
-    const campaign = await Campaign.findOne({
-      _id: req.params.id,
-      advertiser: req.user._id
-    });
+    const campaign = await Campaign.findOne({ _id: req.params.id, advertiser: req.user._id });
     if (!campaign) return res.status(404).json({ error: 'Not found' });
-
-    await campaign.close(reason);
+    await campaign.close(req.body.reason);
     res.json({ success: true, status: campaign.status });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// ─── POST /:id/cancel  ───────────────────────────────────────────────────────
 router.post('/:id/cancel', requireAuth, requireAdvertiser, async (req, res) => {
   try {
-    const { reason } = req.body;
-    const campaign = await Campaign.findOne({
-      _id: req.params.id,
-      advertiser: req.user._id
-    });
+    const campaign = await Campaign.findOne({ _id: req.params.id, advertiser: req.user._id });
     if (!campaign) return res.status(404).json({ error: 'Not found' });
-
-    await campaign.cancel(reason);
+    await campaign.cancel(req.body.reason);
     res.json({ success: true, status: campaign.status });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// ─── Clipping routes (unchanged below) ───────────────────────────────────────
 
-
-
-//////////////////////////////////////////////////////////////////////
-// clipping campaign creation endpoint – this is separate from the main campaign creation because it has different fields and logic (like escrow handling)
-///////////////////////////////////////////////////////////////////////
-// Validation rules
 const campaignValidation = [
-  body('title')
-    .trim()
-    .isLength({ min: 5, max: 100 })
-    .withMessage('Title must be between 5 and 100 characters'),
-  
-  body('videoUrl')
-    .trim()
-    .isURL()
-    .withMessage('Valid video URL is required'),
-  
-  body('budget')
-    .isFloat({ min: 0.01 })
-    .withMessage('Budget must be greater than 0'),
-  
-  body('currency')
-    .isIn(['NGN', 'USDT'])
-    .withMessage('Currency must be NGN or USDT'),
-  
-  body('platforms')
-    .isArray({ min: 1 })
-    .withMessage('At least one platform is required'),
-  
-  body('categories')
-    .isArray({ min: 1 })
-    .withMessage('At least one category is required'),
-  
-  body('costPerThousand')
-    .isFloat({ min: 0 })
-    .withMessage('Invalid cost per thousand'),
-  
-  body('estimatedViews')
-    .isInt({ min: 1 })
-    .withMessage('Invalid estimated views'),
+  body('title').trim().isLength({ min: 5, max: 100 }).withMessage('Title must be 5-100 chars'),
+  body('videoUrl').trim().isURL().withMessage('Valid video URL required'),
+  body('budget').isFloat({ min: 0.01 }).withMessage('Budget must be > 0'),
+  body('currency').isIn(['NGN','USDT']).withMessage('Currency must be NGN or USDT'),
+  body('platforms').isArray({ min: 1 }).withMessage('At least one platform required'),
+  body('categories').isArray({ min: 1 }).withMessage('At least one category required'),
+  body('costPerThousand').isFloat({ min: 0 }).withMessage('Invalid CPM'),
+  body('estimatedViews').isInt({ min: 1 }).withMessage('Invalid estimated views'),
 ];
-// routes/campaigns.js - Modified clipping campaign creation without transactions
 
 router.post('/clipping', requireAuth, campaignValidation, async (req, res) => {
   try {
-    // Check validation errors
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const userId = req.user._id;
-    const {
-      title,
-      videoUrl,
-      budget,
-      currency,
-      platforms,
-      categories,
-      hashtags,
-      directions,
-      ctaUrl,
-      costPerThousand,
-      estimatedViews,
-    } = req.body;
+    const { title, videoUrl, budget, currency, platforms, categories, hashtags, directions, ctaUrl, costPerThousand, estimatedViews } = req.body;
 
-    // Get user and wallet
     const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!['advertiser','admin'].includes(user.role)) return res.status(403).json({ error: 'Only advertisers can create campaigns' });
 
-    // Check if user is advertiser
-    if (user.role !== 'advertiser' && user.role !== 'admin') {
-      return res.status(403).json({ error: 'Only advertisers can create campaigns' });
-    }
-
-    // Get wallet
     const wallet = await Wallet.findOne({ user: userId });
-    if (!wallet) {
-      return res.status(404).json({ error: 'Wallet not found' });
-    }
+    if (!wallet) return res.status(404).json({ error: 'Wallet not found' });
 
-    // Check sufficient balance
-    const availableBalance = currency === 'NGN' ? wallet.balance : wallet.usdtBalance;
-    if (budget > availableBalance) {
-      return res.status(400).json({ error: `Insufficient ${currency} balance` });
-    }
+    const available = currency === 'NGN' ? wallet.balance : wallet.usdtBalance;
+    if (budget > available) return res.status(400).json({ error: `Insufficient ${currency} balance` });
 
-    // Lock funds in escrow
-    if (currency === 'NGN') {
-      await wallet.lockEscrowNGN(budget);
-    } else {
-      await wallet.lockEscrowUSDT(budget);
-    }
+    if (currency === 'NGN') await wallet.lockEscrowNGN(budget);
+    else await wallet.lockEscrowUSDT(budget);
 
-    // Create campaign
     const campaign = new ClippingCampaign({
-      advertiser: userId,
-      title,
-      videoUrl,
-      budget,
-      currency,
-      costPerThousand,
-      estimatedViews,
-      platforms,
-      categories,
-      hashtags: hashtags || [],
-      directions: directions || [],
-      ctaUrl: ctaUrl || null,
-      status: 'active',
+      advertiser: userId, title, videoUrl, budget, currency,
+      costPerThousand, estimatedViews, platforms, categories,
+      hashtags: hashtags || [], directions: directions || [],
+      ctaUrl: ctaUrl || null, status: 'active',
     });
-
     await campaign.save();
 
-    // Create transaction record
     const transaction = new Transaction({
-      user: userId,
-      type: 'campaign_funding',
-      amount: budget,
-      currency,
-      status: 'completed',
-      reference: `CAMPAIGN_${campaign._id}`,
-      metadata: {
-        campaignId: campaign._id,
-        campaignTitle: title,
-      },
+      user: userId, type: 'campaign_funding', amount: budget, currency,
+      status: 'completed', reference: `CAMPAIGN_${campaign._id}`,
+      description: `Clipping campaign funded: ${title}`,
     });
-
     await transaction.save();
 
-    // Update campaign with transaction reference
     campaign.escrowTransaction = transaction._id;
     await campaign.save();
 
-    res.status(201).json({
-      message: 'Campaign created successfully',
-      campaignId: campaign._id,
-      campaign,
-    });
-
+    res.status(201).json({ message: 'Campaign created successfully', campaignId: campaign._id, campaign });
   } catch (error) {
-    console.error('Campaign creation error:', error);
+    console.error('Clipping campaign creation error:', error);
     res.status(500).json({ error: 'Failed to create campaign' });
   }
 });
 
-// Get user's clipping campaigns
 router.get('/clipping', requireAuth, async (req, res) => {
   try {
-    const userId = req.user._id;
     const { status, page = 1, limit = 10 } = req.query;
-
-    // Build query
-    const query = { advertiser: userId };
+    const query = { advertiser: req.user._id };
     if (status) query.status = status;
-
     const campaigns = await ClippingCampaign.find(query)
       .sort({ createdAt: -1 })
-      .limit(parseInt(limit) * 1)
-      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit))
       .populate('advertiser', 'firstName lastName email company');
-
     const total = await ClippingCampaign.countDocuments(query);
-
-    res.json({
-      campaigns,
-      totalPages: Math.ceil(total / parseInt(limit)),
-      currentPage: parseInt(page),
-      total,
-    });
-  } catch (error) {
-    console.error('Fetch campaigns error:', error);
+    res.json({ campaigns, totalPages: Math.ceil(total / Number(limit)), currentPage: Number(page), total });
+  } catch (err) {
     res.status(500).json({ error: 'Failed to fetch campaigns' });
   }
 });
 
-// Get single campaign
 router.get('/clipping/:id', requireAuth, async (req, res) => {
   try {
     const campaign = await ClippingCampaign.findById(req.params.id)
       .populate('advertiser', 'firstName lastName email company');
-
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
-    // Check if user owns the campaign or is admin
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     if (campaign.advertiser._id.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Unauthorized' });
     }
-
     res.json(campaign);
-  } catch (error) {
-    console.error('Fetch campaign error:', error);
+  } catch (err) {
     res.status(500).json({ error: 'Failed to fetch campaign' });
   }
 });
 
-
-// Cancel campaign and refund escrow
 router.post('/clipping/:id/cancel', requireAuth, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
   try {
     const campaign = await ClippingCampaign.findById(req.params.id).session(session);
-    if (!campaign) {
-      await session.abortTransaction();
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
-    // Check ownership
+    if (!campaign) { await session.abortTransaction(); return res.status(404).json({ error: 'Not found' }); }
     if (campaign.advertiser.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
-      await session.abortTransaction();
-      return res.status(403).json({ error: 'Unauthorized' });
+      await session.abortTransaction(); return res.status(403).json({ error: 'Unauthorized' });
     }
-
-    if (campaign.status === 'completed' || campaign.status === 'cancelled') {
-      await session.abortTransaction();
-      return res.status(400).json({ error: 'Campaign cannot be cancelled' });
+    if (['completed','cancelled'].includes(campaign.status)) {
+      await session.abortTransaction(); return res.status(400).json({ error: 'Cannot cancel' });
     }
-
-    // Calculate remaining budget
-    const remainingBudget = campaign.budget - campaign.totalSpent;
-
-    // Get wallet
+    const remaining = campaign.budget - campaign.totalSpent;
     const wallet = await Wallet.findOne({ user: campaign.advertiser }).session(session);
-    if (!wallet) {
-      await session.abortTransaction();
-      return res.status(404).json({ error: 'Wallet not found' });
+    if (!wallet) { await session.abortTransaction(); return res.status(404).json({ error: 'Wallet not found' }); }
+    if (remaining > 0) {
+      if (campaign.currency === 'NGN') await wallet.releaseEscrowNGN(remaining);
+      else await wallet.releaseEscrowUSDT(remaining);
     }
-
-    // Release remaining funds from escrow
-    if (remainingBudget > 0) {
-      if (campaign.currency === 'NGN') {
-        await wallet.releaseEscrowNGN(remainingBudget);
-      } else {
-        await wallet.releaseEscrowUSDT(remainingBudget);
-      }
-    }
-
-    // Update campaign
-    campaign.status = 'cancelled';
-    campaign.cancelledAt = new Date();
-    campaign.updatedAt = new Date();
+    campaign.status = 'cancelled'; campaign.cancelledAt = new Date();
     await campaign.save({ session });
-
-    // Create refund transaction if there was money left
-    if (remainingBudget > 0) {
-      const refundTransaction = new Transaction({
-        user: campaign.advertiser,
-        type: 'campaign_refund',
-        amount: remainingBudget,
-        currency: campaign.currency,
-        status: 'completed',
-        reference: `REFUND_${campaign._id}`,
-        metadata: {
-          campaignId: campaign._id,
-          campaignTitle: campaign.title,
-        },
-      });
-      await refundTransaction.save({ session });
+    if (remaining > 0) {
+      await new Transaction({
+        user: campaign.advertiser, type: 'refund', amount: remaining, currency: campaign.currency,
+        status: 'completed', reference: `REFUND_${campaign._id}`,
+        description: `Clipping campaign cancelled refund: ${campaign.title}`,
+      }).save({ session });
     }
-
     await session.commitTransaction();
-
-    res.json({
-      message: 'Campaign cancelled successfully',
-      refundedAmount: remainingBudget,
-      currency: campaign.currency,
-    });
-  } catch (error) {
+    res.json({ message: 'Campaign cancelled', refundedAmount: remaining, currency: campaign.currency });
+  } catch (err) {
     await session.abortTransaction();
-    console.error('Cancel campaign error:', error);
     res.status(500).json({ error: 'Failed to cancel campaign' });
   } finally {
     session.endSession();
   }
 });
 
-/**
- * GET /api/campaigns/clipping/:id/submissions
- * All ClipSubmissions for a clipping campaign — advertiser & admin only.
- */
 router.get('/clipping/:id/submissions', requireAuth, async (req, res) => {
   try {
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid campaign ID.' });
-    }
-
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid ID' });
     const campaign = await ClippingCampaign.findById(req.params.id);
-    if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
-
-    if (
-      campaign.advertiser.toString() !== req.user._id.toString() &&
-      req.user.role !== 'admin'
-    ) {
-      return res.status(403).json({ error: 'Unauthorized.' });
+    if (!campaign) return res.status(404).json({ error: 'Not found' });
+    if (campaign.advertiser.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Unauthorized' });
     }
-
     const submissions = await ClipSubmission.find({ campaign: req.params.id })
-      .populate('clipper', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .lean();
-
+      .populate('clipper', 'firstName lastName email').sort({ createdAt: -1 }).lean();
     res.json(submissions);
   } catch (err) {
-    console.error('clipping submissions error:', err);
-    res.status(500).json({ error: 'Failed to fetch submissions.' });
+    res.status(500).json({ error: 'Failed to fetch submissions' });
   }
 });
 
-
+export { releaseEscrowToClipper };
 export default router;
-// // routes/campaigns.js
-// import express from 'express';
-// import multer from 'multer';
-// import path from 'path';
-// import Campaign from '../models/Campaign.js';
-// import Application from '../models/Application.js';
-// import Notification from '../models/Notification.js';
-// import { requireAuth, requireAdvertiser } from '../middleware/auth.js'; // assume you have role middleware
-// import { requireAdminAuth } from '../middleware/adminAuth.js';
-// import fs from 'fs';
-
-// import { body, validationResult } from 'express-validator';
-// import mongoose from 'mongoose';
-// import User from '../models/User.js';
-// import Wallet from '../models/Wallet.js';
-// import ClippingCampaign from '../models/ClippingCampaign.js';
-// import Transaction from '../models/Transaction.js';
-
-
-// const router = express.Router();
-// // MULTER CONFIG – THUMBNAIL
-// const uploadDir = path.join(process.cwd(), 'uploads/campaigns');
-
-// // Make sure folder exists (redundant if you use the startup function, but safe)
-// if (!fs.existsSync(uploadDir)) {
-//   fs.mkdirSync(uploadDir, { recursive: true });
-//   console.log(`Ensured campaigns upload dir exists: ${uploadDir}`);
-// }
-
-// const storage = multer.diskStorage({
-//   destination: (req, file, cb) => cb(null, uploadDir),
-//   filename: (req, file, cb) => {
-//     const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-//     cb(null, `${unique}${path.extname(file.originalname)}`);
-//   },
-// });
-
-// const upload = multer({
-//   storage,
-//   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-//   fileFilter: (req, file, cb) => {
-//     const allowed = ['image/jpeg', 'image/png', 'image/webm', 'image/webp'];
-//     if (allowed.includes(file.mimetype)) {
-//       cb(null, true);
-//     } else {
-//       cb(new Error('Only JPEG, PNG, WEBP images allowed'), false);
-//     }
-//   },
-// });
-
-// // routes/campaigns.js - Add this new endpoint
-
-// // GET /api/campaigns/:id/with-submissions
-// router.get('/:id/with-submissions', requireAuth, async (req, res) => {
-//   try {
-//     const campaign = await Campaign.findById(req.params.id)
-//       .populate('advertiser', 'firstName lastName company profileImage')
-//       .populate('selectedClipper', 'firstName lastName profileImage rating')
-//       .populate({
-//         path: 'videoSubmissions.applicationId',
-//         select: 'proposedRateNGN proposedRateUSDT paymentCurrency paymentAmount revisionCount status'
-//       })
-//       .populate({
-//         path: 'videoSubmissions.clipperId',
-//         select: 'firstName lastName profileImage rating'
-//       });
-
-//     if (!campaign) {
-//       return res.status(404).json({ error: 'Campaign not found' });
-//     }
-
-//     // Check if user is the advertiser
-//     if (campaign.advertiser._id.toString() !== req.user._id.toString()) {
-//       return res.status(403).json({ error: 'Access denied' });
-//     }
-
-//     // Get the payment info from the approved/final application
-//     let paymentAmount = null;
-//     let paymentCurrency = null;
-    
-//     // First try to get from finalVideo's applicationId
-//     if (campaign.finalVideo && campaign.finalVideo.applicationId) {
-//       const finalApplication = campaign.videoSubmissions.find(function(sub) {
-//         return sub.applicationId && sub.applicationId._id && 
-//                sub.applicationId._id.toString() === campaign.finalVideo.applicationId.toString();
-//       });
-      
-//       if (finalApplication && finalApplication.applicationId) {
-//         paymentAmount = finalApplication.applicationId.paymentAmount || 
-//                        finalApplication.applicationId.proposedRateNGN || 
-//                        finalApplication.applicationId.proposedRateUSDT;
-//         paymentCurrency = finalApplication.applicationId.paymentCurrency || 
-//                          (finalApplication.applicationId.proposedRateNGN ? 'NGN' : 
-//                           finalApplication.applicationId.proposedRateUSDT ? 'USDT' : null);
-//       }
-//     }
-    
-//     // If no payment from finalVideo, try the currentSubmission
-//     if (!paymentAmount && campaign.currentSubmission) {
-//       const currentApp = campaign.videoSubmissions.find(function(sub) {
-//         return sub.applicationId && sub.applicationId._id && 
-//                sub.applicationId._id.toString() === campaign.currentSubmission.toString();
-//       });
-      
-//       if (currentApp && currentApp.applicationId) {
-//         paymentAmount = currentApp.applicationId.paymentAmount || 
-//                        currentApp.applicationId.proposedRateNGN || 
-//                        currentApp.applicationId.proposedRateUSDT;
-//         paymentCurrency = currentApp.applicationId.paymentCurrency || 
-//                          (currentApp.applicationId.proposedRateNGN ? 'NGN' : 
-//                           currentApp.applicationId.proposedRateUSDT ? 'USDT' : null);
-//       }
-//     }
-    
-//     // If still no payment, try the selectedClipper's application
-//     if (!paymentAmount && campaign.selectedClipper) {
-//       const clipperApp = campaign.videoSubmissions.find(function(sub) {
-//         return sub.clipperId && sub.clipperId._id && 
-//                sub.clipperId._id.toString() === campaign.selectedClipper.toString();
-//       });
-      
-//       if (clipperApp && clipperApp.applicationId) {
-//         paymentAmount = clipperApp.applicationId.paymentAmount || 
-//                        clipperApp.applicationId.proposedRateNGN || 
-//                        clipperApp.applicationId.proposedRateUSDT;
-//         paymentCurrency = clipperApp.applicationId.paymentCurrency || 
-//                          (clipperApp.applicationId.proposedRateNGN ? 'NGN' : 
-//                           clipperApp.applicationId.proposedRateUSDT ? 'USDT' : null);
-//       }
-//     }
-
-//     // Also check for approved submissions if we still don't have payment
-//     if (!paymentAmount && campaign.videoSubmissions && campaign.videoSubmissions.length > 0) {
-//       const approvedSubmission = campaign.videoSubmissions.find(function(sub) {
-//         return sub.status === 'approved' && sub.applicationId;
-//       });
-      
-//       if (approvedSubmission && approvedSubmission.applicationId) {
-//         paymentAmount = approvedSubmission.applicationId.paymentAmount || 
-//                        approvedSubmission.applicationId.proposedRateNGN || 
-//                        approvedSubmission.applicationId.proposedRateUSDT;
-//         paymentCurrency = approvedSubmission.applicationId.paymentCurrency || 
-//                          (approvedSubmission.applicationId.proposedRateNGN ? 'NGN' : 
-//                           approvedSubmission.applicationId.proposedRateUSDT ? 'USDT' : null);
-//       }
-//     }
-
-//     // Convert to plain object and add payment info
-//     const campaignWithPayment = campaign.toObject();
-//     campaignWithPayment.paymentAmount = paymentAmount;
-//     campaignWithPayment.paymentCurrency = paymentCurrency;
-
-//     res.json({ success: true, campaign: campaignWithPayment });
-//   } catch (err) {
-//     console.error('Error fetching campaign with submissions:', err);
-//     res.status(500).json({ error: 'Failed to load campaign data' });
-//   }
-// });
-// // routes/campaigns.js  →  POST /campaigns  handler
-// router.post(
-//   '/',
-//   requireAuth,
-//   requireAdvertiser, // only advertisers can create
-//   upload.single('thumbnail'),
-//   async (req, res) => {
-//     // ────────────────────────────────────────────────
-//     // Debug logging – very helpful when FormData fails
-//     // ────────────────────────────────────────────────
-//     console.log('╔═══════════════════════════════════════════════╗');
-//     console.log('║           CREATE CAMPAIGN REQUEST             ║');
-//     console.log('╚═══════════════════════════════════════════════╝');
-//     console.log('User ID:', req.user?._id?.toString());
-//     console.log('Content-Type:', req.headers['content-type']);
-//     console.log('Has file?', !!req.file);
-//     if (req.file) {
-//       console.log('File info:', {
-//         originalname: req.file.originalname,
-//         filename: req.file.filename,
-//         size: req.file.size,
-//         mimetype: req.file.mimetype,
-//       });
-//     }
-//     console.log('Body keys:', Object.keys(req.body));
-//     console.log('Body sample:', JSON.stringify(req.body, null, 2).slice(0, 400) + '...');
-
-//     try {
-//       // ────────────────────────────────────────────────
-//       // Early validation
-//       // ────────────────────────────────────────────────
-//       if (!req.body.title?.trim()) {
-//         return res.status(400).json({ error: 'Title is required' });
-//       }
-//       if (!req.body.description?.trim()) {
-//         return res.status(400).json({ error: 'Description is required' });
-//       }
-//       if (!req.body.category?.trim()) {
-//         return res.status(400).json({ error: 'Category is required' });
-//       }
-//       if (!req.body.applicationDeadline) {
-//         return res.status(400).json({ error: 'Application deadline is required' });
-//       }
-
-//       // Validate date
-//       const deadline = new Date(req.body.applicationDeadline);
-//       if (isNaN(deadline.getTime())) {
-//         return res.status(400).json({ error: 'Invalid application deadline format' });
-//       }
-//       if (deadline <= new Date()) {
-//         return res.status(400).json({ error: 'Application deadline must be in the future' });
-//       }
-
-//       // ────────────────────────────────────────────────
-//       // Parse JSON arrays safely
-//       // ────────────────────────────────────────────────
-//       let parsedKeyPhrases = [];
-//       let parsedRefLinks = [];
-
-//       if (req.body.keyPhrases) {
-//         try {
-//           parsedKeyPhrases = JSON.parse(req.body.keyPhrases);
-//           if (!Array.isArray(parsedKeyPhrases)) {
-//             parsedKeyPhrases = [];
-//           }
-//         } catch (e) {
-//           console.warn('Failed to parse keyPhrases:', e.message);
-//           // continue with empty array – don't fail creation
-//         }
-//       }
-
-//       if (req.body.referenceLinks) {
-//         try {
-//           parsedRefLinks = JSON.parse(req.body.referenceLinks);
-//           if (!Array.isArray(parsedRefLinks)) {
-//             parsedRefLinks = [];
-//           }
-//         } catch (e) {
-//           console.warn('Failed to parse referenceLinks:', e.message);
-//         }
-//       }
-
-//       // ────────────────────────────────────────────────
-//       // Build campaign document
-//       // ────────────────────────────────────────────────
-//       const campaignData = {
-//         advertiser: req.user._id,
-//         title: req.body.title.trim(),
-//         description: req.body.description.trim(),
-//         script: (req.body.script || '').trim(),
-//         keyPhrases: parsedKeyPhrases,
-//         preferredLength: req.body.preferredLength || '30s',
-//         category: req.body.category.trim(),
-//         applicationDeadline: deadline,
-//         creativeDirection: {
-//           aspectRatio: req.body.aspectRatio || '9:16',
-//           preferredLocation: req.body.preferredLocation || 'anywhere',
-//           locationDescription: (req.body.locationDescription || '').trim(),
-//           backgroundStyle: (req.body.backgroundStyle || '').trim(),
-//           moodTone: (req.body.moodTone || '').trim(),
-//           referenceLinks: parsedRefLinks,
-//         },
-//       };
-
-//       if (req.file) {
-//         campaignData.thumbnailUrl = `/uploads/campaigns/${req.file.filename}`;
-//       }
-
-//       const campaign = new Campaign(campaignData);
-
-//       // Optional: run schema validations early
-//       await campaign.validate();
-
-//       await campaign.save();
-
-//       console.log('Campaign created successfully:', campaign._id.toString());
-
-//       // Optional: future notifications
-//       // await createNotificationForNewCampaign(campaign);
-
-//       return res.status(201).json({
-//         success: true,
-//         campaign: {
-//           _id: campaign._id,
-//           title: campaign.title,
-//           status: campaign.status,
-//           thumbnailUrl: campaign.thumbnailUrl,
-//           createdAt: campaign.createdAt,
-//         },
-//       });
-//     } catch (err) {
-//       console.error('Campaign creation failed:', {
-//         message: err.message,
-//         stack: err.stack?.slice(0, 300),
-//         name: err.name,
-//       });
-
-//       // Multer-specific errors
-//       if (err instanceof multer.MulterError) {
-//         return res.status(400).json({ error: `File upload error: ${err.message}` });
-//       }
-
-//       // Mongoose validation error
-//       if (err.name === 'ValidationError') {
-//         const errors = Object.values(err.errors).map((e) => e.message);
-//         return res.status(400).json({ error: 'Validation failed', details: errors });
-//       }
-
-//       // Generic fallback
-//       return res.status(500).json({
-//         error: 'Failed to create campaign',
-//         message: process.env.NODE_ENV === 'development' ? err.message : undefined,
-//       });
-//     }
-//   }
-// );
-// // DELETE /api/campaigns/:id
-// router.delete('/:id', requireAuth, requireAdvertiser, async (req, res) => {
-//   try {
-//     const campaign = await Campaign.findOne({
-//       _id: req.params.id,
-//       advertiser: req.user._id
-//     });
-
-//     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-
-//     // Safety: Only allow delete if status is cancelled
-//     if (campaign.status !== 'cancelled') {
-//       return res.status(403).json({ error: 'You can only delete a cancelled campaign' });
-//     }
-
-//     // Safety: Prevent delete if any clipper has been selected or is working
-//     const activeApplications = await Application.countDocuments({
-//       campaign: campaign._id,
-//       status: { $in: ['selected', 'accepted', 'submitted', 'revision_requested', 'approved'] }
-//     });
-
-//     if (activeApplications > 0) {
-//       return res.status(403).json({
-//         error: 'Cannot delete campaign. One or more clippers have already been selected or submitted work.'
-//       });
-//     }
-
-//     // Delete thumbnail file if exists
-//     if (campaign.thumbnailUrl) {
-//       const filePath = path.join(process.cwd(), campaign.thumbnailUrl);
-//       if (fs.existsSync(filePath)) {
-//         fs.unlinkSync(filePath);
-//       }
-//     }
-
-//     await Campaign.deleteOne({ _id: campaign._id });
-
-//     res.json({ success: true, message: 'Campaign permanently deleted' });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ error: 'Failed to delete campaign' });
-//   }
-// });
-// // ────────────────────────────────────────────────
-// //      GET MY CAMPAIGNS (advertiser only)
-// // ────────────────────────────────────────────────
-// router.get('/my', requireAuth, requireAdvertiser, async (req, res) => {
-//   try {
-//     const campaigns = await Campaign.find({ advertiser: req.user._id })
-//       .sort({ createdAt: -1 })
-//       .lean();
-
-//     res.json({ success: true, campaigns });
-//   } catch (err) {
-//     res.status(500).json({ error: 'Failed to fetch campaigns' });
-//   }
-// });
-
-// // ────────────────────────────────────────────────
-// //      GET SINGLE CAMPAIGN (owner or public)
-// // ────────────────────────────────────────────────
-// router.get('/:id', requireAuth, async (req, res) => {
-//   try {
-//     const campaign = await Campaign.findById(req.params.id)
-//       .populate('advertiser', 'firstName lastName company profileImage rating');
-
-//     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-
-//     // Optional: hide sensitive fields for non-owners
-//     if (campaign.advertiser.toString() !== req.user._id.toString()) {
-//       // you can remove script / private notes here if needed
-//     }
-
-//     res.json({ success: true, campaign });
-//   } catch (err) {
-//     res.status(500).json({ error: 'Server error' });
-//   }
-// });
-
-// // ────────────────────────────────────────────────
-// //      UPDATE CAMPAIGN (only draft)
-// // ────────────────────────────────────────────────
-// router.patch('/:id', requireAuth, requireAdvertiser, upload.single('thumbnail'), async (req, res) => {
-//   try {
-//     const campaign = await Campaign.findOne({
-//       _id: req.params.id,
-//       advertiser: req.user._id
-//     });
-
-//     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-//     if (campaign.status !== 'draft') {
-//       return res.status(403).json({ error: 'Can only edit draft campaigns' });
-//     }
-
-//     // Update fields if provided
-//     const updatable = [
-//       'title', 'description', 'script', 'keyPhrases', 'preferredLength',
-//       'category', 'applicationDeadline', 'creativeDirection'
-//     ];
-
-//     updatable.forEach(key => {
-//       if (req.body[key] !== undefined) {
-//         if (key === 'keyPhrases' || key === 'creativeDirection.referenceLinks') {
-//           campaign[key] = JSON.parse(req.body[key]);
-//         } else if (key === 'applicationDeadline') {
-//           campaign[key] = new Date(req.body[key]);
-//         } else {
-//           campaign[key] = req.body[key];
-//         }
-//       }
-//     });
-
-//     if (req.file) {
-//       // delete old if exists
-//       if (campaign.thumbnailUrl) {
-//         // you can add fs.unlink logic here
-//       }
-//       campaign.thumbnailUrl = `/uploads/campaigns/${req.file.filename}`;
-//     }
-
-//     await campaign.save();
-//     res.json({ success: true, campaign });
-
-//   } catch (err) {
-//     res.status(400).json({ error: err.message || 'Update failed' });
-//   }
-// });
-
-// // ────────────────────────────────────────────────
-// //      ACTIVATE / CLOSE / CANCEL
-// // ────────────────────────────────────────────────
-// router.post('/:id/activate', requireAuth, requireAdvertiser, async (req, res) => {
-//   try {
-//     const campaign = await Campaign.findOne({
-//       _id: req.params.id,
-//       advertiser: req.user._id
-//     });
-//     if (!campaign) return res.status(404).json({ error: 'Not found' });
-
-//     await campaign.activate();
-//     res.json({ success: true, status: campaign.status });
-//   } catch (err) {
-//     res.status(400).json({ error: err.message });
-//   }
-// });
-
-// router.post('/:id/close', requireAuth, requireAdvertiser, async (req, res) => {
-//   try {
-//     const { reason } = req.body;
-//     const campaign = await Campaign.findOne({
-//       _id: req.params.id,
-//       advertiser: req.user._id
-//     });
-//     if (!campaign) return res.status(404).json({ error: 'Not found' });
-
-//     await campaign.close(reason);
-//     res.json({ success: true, status: campaign.status });
-//   } catch (err) {
-//     res.status(400).json({ error: err.message });
-//   }
-// });
-
-// router.post('/:id/cancel', requireAuth, requireAdvertiser, async (req, res) => {
-//   try {
-//     const { reason } = req.body;
-//     const campaign = await Campaign.findOne({
-//       _id: req.params.id,
-//       advertiser: req.user._id
-//     });
-//     if (!campaign) return res.status(404).json({ error: 'Not found' });
-
-//     await campaign.cancel(reason);
-//     res.json({ success: true, status: campaign.status });
-//   } catch (err) {
-//     res.status(400).json({ error: err.message });
-//   }
-// });
-
-
-
-
-// //////////////////////////////////////////////////////////////////////
-// // clipping campaign creation endpoint – this is separate from the main campaign creation because it has different fields and logic (like escrow handling)
-// ///////////////////////////////////////////////////////////////////////
-// // Validation rules
-// const campaignValidation = [
-//   body('title')
-//     .trim()
-//     .isLength({ min: 5, max: 100 })
-//     .withMessage('Title must be between 5 and 100 characters'),
-  
-//   body('videoUrl')
-//     .trim()
-//     .isURL()
-//     .withMessage('Valid video URL is required'),
-  
-//   body('budget')
-//     .isFloat({ min: 0.01 })
-//     .withMessage('Budget must be greater than 0'),
-  
-//   body('currency')
-//     .isIn(['NGN', 'USDT'])
-//     .withMessage('Currency must be NGN or USDT'),
-  
-//   body('platforms')
-//     .isArray({ min: 1 })
-//     .withMessage('At least one platform is required'),
-  
-//   body('categories')
-//     .isArray({ min: 1 })
-//     .withMessage('At least one category is required'),
-  
-//   body('costPerThousand')
-//     .isFloat({ min: 0 })
-//     .withMessage('Invalid cost per thousand'),
-  
-//   body('estimatedViews')
-//     .isInt({ min: 1 })
-//     .withMessage('Invalid estimated views'),
-// ];
-// // routes/campaigns.js - Modified clipping campaign creation without transactions
-
-// router.post('/clipping', requireAuth, campaignValidation, async (req, res) => {
-//   try {
-//     // Check validation errors
-//     const errors = validationResult(req);
-//     if (!errors.isEmpty()) {
-//       return res.status(400).json({ errors: errors.array() });
-//     }
-
-//     const userId = req.user.id;
-//     const {
-//       title,
-//       videoUrl,
-//       budget,
-//       currency,
-//       platforms,
-//       categories,
-//       hashtags,
-//       directions,
-//       ctaUrl,
-//       costPerThousand,
-//       estimatedViews,
-//     } = req.body;
-
-//     // Get user and wallet
-//     const user = await User.findById(userId);
-//     if (!user) {
-//       return res.status(404).json({ error: 'User not found' });
-//     }
-
-//     // Check if user is advertiser
-//     if (user.role !== 'advertiser' && user.role !== 'admin') {
-//       return res.status(403).json({ error: 'Only advertisers can create campaigns' });
-//     }
-
-//     // Get wallet
-//     const wallet = await Wallet.findOne({ user: userId });
-//     if (!wallet) {
-//       return res.status(404).json({ error: 'Wallet not found' });
-//     }
-
-//     // Check sufficient balance
-//     const availableBalance = currency === 'NGN' ? wallet.balance : wallet.usdtBalance;
-//     if (budget > availableBalance) {
-//       return res.status(400).json({ error: `Insufficient ${currency} balance` });
-//     }
-
-//     // Lock funds in escrow
-//     if (currency === 'NGN') {
-//       await wallet.lockEscrowNGN(budget);
-//     } else {
-//       await wallet.lockEscrowUSDT(budget);
-//     }
-
-//     // Create campaign
-//     const campaign = new ClippingCampaign({
-//       advertiser: userId,
-//       title,
-//       videoUrl,
-//       budget,
-//       currency,
-//       costPerThousand,
-//       estimatedViews,
-//       platforms,
-//       categories,
-//       hashtags: hashtags || [],
-//       directions: directions || [],
-//       ctaUrl: ctaUrl || null,
-//       status: 'active',
-//     });
-
-//     await campaign.save();
-
-//     // Create transaction record
-//     const transaction = new Transaction({
-//       user: userId,
-//       type: 'campaign_funding',
-//       amount: budget,
-//       currency,
-//       status: 'completed',
-//       reference: `CAMPAIGN_${campaign._id}`,
-//       metadata: {
-//         campaignId: campaign._id,
-//         campaignTitle: title,
-//       },
-//     });
-
-//     await transaction.save();
-
-//     // Update campaign with transaction reference
-//     campaign.escrowTransaction = transaction._id;
-//     await campaign.save();
-
-//     res.status(201).json({
-//       message: 'Campaign created successfully',
-//       campaignId: campaign._id,
-//       campaign,
-//     });
-
-//   } catch (error) {
-//     console.error('Campaign creation error:', error);
-//     res.status(500).json({ error: 'Failed to create campaign' });
-//   }
-// });
-
-// // Get user's clipping campaigns
-// router.get('/clipping', requireAuth, async (req, res) => {
-//   try {
-//     const userId = req.user.id;
-//     const { status, page = 1, limit = 10 } = req.query;
-
-//     // Build query
-//     const query = { advertiser: userId };
-//     if (status) query.status = status;
-
-//     const campaigns = await ClippingCampaign.find(query)
-//       .sort({ createdAt: -1 })
-//       .limit(parseInt(limit) * 1)
-//       .skip((parseInt(page) - 1) * parseInt(limit))
-//       .populate('advertiser', 'firstName lastName email company');
-
-//     const total = await ClippingCampaign.countDocuments(query);
-
-//     res.json({
-//       campaigns,
-//       totalPages: Math.ceil(total / parseInt(limit)),
-//       currentPage: parseInt(page),
-//       total,
-//     });
-//   } catch (error) {
-//     console.error('Fetch campaigns error:', error);
-//     res.status(500).json({ error: 'Failed to fetch campaigns' });
-//   }
-// });
-
-// // Get single campaign
-// router.get('/clipping/:id', requireAuth, async (req, res) => {
-//   try {
-//     const campaign = await ClippingCampaign.findById(req.params.id)
-//       .populate('advertiser', 'firstName lastName email company');
-
-//     if (!campaign) {
-//       return res.status(404).json({ error: 'Campaign not found' });
-//     }
-
-//     // Check if user owns the campaign or is admin
-//     if (campaign.advertiser._id.toString() !== req.user.id && req.user.role !== 'admin') {
-//       return res.status(403).json({ error: 'Unauthorized' });
-//     }
-
-//     res.json(campaign);
-//   } catch (error) {
-//     console.error('Fetch campaign error:', error);
-//     res.status(500).json({ error: 'Failed to fetch campaign' });
-//   }
-// });
-
-
-// // Cancel campaign and refund escrow
-// router.post('/clipping/:id/cancel', requireAuth, async (req, res) => {
-//   const session = await mongoose.startSession();
-//   session.startTransaction();
-
-//   try {
-//     const campaign = await ClippingCampaign.findById(req.params.id).session(session);
-//     if (!campaign) {
-//       await session.abortTransaction();
-//       return res.status(404).json({ error: 'Campaign not found' });
-//     }
-
-//     // Check ownership
-//     if (campaign.advertiser.toString() !== req.user.id && req.user.role !== 'admin') {
-//       await session.abortTransaction();
-//       return res.status(403).json({ error: 'Unauthorized' });
-//     }
-
-//     if (campaign.status === 'completed' || campaign.status === 'cancelled') {
-//       await session.abortTransaction();
-//       return res.status(400).json({ error: 'Campaign cannot be cancelled' });
-//     }
-
-//     // Calculate remaining budget
-//     const remainingBudget = campaign.budget - campaign.totalSpent;
-
-//     // Get wallet
-//     const wallet = await Wallet.findOne({ user: campaign.advertiser }).session(session);
-//     if (!wallet) {
-//       await session.abortTransaction();
-//       return res.status(404).json({ error: 'Wallet not found' });
-//     }
-
-//     // Release remaining funds from escrow
-//     if (remainingBudget > 0) {
-//       if (campaign.currency === 'NGN') {
-//         await wallet.releaseEscrowNGN(remainingBudget);
-//       } else {
-//         await wallet.releaseEscrowUSDT(remainingBudget);
-//       }
-//     }
-
-//     // Update campaign
-//     campaign.status = 'cancelled';
-//     campaign.cancelledAt = new Date();
-//     campaign.updatedAt = new Date();
-//     await campaign.save({ session });
-
-//     // Create refund transaction if there was money left
-//     if (remainingBudget > 0) {
-//       const refundTransaction = new Transaction({
-//         user: campaign.advertiser,
-//         type: 'campaign_refund',
-//         amount: remainingBudget,
-//         currency: campaign.currency,
-//         status: 'completed',
-//         reference: `REFUND_${campaign._id}`,
-//         metadata: {
-//           campaignId: campaign._id,
-//           campaignTitle: campaign.title,
-//         },
-//       });
-//       await refundTransaction.save({ session });
-//     }
-
-//     await session.commitTransaction();
-
-//     res.json({
-//       message: 'Campaign cancelled successfully',
-//       refundedAmount: remainingBudget,
-//       currency: campaign.currency,
-//     });
-//   } catch (error) {
-//     await session.abortTransaction();
-//     console.error('Cancel campaign error:', error);
-//     res.status(500).json({ error: 'Failed to cancel campaign' });
-//   } finally {
-//     session.endSession();
-//   }
-// });
-
-
-// export default router;

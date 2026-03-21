@@ -1,737 +1,638 @@
-import React, {
-  useEffect,
-  useState,
-  ChangeEvent,
-  FormEvent,
-} from 'react';
+// components/advertiser/WalletSection.tsx
+// Dual-currency wallet with deposit & withdrawal modals
+// Mirrors the mobile WalletScreen logic and API calls exactly
+import React, { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
-import { Dialog } from '@headlessui/react';
-import {
-  UploadCloud,
-  ArrowDownCircle,
-  FileText,
-  Landmark,
-  CircleDollarSign,
-  Info,
-  X
-} from 'lucide-react';
 
-import { getUserFromToken } from '@/utils/getUserFromToken';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://clippapay.com/api';
 
-type Deposit = {
-  _id: string;
-  amount: number;
-  receiptUrl: string;
-  status: 'pending' | 'approved' | 'rejected';
-  createdAt: string;
-};
-
-type Withdrawal = {
-  _id: string;
-  amount: number;
-  method: 'bank' | 'usdt';
-  bankName?: string;
-  accountNumber?: string;
-  accountName?: string;
-  usdtAddress?: string;
-  usdtNetwork?: string;
-  status: 'pending' | 'completed' | 'declined';
-  createdAt: string;
-};
-
-// Declare PaystackPop type
-declare global {
-  interface Window {
-    PaystackPop: any;
-  }
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface WalletData {
+  balance: number; usdtBalance: number;
+  escrowLocked: number; usdtEscrowLocked: number;
+}
+interface PlatformDetails {
+  bank: { name: string; accountNumber: string; accountName: string };
+  usdt: { address: string; network: string; minDeposit: number; minWithdrawal: number };
+  limits: { ngnMinDeposit: number; ngnMinWithdrawal: number; usdtRate: number };
+}
+interface TxItem {
+  _id: string; type: string; amount: number;
+  currency: 'NGN' | 'USDT'; status: string;
+  description?: string; createdAt: string;
+}
+interface Deposit {
+  _id: string; amount: number; currency: 'NGN' | 'USDT';
+  status: 'pending' | 'approved' | 'rejected'; createdAt: string;
+}
+interface Withdrawal {
+  _id: string; amount: number; currency: 'NGN' | 'USDT';
+  status: 'pending' | 'completed' | 'declined'; createdAt: string;
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const fmtNGN  = (n: number) => `₦${n.toLocaleString('en-NG', { minimumFractionDigits: 0 })}`;
+const fmtUSDT = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt     = (n: number, cur: 'NGN' | 'USDT') => cur === 'NGN' ? fmtNGN(n) : fmtUSDT(n);
+const getToken = () => localStorage.getItem('token');
+
+const TX_ICONS: Record<string, { color: string; bg: string; label: string }> = {
+  deposit:          { color: 'text-emerald-600', bg: 'bg-emerald-50', label: 'Deposit'          },
+  campaign_funding: { color: 'text-amber-600',   bg: 'bg-amber-50',   label: 'Campaign Funding' },
+  escrow:           { color: 'text-amber-600',   bg: 'bg-amber-50',   label: 'Escrow Lock'      },
+  escrow_release:   { color: 'text-indigo-600',  bg: 'bg-indigo-50',  label: 'Escrow Release'   },
+  clipping_reward:  { color: 'text-emerald-600', bg: 'bg-emerald-50', label: 'Clipping Reward'  },
+  withdrawal:       { color: 'text-red-600',     bg: 'bg-red-50',     label: 'Withdrawal'       },
+  payment:          { color: 'text-purple-600',  bg: 'bg-purple-50',  label: 'Payment'          },
+  refund:           { color: 'text-cyan-600',    bg: 'bg-cyan-50',    label: 'Refund'           },
+};
+const txIcon = (type: string) => TX_ICONS[type] || { color: 'text-gray-600', bg: 'bg-gray-100', label: type };
+const statusColor = (s: string) =>
+  ['approved', 'completed'].includes(s) ? 'text-emerald-600' : ['rejected', 'declined'].includes(s) ? 'text-red-600' : 'text-amber-600';
+const isCredit = (type: string) => ['deposit', 'clipping_reward', 'escrow_release', 'refund'].includes(type);
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function WalletSection() {
-  // balances
-  const [balance, setBalance] = useState(0);
-  const [escrow, setEscrow] = useState(0);
-
-  // lists
-  const [deposits, setDeposits] = useState<Deposit[]>([]);
-  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-
-  // loading / messages
-  const [loading, setLoading] = useState(true);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [wallet, setWallet]             = useState<WalletData>({ balance: 0, usdtBalance: 0, escrowLocked: 0, usdtEscrowLocked: 0 });
+  const [platform, setPlatform]         = useState<PlatformDetails | null>(null);
+  const [deposits, setDeposits]         = useState<Deposit[]>([]);
+  const [withdrawals, setWithdrawals]   = useState<Withdrawal[]>([]);
+  const [transactions, setTransactions] = useState<TxItem[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [historyTab, setHistoryTab]     = useState<'all' | 'deposits' | 'withdrawals'>('all');
 
   // Deposit modal
-  const [showDepModal, setShowDepModal] = useState(false);
-  const [depAmt, setDepAmt] = useState(0);
-  const [depFile, setDepFile] = useState<File | null>(null);
-  // const [depMethod, setDepMethod] = useState<'bank' | 'usdt' | 'paystack'>('bank');
-  const [depMethod, setDepMethod] = useState<'bank' | 'usdt' | 'paystack'>('paystack');
-
+  const [depositModal, setDepositModal] = useState(false);
+  const [depositCur, setDepositCur]     = useState<'NGN' | 'USDT'>('NGN');
+  const [depositAmt, setDepositAmt]     = useState('');
+  const [receipt, setReceipt]           = useState<File | null>(null);
+  const [txHash, setTxHash]             = useState('');
+  const [submitting, setSubmitting]     = useState(false);
+  const [depositErr, setDepositErr]     = useState('');
 
   // Withdrawal modal
-  const [showWdrModal, setShowWdrModal] = useState(false);
-  const [wdrAmt, setWdrAmt] = useState(0);
-  const [wdrMethod, setWdrMethod] = useState<'bank' | 'usdt'>('bank');
-  const [wdrBankName, setWdrBankName] = useState('');
-  const [wdrAcctNum, setWdrAcctNum] = useState('');
-  const [wdrAcctName, setWdrAcctName] = useState('');
-  const [wdrUsdtAddr, setWdrUsdtAddr] = useState('');
-  const [wdrUsdtNet, setWdrUsdtNet] = useState('');
+  const [wdrModal, setWdrModal]         = useState(false);
+  const [wdrCur, setWdrCur]             = useState<'NGN' | 'USDT'>('NGN');
+  const [wdrAmt, setWdrAmt]             = useState('');
+  const [bankName, setBankName]         = useState('');
+  const [accNum, setAccNum]             = useState('');
+  const [accName, setAccName]           = useState('');
+  const [wdrAddr, setWdrAddr]           = useState('');
+  const [wdrNet, setWdrNet]             = useState('');
+  const [wdrErr, setWdrErr]             = useState('');
 
-  // Bank details for display
-  const [bankDetails, setBankDetails] = useState({
-    bankName: '',
-    accountNumber: '',
-    accountName: ''
-  });
-
-  // Paystack states
-  const [email, setEmail] = useState('');
-  const [reference, setReference] = useState('');
-  // const publicKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || 'pk_test_051a719bd448e98834a3994149ce4f61552ff1f0';
-
-  // FIX: Hardcode the public key for now
-  const publicKey = 'pk_test_051a719bd448e98834a3994149ce4f61552ff1f0';
-
-  const withdrawable = balance;
-
-  // Paystack payment function
-  const initializePaystackPayment = () => {
-    if (!window.PaystackPop) {
-      setMsg('Payment processor not loaded. Please refresh and try again.');
-      return;
-    }
-
-    if (!email || depAmt < 5000) {
-      setMsg('Please enter a valid email and amount (minimum ₦5,000).');
-      return;
-    }
-
-    const paystack = window.PaystackPop.setup({
-      key: publicKey,
-      email: email,
-      amount: depAmt * 100, // Convert to kobo
-      ref: reference,
-      currency: 'NGN',
-      onSuccess: (transaction: any) => {
-        setMsg('Payment successful! Verifying...');
-        verifyPaystackPayment(transaction.reference);
-      },
-      onCancel: () => {
-        setMsg('Payment was cancelled.');
-      },
-      onClose: () => {
-        setMsg('Payment window closed.');
-      }
-    });
-
-    paystack.openIframe();
-  };
-
-  // Verify Paystack payment
-  const verifyPaystackPayment = async (ref: string) => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      await axios.post('/wallet/verify-paystack', { reference: ref });
-      setMsg('Deposit successful! Balance updated.');
-      setShowDepModal(false);
-      setDepAmt(0);
-      fetchAll();
-    } catch (err: any) {
-      console.error(err);
-      setMsg(err.response?.data?.error || 'Payment verification failed. If charged, contact support.');
-    } finally {
-      setLoading(false);
-    }
-  };
+      const token = getToken();
+      if (!token) return;
+      const h = { Authorization: `Bearer ${token}` };
 
-  // Fetch bank details, wallet data, and user email
-  useEffect(() => {
-    const fetchBankDetails = async () => {
-      try {
-        const res = await axios.get('/wallet/bank-details');
-        setBankDetails(res.data);
-      } catch (err) {
-        console.error('Failed to fetch bank details:', err);
-      }
-    };
-
-
-
-    fetchBankDetails();
-
-    fetchAll();
-
-    // const interval = setInterval(fetchAll, 30000); // 30s refresh
-
-    // return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const user = getUserFromToken();
-    if (user?.email) {
-      setEmail(user.email);
-    } else {
-      setMsg('Email not found in token. Please re-login.');
-    }
-    const fetchBankDetails = async () => {
-      try {
-        const res = await axios.get('/wallet/bank-details');
-        setBankDetails(res.data);
-      } catch (err) {
-        console.error('Failed to fetch bank details:', err);
-      }
-    };
-
-    fetchBankDetails();
-    fetchAll();
-    getUserFromToken()
-
-  }, []);
-
-  // Generate unique reference when deposit modal opens
-  useEffect(() => {
-    if (showDepModal) {
-      setReference(`dep_${new Date().getTime()}_${Math.random().toString(36).substr(2, 9)}`);
-    }
-  }, [showDepModal]);
-
-  // Fetch wallet, deposits, withdrawals
-  const fetchAll = async () => {
-    setLoading(true);
-    try {
-      const [wRes, dRes, wdRes] = await Promise.all([
-        axios.get<{ balance: number; escrowLocked: number }>('/wallet'),
-        axios.get<Deposit[]>('/wallet/deposits'),
-        axios.get<Withdrawal[]>('/withdrawals'),
+      const [walletRes, depositsRes, wdrRes, txRes] = await Promise.allSettled([
+        axios.get(`${API_BASE}/wallet`, { headers: h }),
+        axios.get(`${API_BASE}/wallet/deposits`, { headers: h }),
+        axios.get(`${API_BASE}/withdrawals`, { headers: h }),
+        axios.get(`${API_BASE}/transactions`, { headers: h }),
       ]);
-      setBalance(wRes.data.balance);
-      setEscrow(wRes.data.escrowLocked);
-      setDeposits(dRes.data);
-      setWithdrawals(wdRes.data);
+
+      if (walletRes.status === 'fulfilled') {
+        const d = walletRes.value.data;
+        setWallet({
+          balance:          d.balance          || 0,
+          usdtBalance:      d.usdtBalance      || 0,
+          escrowLocked:     d.escrowLocked     || 0,
+          usdtEscrowLocked: d.usdtEscrowLocked || 0,
+        });
+      }
+      if (depositsRes.status === 'fulfilled')  setDeposits(depositsRes.value.data  || []);
+      if (wdrRes.status === 'fulfilled')        setWithdrawals(wdrRes.value.data    || []);
+      if (txRes.status === 'fulfilled')         setTransactions(txRes.value.data    || []);
     } catch (e) {
-      console.error(e);
-      setMsg('Failed to load wallet data.');
+      console.error('wallet load error:', e);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // Submit manual deposit (bank or usdt)
-  const submitDeposit = async (e: FormEvent) => {
-    e.preventDefault();
-
-    if (depAmt < 10000) {
-      setMsg('Minimum deposit amount is ₦10,000.');
-      return;
-    }
-
-    if (depAmt <= 0 || !depFile) {
-      setMsg('Please enter an amount and upload your receipt.');
-      return;
-    }
-
-    const form = new FormData();
-    form.append('amount', depAmt.toString());
-    form.append('receipt', depFile);
-    form.append('paymentMethod', depMethod);
-
+  const loadPlatform = useCallback(async () => {
     try {
-      await axios.post('/wallet/deposits', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const token = getToken();
+      const res = await axios.get(`${API_BASE}/wallet/platform-details`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-      setMsg('Deposit request sent – awaiting approval.');
-      setShowDepModal(false);
-      setDepAmt(0);
-      setDepFile(null);
-      fetchAll();
-    } catch (err: any) {
-      console.error(err);
-      setMsg(err.response?.data?.error || 'Deposit submission failed.');
-    }
-  };
+      setPlatform(res.data);
+    } catch (_) {}
+  }, []);
 
-  // Submit withdrawal
-  const submitWithdraw = async (e: FormEvent) => {
-    e.preventDefault();
-    if (wdrAmt <= 0 || wdrAmt > withdrawable) {
-      setMsg('Invalid withdrawal amount.');
-      return;
-    }
-    const payload: any = { amount: wdrAmt, paymentMethod: wdrMethod };
-    if (wdrMethod === 'bank') {
-      if (!wdrBankName || !wdrAcctNum || !wdrAcctName) {
-        setMsg('Bank details are required.');
-        return;
-      }
-      payload.bankName = wdrBankName;
-      payload.accountNumber = wdrAcctNum;
-      payload.accountName = wdrAcctName;
-    } else {
-      if (!wdrUsdtAddr || !wdrUsdtNet) {
-        setMsg('USDT address & network required.');
-        return;
-      }
-      payload.usdtAddress = wdrUsdtAddr;
-      payload.usdtNetwork = wdrUsdtNet;
-    }
+  useEffect(() => { load(); loadPlatform(); }, [load, loadPlatform]);
+
+  // ── Deposit submit ─────────────────────────────────────────────────────────
+  const submitDeposit = async () => {
+    setDepositErr('');
+    const amt  = depositCur === 'NGN' ? parseInt(depositAmt) : parseFloat(depositAmt);
+    const min  = depositCur === 'NGN' ? (platform?.limits.ngnMinDeposit || 1000) : (platform?.usdt.minDeposit || 10);
+    if (!amt || amt < min) { setDepositErr(`Minimum: ${depositCur === 'NGN' ? fmtNGN(min) : `$${min} USDT`}`); return; }
+    if (!receipt) { setDepositErr('Please attach your payment receipt'); return; }
+    if (depositCur === 'USDT' && !txHash.trim()) { setDepositErr('Transaction hash is required for USDT deposits'); return; }
+
+    setSubmitting(true);
     try {
-      await axios.post('/withdrawals', payload);
-      setMsg('Withdrawal requested – admin will process within 30 mins.');
-      setShowWdrModal(false);
-      setWdrAmt(0);
-      fetchAll();
-    } catch (err: any) {
-      console.error(err);
-      setMsg(err.response?.data?.error || 'Withdrawal request failed.');
-    }
+      const token = getToken();
+      const form = new FormData();
+      form.append('amount', amt.toString());
+      form.append('currency', depositCur);
+      form.append('paymentMethod', depositCur === 'NGN' ? 'bank_transfer' : 'usdt');
+      form.append('receipt', receipt);
+      if (depositCur === 'USDT') { form.append('txHash', txHash.trim()); form.append('network', platform?.usdt.network || 'TRC20'); }
+
+      await axios.post(`${API_BASE}/wallet/deposits`, form, {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
+        timeout: 30000,
+      });
+
+      setDepositModal(false); setDepositAmt(''); setReceipt(null); setTxHash('');
+      load();
+    } catch (e: any) {
+      setDepositErr(e.response?.data?.error || 'Could not submit deposit');
+    } finally { setSubmitting(false); }
   };
 
-  if (loading) return <p className="text-center py-8">Loading…</p>;
+  // ── Withdrawal submit ──────────────────────────────────────────────────────
+  const submitWithdrawal = async () => {
+    setWdrErr('');
+    const amt   = wdrCur === 'NGN' ? parseInt(wdrAmt) : parseFloat(wdrAmt);
+    const avail = wdrCur === 'NGN' ? wallet.balance : wallet.usdtBalance;
+    const minW  = wdrCur === 'NGN' ? (platform?.limits.ngnMinWithdrawal || 500) : (platform?.usdt.minWithdrawal || 5);
+
+    if (!amt || isNaN(amt) || amt <= 0)  { setWdrErr('Enter a valid amount'); return; }
+    if (amt > avail)                      { setWdrErr(`Exceeds your available ${wdrCur} balance`); return; }
+    if (amt < minW)                       { setWdrErr(`Minimum: ${wdrCur === 'NGN' ? fmtNGN(minW) : `$${minW}`}`); return; }
+    if (wdrCur === 'NGN' && (!bankName || !accNum || !accName)) { setWdrErr('Fill in all bank details'); return; }
+    if (wdrCur === 'USDT' && (!wdrAddr || !wdrNet)) { setWdrErr('Fill in USDT address and network'); return; }
+
+    setSubmitting(true);
+    try {
+      const token = getToken();
+      await axios.post(`${API_BASE}/withdrawals`, {
+        amount: amt, currency: wdrCur,
+        paymentMethod: wdrCur === 'NGN' ? 'bank' : 'usdt',
+        ...(wdrCur === 'NGN'
+          ? { bank_name: bankName, account_number: accNum, account_name: accName }
+          : { usdt_address: wdrAddr, usdt_network: wdrNet }),
+      }, { headers: { Authorization: `Bearer ${token}` } });
+
+      setWdrModal(false); setWdrAmt(''); setBankName(''); setAccNum(''); setAccName(''); setWdrAddr(''); setWdrNet('');
+      load();
+    } catch (e: any) {
+      setWdrErr(e.response?.data?.error || 'Could not submit withdrawal');
+    } finally { setSubmitting(false); }
+  };
+
+  // ── History list ───────────────────────────────────────────────────────────
+  const historyItems = (() => {
+    if (historyTab === 'deposits')    return deposits.map((d) => ({ ...d, type: 'deposit' }));
+    if (historyTab === 'withdrawals') return withdrawals.map((w) => ({ ...w, type: 'withdrawal' }));
+    const merged = [
+      ...transactions,
+      ...deposits.map((d) => ({ ...d, type: 'deposit' })),
+      ...withdrawals.map((w) => ({ ...w, type: 'withdrawal' })),
+    ];
+    const seen = new Set<string>();
+    return merged
+      .filter((x) => { if (seen.has(x._id)) return false; seen.add(x._id); return true; })
+      .sort((a, b) => new Date((b as any).createdAt).getTime() - new Date((a as any).createdAt).getTime())
+      .slice(0, 30);
+  })();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-3">
+        <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-gray-500 text-sm font-medium">Loading wallet…</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 p-4 max-w-4xl mx-auto">
-      {msg && (
-        <div className={`px-4 py-2 rounded ${msg.includes('success') ? 'bg-green-100 text-green-800' :
-          msg.includes('fail') ? 'bg-red-100 text-red-800' :
-            'bg-blue-100 text-blue-800'
-          }`}>
-          {msg}
-        </div>
-      )}
+   <div className="min-h-screen bg-gray-50">
+      {/* ── Hero ── */}
+      <div className="bg-gradient-to-br from-emerald-900 via-emerald-800 to-emerald-700 px-6 pt-8 pb-6">
+        <h1 className="text-2xl font-extrabold text-white mb-1">My Wallet</h1>
+        <p className="text-emerald-200 text-sm mb-5">Campaign budgets & available funds</p>
 
-      {/* Balances */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <p className="text-sm font-medium text-gray-500">Available Balance</p>
-          <p className="mt-2 text-2xl font-bold">₦{balance.toLocaleString()}</p>
-        </div>
-        <div className="bg-white rounded-lg shadow p-6">
-          <p className="text-sm font-medium text-gray-500">In Escrow</p>
-          <p className="mt-2 text-2xl font-bold">₦{escrow.toLocaleString()}</p>
+        {/* Dual balance cards */}
+        <div className="grid grid-cols-2 gap-3">
+          <BalanceCard
+            label="NGN Balance"
+            amount={fmtNGN(wallet.balance)}
+            sub={`${fmtNGN(wallet.escrowLocked)} in escrow`}
+            accentText="text-emerald-200"
+            subText="text-emerald-200/80"
+            onDeposit={() => { setDepositCur('NGN'); setDepositModal(true); }}
+            onWithdraw={() => { setWdrCur('NGN'); setWdrModal(true); }}
+          />
+          <BalanceCard
+            label="USDT Balance"
+            amount={fmtUSDT(wallet.usdtBalance)}
+            sub={`$${wallet.usdtEscrowLocked.toFixed(2)} in escrow`}
+            accentText="text-yellow-200"
+            subText="text-yellow-200/80"
+            onDeposit={() => { setDepositCur('USDT'); setDepositModal(true); }}
+            onWithdraw={() => { setWdrCur('USDT'); setWdrModal(true); }}
+          />
         </div>
       </div>
 
-      {/* Action Buttons */}
-      <div className="flex gap-4">
-        <button
-          onClick={() => setShowDepModal(true)}
-          className="px-5 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition flex items-center gap-2"
-        >
-          <ArrowDownCircle className="w-5 h-5" />
-          Deposit Funds
-        </button>
-
-        {/* <button
-          onClick={() => setShowWdrModal(true)}
-          disabled={withdrawable <= 0}
-          className="px-5 py-2 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 transition flex items-center gap-2 disabled:opacity-50"
-        >
-          <UploadCloud className="w-5 h-5" />
-          Withdraw Funds
-        </button> */}
-      </div>
-
-      {/* Deposit Requests */}
-      <section>
-        <h2 className="text-lg font-semibold mb-2">
-          Your Deposit Requests
-        </h2>
-        <ul className="space-y-2">
-          {deposits.length ? deposits.map((d, idx) => (
-            <li
-              key={d._id}
-              className="flex items-center justify-between bg-white rounded-lg p-4 shadow"
-            >
-              <div className="flex items-center gap-4">
-                <FileText className="w-5 h-5 text-gray-500" />
-                <div>
-                  <p className="font-medium">₦{d.amount.toLocaleString()}</p>
-                  <p className="text-xs text-gray-500">
-                    {new Date(d.createdAt).toLocaleDateString()}
-                  </p>
-                </div>
+      <div className="max-w-3xl mx-auto p-4 space-y-4">
+        {/* Escrow card */}
+        {(wallet.escrowLocked > 0 || wallet.usdtEscrowLocked > 0) && (
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-9 h-9 bg-amber-50 rounded-xl flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
               </div>
-              <div className="flex items-center gap-4">
-                <span
-                  className={`px-2 py-1 text-xs font-semibold rounded-full ${d.status === 'pending'
-                    ? 'bg-yellow-100 text-yellow-800'
-                    : d.status === 'approved'
-                      ? 'bg-green-100 text-green-800'
-                      : 'bg-red-100 text-red-800'
-                    }`}
-                >
-                  {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
-                </span>
-                <a
-                  href={d.receiptUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-blue-600 hover:underline text-sm"
-                >
-                  View Receipt
-                </a>
+              <div>
+                <h3 className="font-bold text-gray-900 text-sm">Campaign Escrow</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Runs down as creators & clippers earn</p>
               </div>
-            </li>
-          )) : (
-            <p className="text-gray-500">No deposit requests yet.</p>
-          )}
-        </ul>
-      </section>
-
-      {/* Withdrawal Requests */}
-      <section>
-        <h2 className="text-lg font-semibold mb-2">
-          Your Withdrawal Requests
-        </h2>
-        <ul className="space-y-2">
-          {withdrawals.length ? withdrawals.map((w, idx) => (
-            <li
-              key={w._id}
-              className="flex items-center justify-between bg-white rounded-lg p-4 shadow"
-            >
-              <div className="flex items-center gap-4">
-                <FileText className="w-5 h-5 text-gray-500" />
-                <div>
-                  <p className="font-medium">₦{w.amount.toLocaleString()}</p>
-                  <p className="text-xs text-gray-500">
-                    {new Date(w.createdAt).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-              <span
-                className={`px-2 py-1 text-xs font-semibold rounded-full ${w.status === 'pending'
-                  ? 'bg-yellow-100 text-yellow-800'
-                  : w.status === 'completed'
-                    ? 'bg-green-100 text-green-800'
-                    : 'bg-red-100 text-red-800'
-                  }`}
-              >
-                {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
-              </span>
-            </li>
-          )) : (
-            <p className="text-gray-500">No withdrawal requests yet.</p>
-          )}
-        </ul>
-      </section>
-
-
-      {/* Deposit Modal */}
-      <Dialog open={showDepModal} onClose={() => setShowDepModal(false)} className="relative z-50">
-        <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-        <Dialog.Panel className="fixed inset-0 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg p-6 max-w-lg w-full space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center">
-              <Dialog.Title className="text-xl font-semibold">Add Funds</Dialog.Title>
-              <button onClick={() => setShowDepModal(false)}><X className="w-6 h-6" /></button>
             </div>
 
-            <form onSubmit={depMethod !== 'paystack' ? submitDeposit : (e) => e.preventDefault()} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              {wallet.escrowLocked > 0 && (
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center">
+                  <p className="text-xs font-semibold text-amber-700 mb-1">NGN Locked</p>
+                  <p className="text-lg font-extrabold text-amber-700">{fmtNGN(wallet.escrowLocked)}</p>
+                </div>
+              )}
+              {wallet.usdtEscrowLocked > 0 && (
+                <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-3 text-center">
+                  <p className="text-xs font-semibold text-yellow-700 mb-1">USDT Locked</p>
+                  <p className="text-lg font-extrabold text-yellow-700">{fmtUSDT(wallet.usdtEscrowLocked)}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-start gap-2 bg-amber-50 rounded-xl p-3">
+              <svg className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-xs text-amber-800 leading-relaxed">
+                When you fund a campaign, the budget is locked here. Each time admin approves a creator's work, that amount is deducted and paid to the creator. Remaining escrow is refunded if you cancel.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Transaction history */}
+        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+          <h2 className="text-base font-bold text-gray-900 mb-4">Transaction History</h2>
+
+          <div className="flex bg-gray-100 rounded-xl p-1 mb-4">
+            {(['all', 'deposits', 'withdrawals'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setHistoryTab(t)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-all ${
+                  historyTab === t ? 'bg-white shadow-sm text-emerald-600 font-bold' : 'text-gray-600'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          {historyItems.length === 0 ? (
+            <div className="flex flex-col items-center py-10 gap-2">
+              <svg className="w-12 h-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              <p className="text-gray-400 text-sm font-medium">No transactions yet</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {historyItems.map((item: any) => {
+                const ic  = txIcon(item.type || 'payment');
+                const cur = (item.currency as 'NGN' | 'USDT') || 'NGN';
+                return (
+                  <div key={item._id} className="flex items-center gap-3 py-3">
+                    <div className={`w-10 h-10 ${ic.bg} rounded-2xl flex items-center justify-center shrink-0`}>
+                      <span className={`text-base ${ic.color}`}>
+                        {isCredit(item.type) ? '↓' : '↑'}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 capitalize truncate">
+                        {item.description || ic.label || (item.type || 'Transaction').replace(/_/g, ' ')}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {new Date(item.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`text-sm font-bold ${isCredit(item.type) ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {isCredit(item.type) ? '+' : '-'}{fmt(item.amount, cur)}
+                      </p>
+                      <span className={`text-[11px] font-semibold capitalize ${statusColor(item.status)}`}>
+                        {item.status}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ══════════════════════ DEPOSIT MODAL ══════════════════════ */}
+      {depositModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+              <h2 className="text-lg font-extrabold text-gray-900">Deposit Funds</h2>
+              <button
+                onClick={() => { setDepositModal(false); setDepositErr(''); }}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+              >
+                <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {depositErr && (
+                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 font-medium">
+                  {depositErr}
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Payment Method</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {(['paystack', 'bank'] as const).map(m => (
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Currency</label>
+                <div className="flex bg-gray-100 rounded-xl p-1">
+                  {(['NGN', 'USDT'] as const).map((c) => (
                     <button
-                      key={m}
-                      type="button"
-                      onClick={() => setDepMethod(m)}
-                      className={`flex items-center justify-center gap-2 p-3 rounded-lg border transition-all ${depMethod === m
-                        ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm'
-                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                        }`}
+                      key={c}
+                      onClick={() => { setDepositCur(c); setDepositErr(''); }}
+                      className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                        depositCur === c ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'
+                      }`}
                     >
-                      {m === 'bank' ? (
-                        <>
-                          <Landmark className="w-5 h-5" />
-                          Bank Transfer
-                        </>
-                      ) : (
-                        <>
-                          <CircleDollarSign className="w-5 h-5" />
-                          Paystack - Coming Soon
-                        </>
-                      )}
+                      {c}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {depMethod === 'bank' && (
-                <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <Info className="w-5 h-5 text-blue-600 flex-shrink-0" />
-                    <p className="text-sm text-blue-800">
-                      Transfer to our bank account and upload receipt for verification.
-                    </p>
-                  </div>
-                  <div className="space-y-2 text-sm">
-                    <p><span className="font-medium">Bank:</span> {bankDetails.bankName}</p>
-                    <p><span className="font-medium">Account:</span> {bankDetails.accountNumber}</p>
-                    <p><span className="font-medium">Name:</span> {bankDetails.accountName}</p>
-                  </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Amount</label>
+                <div className="flex items-center border border-gray-200 bg-gray-50 rounded-xl px-4">
+                  <span className="text-xl font-bold text-gray-500 mr-2">{depositCur === 'NGN' ? '₦' : '$'}</span>
+                  <input
+                    type="number"
+                    value={depositAmt}
+                    onChange={(e) => { setDepositAmt(e.target.value); setDepositErr(''); }}
+                    placeholder={depositCur === 'NGN' ? '20,000' : '10'}
+                    className="flex-1 py-3.5 bg-transparent text-xl font-bold text-gray-900 focus:outline-none"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Min: {depositCur === 'NGN' ? fmtNGN(platform?.limits.ngnMinDeposit || 1000) : `$${platform?.usdt.minDeposit || 10} USDT`}
+                </p>
+              </div>
+
+              {/* NGN bank details */}
+              {depositCur === 'NGN' && platform && (
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                  <p className="text-sm font-bold text-gray-700 mb-3">Transfer to this account first</p>
+                  {[['Bank', platform.bank.name], ['Account No.', platform.bank.accountNumber], ['Name', platform.bank.accountName]].map(([l, v]) => (
+                    <div key={l} className="flex justify-between py-2 border-b border-gray-200 last:border-0">
+                      <span className="text-sm text-gray-500">{l}</span>
+                      <span className="text-sm font-bold text-gray-800">{v}</span>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {depMethod === 'paystack' && (
-                <div className="bg-green-50 border border-green-100 rounded-lg p-4 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <Info className="w-5 h-5 text-green-600 flex-shrink-0" />
-                    <p className="text-sm text-green-800">
-                      Pay securely via Paystack (cards, bank, etc.). Funds added instantly on success.
-                    </p>
+              {/* USDT address */}
+              {depositCur === 'USDT' && platform && (
+                <div className="space-y-3">
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                    <p className="text-sm font-bold text-gray-700 mb-3">Send USDT ({platform.usdt.network}) to:</p>
+                    <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-2.5 mb-3">
+                      <span className="flex-1 text-xs font-mono text-gray-800 truncate">{platform.usdt.address}</span>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(platform.usdt.address); }}
+                        className="text-emerald-600 hover:text-emerald-700 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="flex items-start gap-2 bg-amber-50 rounded-lg p-2.5">
+                      <svg className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <p className="text-xs text-amber-800">Only send on {platform.usdt.network}. Wrong network = lost funds.</p>
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-500">
-                    Minimum: ₦10,000. Email: {email}
-                  </p>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Transaction Hash (TXID) *</label>
+                    <textarea
+                      value={txHash}
+                      onChange={(e) => { setTxHash(e.target.value); setDepositErr(''); }}
+                      placeholder="Paste transaction hash from your wallet"
+                      rows={2}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-none"
+                    />
+                  </div>
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₦)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₦</span>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  {depositCur === 'NGN' ? 'Upload Bank Receipt *' : 'Upload Screenshot *'}
+                </label>
+                <label className="flex flex-col items-center justify-center border-2 border-dashed border-emerald-200 rounded-xl py-6 bg-emerald-50 cursor-pointer hover:bg-emerald-100 transition-colors">
+                  <svg className={`w-7 h-7 mb-2 ${receipt ? 'text-emerald-600' : 'text-emerald-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={receipt ? 'M5 13l4 4L19 7' : 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12'} />
+                  </svg>
+                  <span className={`text-sm font-semibold ${receipt ? 'text-emerald-600' : 'text-emerald-600'}`}>
+                    {receipt ? receipt.name : 'Click to attach file'}
+                  </span>
                   <input
-                    type="number"
-                    min="10000"
-                    value={depAmt || ''}
-                    onChange={e => setDepAmt(parseFloat(e.target.value) || 0)}
-                    required
-                    className="pl-8 pr-4 py-2 block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                    type="file"
+                    accept="image/*,application/pdf"
+                    className="hidden"
+                    onChange={(e) => { if (e.target.files?.[0]) { setReceipt(e.target.files[0]); setDepositErr(''); } }}
                   />
-                </div>
-                <p className="mt-1 text-xs text-gray-500">Minimum deposit: ₦5,000</p>
+                </label>
               </div>
 
-              {depMethod !== 'paystack' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Upload Receipt</label>
-                  <div
-                    className={`relative border-2 border-dashed rounded-lg p-4 text-center ${depFile ? 'bg-blue-50 border-blue-500' : 'bg-gray-50 border-gray-300'
+              <button
+                onClick={submitDeposit}
+                disabled={submitting}
+                className="w-full bg-gradient-to-r from-emerald-600 to-emerald-500 text-white font-bold py-4 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center"
+              >
+                {submitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Submit Deposit Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════ WITHDRAWAL MODAL ══════════════════════ */}
+      {wdrModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+              <h2 className="text-lg font-extrabold text-gray-900">Withdraw Funds</h2>
+              <button
+                onClick={() => { setWdrModal(false); setWdrErr(''); }}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+              >
+                <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {wdrErr && (
+                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 font-medium">
+                  {wdrErr}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Currency</label>
+                <div className="flex bg-gray-100 rounded-xl p-1">
+                  {(['NGN', 'USDT'] as const).map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => { setWdrCur(c); setWdrErr(''); }}
+                      className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                        wdrCur === c ? 'bg-white shadow-sm text-emerald-600' : 'text-gray-500'
                       }`}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const file = e.dataTransfer.files?.[0];
-                      if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) {
-                        setDepFile(file);
-                      } else {
-                        setMsg('Please upload an image or PDF file.');
-                      }
-                    }}
-                  >
-                    <UploadCloud className="mx-auto w-8 h-8 text-gray-400" />
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Amount</label>
+                <div className="flex items-center border border-gray-200 bg-gray-50 rounded-xl px-4">
+                  <span className="text-xl font-bold text-gray-500 mr-2">{wdrCur === 'NGN' ? '₦' : '$'}</span>
+                  <input
+                    type="number"
+                    value={wdrAmt}
+                    onChange={(e) => { setWdrAmt(e.target.value); setWdrErr(''); }}
+                    placeholder="0"
+                    className="flex-1 py-3.5 bg-transparent text-xl font-bold text-gray-900 focus:outline-none"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Available: {wdrCur === 'NGN' ? fmtNGN(wallet.balance) : fmtUSDT(wallet.usdtBalance)}
+                </p>
+              </div>
+
+              {wdrCur === 'NGN' ? (
+                <div className="space-y-3">
+                  {[
+                    ['Bank Name',       bankName,  setBankName, 'e.g. Zenith Bank',        'text'],
+                    ['Account Number',  accNum,    setAccNum,   '10-digit number',          'text'],
+                    ['Account Name',    accName,   setAccName,  'Account holder name',      'text'],
+                  ].map(([lbl, val, setter, ph, type]: any) => (
+                    <div key={lbl}>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1.5">{lbl}</label>
+                      <input
+                        type={type}
+                        value={val}
+                        onChange={(e) => { setter(e.target.value); setWdrErr(''); }}
+                        placeholder={ph}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">USDT Wallet Address</label>
                     <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                        const file = e.target.files?.[0] ?? null;
-                        if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) {
-                          setDepFile(file);
-                        } else {
-                          setMsg('Please upload an image or PDF file.');
-                        }
-                      }}
-                      required
-                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      type="text"
+                      value={wdrAddr}
+                      onChange={(e) => { setWdrAddr(e.target.value); setWdrErr(''); }}
+                      placeholder="Your USDT address"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-400"
                     />
-                    {depFile ? (
-                      <p className="mt-2 text-sm text-blue-600 font-medium">
-                        Selected: {depFile.name}
-                      </p>
-                    ) : (
-                      <p className="mt-2 text-sm text-gray-600">
-                        Drag receipt here or click to upload
-                      </p>
-                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Network</label>
+                    <input
+                      type="text"
+                      value={wdrNet}
+                      onChange={(e) => { setWdrNet(e.target.value); setWdrErr(''); }}
+                      placeholder="TRC20 / ERC20 / BEP20"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    />
                   </div>
                 </div>
               )}
 
-              <div className="pt-2 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowDepModal(false)}
-                  className="px-5 py-2 rounded-lg bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition"
-                >
-                  Cancel
-                </button>
-                {depMethod !== 'paystack' ? (
-                  <button
-                    type="submit"
-                    className="px-5 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition flex items-center gap-2"
-                    disabled={loading}
-                  >
-                    {loading ? 'Processing...' : 'Submit Deposit'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={initializePaystackPayment}
-                    disabled={loading || !email || depAmt < 500000000000000000000000}
-                    className="px-5 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-50"
-                  >
-                    Pay with Paystack
-                  </button>
-                )}
-              </div>
-            </form>
+              <button
+                onClick={submitWithdrawal}
+                disabled={submitting}
+                className="w-full bg-gradient-to-r from-red-600 to-red-500 text-white font-bold py-4 rounded-xl hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center"
+              >
+                {submitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Submit Withdrawal'}
+              </button>
+              <p className="text-center text-xs text-gray-500">Processed within 24–48 hours</p>
+            </div>
           </div>
-        </Dialog.Panel>
-      </Dialog>
+        </div>
+      )}
+    </div>
+  );
+}
 
-      {/* Withdrawal Modal (unchanged) */}
-      <Dialog
-        open={showWdrModal}
-        onClose={() => setShowWdrModal(false)}
-        className="relative z-50"
-      >
-        <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-        <Dialog.Panel className="fixed inset-0 flex items-center justify-center p-4">
-          <form onSubmit={submitWithdraw} className="bg-white rounded-lg p-6 max-w-lg w-full space-y-4">
-            <div className="flex justify-between items-center">
-              <Dialog.Title className="text-xl font-semibold">Withdraw Funds</Dialog.Title>
-              <button onClick={() => setShowWdrModal(false)}><X className="w-6 h-6" /></button>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Withdrawal Method</label>
-              <div className="grid grid-cols-2 gap-3">
-                {(['bank', 'usdt'] as const).map(m => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setWdrMethod(m)}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-lg border transition-all ${wdrMethod === m
-                      ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm'
-                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                      }`}
-                  >
-                    {m === 'bank' ? (
-                      <>
-                        <Landmark className="w-5 h-5" />
-                        Bank Transfer
-                      </>
-                    ) : (
-                      <>
-                        <CircleDollarSign className="w-5 h-5" />
-                        USDT
-                      </>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₦)</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₦</span>
-                <input
-                  type="number"
-                  min="1000"
-                  max={withdrawable}
-                  value={wdrAmt}
-                  onChange={e => setWdrAmt(parseFloat(e.target.value))}
-                  required
-                  className="pl-8 pr-4 py-2 block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-              <p className="mt-1 text-xs text-gray-500">
-                Minimum withdrawal: ₦1,000
-              </p>
-            </div>
-
-            {wdrMethod === 'bank' ? (
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
-                  <input
-                    type="text"
-                    value={wdrBankName}
-                    onChange={e => setWdrBankName(e.target.value)}
-                    required
-                    className="block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="e.g. Access Bank"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
-                    <input
-                      type="text"
-                      value={wdrAcctNum}
-                      onChange={e => setWdrAcctNum(e.target.value)}
-                      required
-                      className="block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="10 digits"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
-                    <input
-                      type="text"
-                      value={wdrAcctName}
-                      onChange={e => setWdrAcctName(e.target.value)}
-                      required
-                      className="block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
-                      placeholder="As it appears on bank"
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">USDT Address</label>
-                  <input
-                    type="text"
-                    value={wdrUsdtAddr}
-                    onChange={e => setWdrUsdtAddr(e.target.value)}
-                    required
-                    className="block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500 font-mono"
-                    placeholder="TXXXXXXXXXXXXXXXXXXX"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Network</label>
-                  <select
-                    value={wdrUsdtNet}
-                    onChange={e => setWdrUsdtNet(e.target.value)}
-                    required
-                    className="block w-full rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="">Select network</option>
-                    <option value="TRC20">TRC20</option>
-                    <option value="ERC20">ERC20</option>
-                    <option value="BEP20">BEP20</option>
-                  </select>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Ensure network matches your wallet
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <div className="pt-2 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setShowWdrModal(false)}
-                className="px-5 py-2 rounded-lg bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition flex items-center gap-2"
-                disabled={loading}
-              >
-                {loading ? 'Processing...' : 'Withdraw Funds'}
-              </button>
-            </div>
-          </form>
-        </Dialog.Panel>
-      </Dialog>
+// ─── BalanceCard ──────────────────────────────────────────────────────────────
+function BalanceCard({ label, amount, sub, accentText, subText, onDeposit, onWithdraw }: {
+  label: string; amount: string; sub: string;
+  accentText: string; subText: string;
+  onDeposit: () => void; onWithdraw: () => void;
+}) {
+  return (
+    <div className="bg-white/15 backdrop-blur-sm rounded-2xl p-4 border border-white/20">
+      <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${accentText}`}>{label}</p>
+      <p className="text-white font-extrabold text-xl truncate mb-1">{amount}</p>
+      <p className={`text-xs mb-4 ${subText}`}>{sub}</p>
+      <div className="flex gap-2">
+        <button
+          onClick={onDeposit}
+          className="flex-1 flex items-center justify-center gap-1 bg-white/20 text-white text-xs font-bold py-2 rounded-lg hover:bg-white/30 transition-colors"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+          </svg>
+          Fund
+        </button>
+        <button
+          onClick={onWithdraw}
+          className="flex-1 flex items-center justify-center gap-1 bg-white text-emerald-700 text-xs font-bold py-2 rounded-lg hover:bg-gray-50 transition-colors"
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+          </svg>
+          Withdraw
+        </button>
+      </div>
     </div>
   );
 }

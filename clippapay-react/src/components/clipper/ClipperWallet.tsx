@@ -1,10 +1,25 @@
-import React, { useEffect, useState, FormEvent } from 'react';
+// components/clipper/ClipperWallet.tsx
+// Web conversion of app/(dashboard)/wallet.tsx (mobile)
+// Clipper wallet: earn from clipping → withdraw to bank or USDT
+// Deposit is NOT available for clippers (earnings come from campaigns)
+// Flow: clipper requests withdrawal → funds locked in escrow → admin pays externally
+//       → admin clicks "Mark Paid" → escrow debited → withdrawal complete
+import React, { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
-import { HiOutlineArrowDown, HiOutlineInformationCircle } from 'react-icons/hi';
 
-type Withdrawal = {
+const API_BASE = import.meta.env.VITE_API_URL || 'https://clippapay.com/api';
+const getToken = () => localStorage.getItem('token');
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface PlatformDetails {
+  bank:   { name: string; accountNumber: string; accountName: string };
+  usdt:   { address: string; network: string; minDeposit: number; minWithdrawal: number };
+  limits: { ngnMinDeposit: number; ngnMinWithdrawal: number; usdtRate: number };
+}
+interface Withdrawal {
   _id: string;
   amount: number;
+  currency: 'NGN' | 'USDT';
   paymentMethod: 'bank' | 'usdt';
   bank_name?: string;
   account_number?: string;
@@ -14,363 +29,392 @@ type Withdrawal = {
   status: 'pending' | 'completed' | 'declined';
   declineReason?: string;
   createdAt: string;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const fmtNGN  = (n: number) => `₦${n.toLocaleString('en-NG')}`;
+const fmtUSDT = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
+const fmt     = (n: number, cur: 'NGN' | 'USDT') => cur === 'NGN' ? fmtNGN(n) : fmtUSDT(n);
+
+const statusCfg = (s: string) => {
+  if (['approved', 'completed'].includes(s)) return { textCls: 'text-emerald-600', bgCls: 'bg-emerald-50', dot: 'bg-emerald-400', label: 'Completed' };
+  if (['rejected', 'declined'].includes(s))  return { textCls: 'text-red-600',     bgCls: 'bg-red-50',     dot: 'bg-red-400',     label: 'Declined'  };
+  return                                            { textCls: 'text-amber-600',   bgCls: 'bg-amber-50',   dot: 'bg-amber-400',   label: 'Pending'   };
 };
 
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function ClipperWallet() {
-  const [balance, setBalance] = useState(0);
-  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [balance,      setBalance]      = useState(0);
+  const [usdtBalance,  setUsdtBalance]  = useState(0);
+  const [withdrawals,  setWithdrawals]  = useState<Withdrawal[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [platform,     setPlatform]     = useState<PlatformDetails | null>(null);
+  const [currency,     setCurrency]     = useState<'NGN' | 'USDT'>('NGN');
 
-  // Withdrawal dialog state
-  const [showWdrModal, setShowWdrModal] = useState(false);
-  const [wdrAmt, setWdrAmt] = useState(0);
-  const [wdrBankName, setWdrBankName] = useState('');
-  const [wdrAcctNum, setWdrAcctNum] = useState('');
-  const [wdrAcctName, setWdrAcctName] = useState('');
-  const [processing, setProcessing] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'bank' | 'usdt'>('bank');
-  const [usdtAddress, setUsdtAddress] = useState('');
-  const [usdtNetwork, setUsdtNetwork] = useState('');
-  const usdtRate = 1500; // ₦1500 per 1 USDT
-  const usdtEquivalent = wdrAmt > 0 ? (wdrAmt / usdtRate).toFixed(2) : '0.00';
+  // Limits from platform (with defaults)
+  const minNgnWithdraw  = platform?.limits.ngnMinWithdrawal ?? 1000;
+  const minUsdtWithdraw = platform?.usdt.minWithdrawal      ?? 5;
 
-  // Minimum withdrawal amounts
-  const MIN_BANK_WITHDRAWAL = 200; // ₦200
-  const MIN_USDT_WITHDRAWAL = 1; // 1 USDT
+  // Withdrawal modal
+  const [wdrOpen,   setWdrOpen]   = useState(false);
+  const [wdrAmt,    setWdrAmt]    = useState('');
+  const [wdrMethod, setWdrMethod] = useState<'bank' | 'usdt'>('bank');
+  const [bankName,  setBankName]  = useState('');
+  const [accNum,    setAccNum]    = useState('');
+  const [accName,   setAccName]   = useState('');
+  const [wdrAddr,   setWdrAddr]   = useState('');
+  const [wdrNet,    setWdrNet]    = useState('');
+  const [wdrErr,    setWdrErr]    = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  // fetch wallet & withdrawals
-  const fetchAll = async () => {
+  // ── Fetch ────────────────────────────────────────────────────────────────
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [wRes, wdRes] = await Promise.all([
-        axios.get<{ balance: number }>('/wallet'),
-        axios.get<Withdrawal[]>('/withdrawals'),
+      const token = getToken();
+      if (!token) return;
+      const h = { Authorization: `Bearer ${token}` };
+
+      const [walletRes, wdrRes, platformRes] = await Promise.allSettled([
+        axios.get(`${API_BASE}/wallet`,                   { headers: h }),
+        axios.get(`${API_BASE}/wallet/withdrawals`,       { headers: h }),
+        axios.get(`${API_BASE}/wallet/platform-details`,  { headers: h }),
       ]);
-      setBalance(wRes.data.balance);
-      setWithdrawals(wdRes.data);
+
+      if (walletRes.status   === 'fulfilled') {
+        setBalance(walletRes.value.data.balance     || 0);
+        setUsdtBalance(walletRes.value.data.usdtBalance || 0);
+      }
+      if (wdrRes.status      === 'fulfilled') setWithdrawals(wdrRes.value.data     || []);
+      if (platformRes.status === 'fulfilled') setPlatform(platformRes.value.data);
     } catch (e) {
-      console.error(e);
-      setMsg('Failed to load wallet data.');
+      console.error('wallet load:', e);
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchAll();
   }, []);
 
-  // Check if withdrawal amount meets minimum requirements
-  const isValidWithdrawalAmount = () => {
-    if (paymentMethod === 'bank') {
-      return wdrAmt >= MIN_BANK_WITHDRAWAL;
-    } else {
-      return (wdrAmt / usdtRate) >= MIN_USDT_WITHDRAWAL;
-    }
-  };
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // submit withdrawal request
-  const submitWithdraw = async (e: FormEvent) => {
-    e.preventDefault();
-    setProcessing(true);
-    setMsg(null);
+  // ── Open withdraw ────────────────────────────────────────────────────────
+  const openWithdraw = () => {
+    const bal = currency === 'NGN' ? balance : usdtBalance;
+    const min = currency === 'NGN' ? minNgnWithdraw : minUsdtWithdraw;
 
-    // Check basic amount validity
-    if (wdrAmt <= 0 || wdrAmt > balance) {
-      setMsg('Invalid withdrawal amount.');
-      setProcessing(false);
-      return;
-    }
-
-    // Check minimum withdrawal amount
-    if (!isValidWithdrawalAmount()) {
-      setMsg(
-        paymentMethod === 'bank'
-          ? `Minimum bank withdrawal is ₦${MIN_BANK_WITHDRAWAL.toLocaleString()}`
-          : `Minimum USDT withdrawal is ${MIN_USDT_WITHDRAWAL} USDT (₦${(MIN_USDT_WITHDRAWAL * usdtRate).toLocaleString()})`
+    if (bal < min) {
+      alert(
+        `Can't Withdraw Yet\n\nYour ${currency} balance (${fmt(bal, currency)}) is below the minimum withdrawal of ${
+          currency === 'NGN' ? fmtNGN(min) : `${min} USDT`
+        }.`
       );
-      setProcessing(false);
       return;
     }
 
-    // Payment method–specific validation
-    if (paymentMethod === 'bank') {
-      if (!wdrBankName || !wdrAcctNum || !wdrAcctName) {
-        setMsg('All bank details are required.');
-        setProcessing(false);
-        return;
-      }
-    } else if (paymentMethod === 'usdt') {
-      if (!usdtAddress || !usdtNetwork) {
-        setMsg('USDT address and network are required.');
-        setProcessing(false);
-        return;
-      }
+    setWdrAmt(''); setWdrErr('');
+    setBankName(''); setAccNum(''); setAccName('');
+    setWdrAddr(''); setWdrNet('');
+    setWdrMethod(currency === 'NGN' ? 'bank' : 'usdt');
+    setWdrOpen(true);
+  };
+
+  // ── Submit withdrawal ────────────────────────────────────────────────────
+  const submitWithdrawal = async () => {
+    setWdrErr('');
+    const amt   = currency === 'NGN' ? parseInt(wdrAmt, 10) : parseFloat(wdrAmt);
+    const avail = currency === 'NGN' ? balance : usdtBalance;
+    const min   = currency === 'NGN' ? minNgnWithdraw : minUsdtWithdraw;
+
+    if (!wdrAmt || isNaN(amt) || amt <= 0) { setWdrErr('Please enter a valid amount.'); return; }
+    if (amt > avail) { setWdrErr(`Amount exceeds your ${currency} balance.`); return; }
+    if (amt < min)   { setWdrErr(`Minimum ${currency} withdrawal is ${currency === 'NGN' ? fmtNGN(min) : `${min} USDT`}.`); return; }
+
+    if (currency === 'NGN') {
+      if (!bankName || !accNum || !accName) { setWdrErr('Please fill in all bank details.'); return; }
+    } else {
+      if (!wdrAddr || !wdrNet) { setWdrErr('Please provide your USDT address and network.'); return; }
     }
 
+    setSubmitting(true);
     try {
-      await axios.post('/withdrawals', {
-        amount: wdrAmt,
-        paymentMethod,
-        ...(paymentMethod === 'bank'
-          ? {
-            bankName: wdrBankName,
-            accountNumber: wdrAcctNum,
-            accountName: wdrAcctName,
-          }
-          : {
-            usdtAddress,
-            usdtNetwork,
-          }),
-      });
+      const token = getToken();
+      // POST to /api/wallet/withdrawals — locks funds in escrow until admin approves
+      await axios.post(`${API_BASE}/wallet/withdrawals`, {
+        amount:        amt,
+        currency,
+        paymentMethod: currency === 'NGN' ? 'bank' : 'usdt',
+        ...(currency === 'NGN'
+          ? { bank_name: bankName, account_number: accNum, account_name: accName }
+          : { usdt_address: wdrAddr, usdt_network: wdrNet }),
+      }, { headers: { Authorization: `Bearer ${token}` } });
 
-      setMsg('Withdrawal requested – admin will process within 30 mins.');
-      setShowWdrModal(false);
-
-      // Clear all fields
-      setWdrAmt(0);
-      setWdrBankName('');
-      setWdrAcctNum('');
-      setWdrAcctName('');
-      setUsdtAddress('');
-      setUsdtNetwork('');
-
+      setWdrOpen(false);
       fetchAll();
-    } catch (err: any) {
-      console.error(err);
-      setMsg(err.response?.data?.error || 'Withdrawal request failed.');
+    } catch (e: any) {
+      setWdrErr(e.response?.data?.error || 'Failed to submit withdrawal request.');
     } finally {
-      setProcessing(false);
+      setSubmitting(false);
     }
   };
 
-  if (loading) return <p className="text-center py-10">Loading wallet…</p>;
+  const resetForm = () => {
+    setWdrAmt(''); setWdrErr('');
+    setBankName(''); setAccNum(''); setAccName('');
+    setWdrAddr(''); setWdrNet('');
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────────
+  if (loading) return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-3">
+      <div className="w-9 h-9 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      <p className="text-sm text-gray-400 font-medium">Loading wallet…</p>
+    </div>
+  );
+
+  const displayBalance = currency === 'NGN' ? fmtNGN(balance) : fmtUSDT(usdtBalance);
 
   return (
-    <div className="space-y-6 max-w-3xl mx-auto p-4">
-      {msg && (
-        <div className={`px-4 py-2 rounded ${msg.includes('Failed') ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
-          {msg}
-        </div>
-      )}
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-2xl mx-auto px-5 py-6 space-y-5">
 
-      <h2 className="text-2xl font-semibold">My Wallet</h2>
-      <div className="bg-white p-6 rounded-lg shadow mb-6 relative">
-        <p className="text-sm text-gray-600">Available Balance</p>
-        <p className="text-3xl font-bold">₦{balance.toLocaleString()}</p>
-        <div className="mt-2 flex items-center text-sm">
-          <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
-            <HiOutlineInformationCircle className="inline mr-1" />
-            Minimum withdrawal: ₦200 or 1 USDT
-          </span>
+        {/* ── Header ── */}
+        <div>
+          <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Wallet</h1>
+          <p className="text-sm text-gray-500 mt-1">Manage your earnings and withdrawals</p>
+        </div>
+
+        {/* ── Currency toggle ── */}
+        <div className="flex bg-gray-100 rounded-xl p-1">
+          {(['NGN', 'USDT'] as const).map((c) => (
+            <button key={c} onClick={() => setCurrency(c)}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                currency === c ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Balance card ── */}
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-9 h-9 bg-indigo-50 rounded-xl flex items-center justify-center">
+              <svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              </svg>
+            </div>
+            <span className="text-sm font-semibold text-gray-500">
+              {currency === 'NGN' ? 'Available Balance' : 'USDT Balance'}
+            </span>
+          </div>
+
+          <p className="text-4xl font-extrabold text-gray-900 mb-5 tracking-tight">{displayBalance}</p>
+
+          {/* Withdraw button only — clippers earn, they don't deposit */}
+          <button
+            onClick={openWithdraw}
+            className="w-full flex items-center justify-center gap-2 bg-red-500 text-white font-bold py-3.5 rounded-xl text-base hover:bg-red-600 active:scale-[0.98] transition-all"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+            </svg>
+            Withdraw
+          </button>
+        </div>
+
+        {/* ── Withdrawal history ── */}
+        <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+              </svg>
+              <h2 className="text-lg font-bold text-gray-900">Withdrawal History</h2>
+            </div>
+            <button onClick={fetchAll} className="text-gray-400 hover:text-gray-600 transition-colors" title="Refresh">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </div>
+
+          {withdrawals.length === 0 ? (
+            <div className="flex flex-col items-center py-10 gap-3">
+              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                <svg className="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                </svg>
+              </div>
+              <p className="text-base font-bold text-gray-700">No withdrawals yet</p>
+              <p className="text-sm text-gray-400">Your withdrawal history will appear here</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {withdrawals.slice(0, 10).map((w) => {
+                const cfg = statusCfg(w.status);
+                return (
+                  <div key={w._id} className="flex items-center justify-between py-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-red-50 rounded-2xl flex items-center justify-center shrink-0">
+                        <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-gray-900">{fmt(w.amount, w.currency)}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {w.currency}
+                          {w.paymentMethod === 'bank' && w.bank_name ? ` · ${w.bank_name}` : ''}
+                          {w.paymentMethod === 'usdt' && w.usdt_network ? ` · USDT ${w.usdt_network}` : ''}
+                          {' · '}{new Date(w.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </p>
+                        {w.declineReason && (
+                          <p className="text-xs text-red-500 mt-0.5 italic">{w.declineReason}</p>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold capitalize ${cfg.bgCls} ${cfg.textCls}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+                      {cfg.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
-      <button
-        onClick={() => setShowWdrModal(true)}
-        disabled={balance <= 0}
-        className="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition disabled:opacity-50"
-      >
-        <HiOutlineArrowDown className="w-5 h-5 mr-2" />
-        Withdraw Funds
-      </button>
 
-      {/* WITHDRAWAL REQUESTS TABLE */}
-      <h3 className="text-xl font-semibold mt-8">My Withdrawal Requests</h3>
-      <div className="overflow-x-auto bg-white rounded-lg shadow">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">Date</th>
-              <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">Amount</th>
-              <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">Payment Method</th>
-              <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">Details</th>
-              <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">Status</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {withdrawals.map(w => (
-              <tr key={w._id}>
-                <td className="px-4 py-2 text-sm">{new Date(w.createdAt).toLocaleDateString()}</td>
-                <td className="px-4 py-2 text-sm">₦{w.amount.toLocaleString()}</td>
-                <td className="px-4 py-2 text-sm capitalize">{w.paymentMethod}</td>
-                <td className="px-4 py-2 text-sm">
-                  {w.paymentMethod === 'bank' ? (
-                    <>
-                      <div><strong>Bank:</strong> {w.bank_name}</div>
-                      <div><strong>Acct #:</strong> {w.account_number}</div>
-                      <div><strong>Name:</strong> {w.account_name}</div>
-                    </>
-                  ) : (
-                    <>
-                      <div><strong>Address:</strong> {w.usdt_address}</div>
-                      <div><strong>Network:</strong> {w.usdt_network}</div>
-                    </>
-                  )}
-                </td>
-                <td className="px-4 py-2 text-sm">
-                  {w.status === 'declined' ? (
-                    <span className="text-red-600">Declined{w.declineReason ? ': ' + w.declineReason : ''}</span>
-                  ) : w.status === 'completed' || w.status === 'paid' ? (
-                    <span className="text-green-600">Paid</span>
-                  ) : (
-                    <span className="text-yellow-600">Pending</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {withdrawals.length === 0 && (
-              <tr>
-                <td colSpan={5} className="text-center py-6 text-gray-400">
-                  No withdrawal requests yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* ══════════════════ WITHDRAWAL MODAL ══════════════════ */}
+      {wdrOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md max-h-[92vh] overflow-y-auto shadow-2xl">
 
-      {showWdrModal && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="bg-blue-600 text-white p-6">
-              <h3 className="text-xl font-bold">Withdraw Funds</h3>
-              <p className="text-blue-100 text-sm mt-1">Available balance: ₦{balance.toLocaleString()}</p>
+            {/* Drag handle (mobile feel) */}
+            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mt-3 mb-1 sm:hidden" />
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="text-xl font-extrabold text-gray-900">Withdraw {currency}</h2>
+              <button
+                onClick={() => { setWdrOpen(false); resetForm(); }}
+                className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+              >
+                <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
 
-            <form onSubmit={submitWithdraw} className="p-6 space-y-6">
-              <div>
-                {/* Payment Method Tabs */}
-                <div className="flex space-x-2 mb-4">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('bank')}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium border
-                ${paymentMethod === 'bank' ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-100 text-gray-700'}`}
-                  >
-                    Bank Transfer
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('usdt')}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium border
-                ${paymentMethod === 'usdt' ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-100 text-gray-700'}`}
-                  >
-                    USDT Wallet
-                  </button>
+            <div className="px-6 py-5 space-y-5">
+              {wdrErr && (
+                <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-600 font-medium">
+                  {wdrErr}
                 </div>
-              </div>
-
-              {/* Common Amount Input */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Amount {paymentMethod === 'bank' ? '(₦)' : '(USDT)'}
-                </label>
-                <div className="text-xs text-gray-500 mb-1">
-                  Minimum: {paymentMethod === 'bank' ? `₦${MIN_BANK_WITHDRAWAL.toLocaleString()}` : `${MIN_USDT_WITHDRAWAL} USDT`}
-                  {paymentMethod === 'usdt' && (
-                    <span className="ml-1">(≈ ₦{(MIN_USDT_WITHDRAWAL * usdtRate).toLocaleString()})</span>
-                  )}
-                </div>
-                <input
-                  type="number"
-                  min={paymentMethod === 'bank' ? MIN_BANK_WITHDRAWAL : MIN_USDT_WITHDRAWAL * usdtRate}
-                  step={paymentMethod === 'bank' ? 100 : 0.01}
-                  max={balance}
-                  value={wdrAmt}
-                  onChange={e => setWdrAmt(Number(e.target.value))}
-                  required
-                  className="w-full px-4 py-3 border rounded-lg"
-                  placeholder={`Enter amount (min ${paymentMethod === 'bank' ? `₦${MIN_BANK_WITHDRAWAL.toLocaleString()}` : `${MIN_USDT_WITHDRAWAL} USDT`})`}
-                />
-                {paymentMethod === 'usdt' && wdrAmt > 0 && (
-                  <div className="text-xs text-gray-500 mt-1">
-                    You will receive: {(wdrAmt / usdtRate).toFixed(6)} USDT
-                  </div>
-                )}
-              </div>
-
-              {/* Bank Transfer Fields */}
-              {paymentMethod === 'bank' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
-                    <input
-                      type="text"
-                      value={wdrBankName}
-                      onChange={e => setWdrBankName(e.target.value)}
-                      className="w-full px-4 py-3 border rounded-lg"
-                      placeholder="e.g. Zenith Bank"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
-                    <input
-                      type="text"
-                      value={wdrAcctNum}
-                      onChange={e => setWdrAcctNum(e.target.value)}
-                      className="w-full px-4 py-3 border rounded-lg"
-                      placeholder="10-digit account number"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Account Name</label>
-                    <input
-                      type="text"
-                      value={wdrAcctName}
-                      onChange={e => setWdrAcctName(e.target.value)}
-                      className="w-full px-4 py-3 border rounded-lg"
-                      placeholder="Account holder's name"
-                    />
-                  </div>
-                </>
               )}
 
-              {/* USDT Wallet Fields */}
-              {paymentMethod === 'usdt' && (
-                <>
+              {/* Amount */}
+              <div>
+                <p className="text-sm font-semibold text-gray-700 mb-2">
+                  Amount ({currency === 'NGN' ? '₦' : 'USDT'})
+                </p>
+                <div className="flex items-center border border-gray-200 bg-gray-50 rounded-2xl px-4">
+                  <span className="text-2xl font-bold text-gray-400 mr-2">
+                    {currency === 'NGN' ? '₦' : '$'}
+                  </span>
+                  <input
+                    type="number"
+                    value={wdrAmt}
+                    onChange={(e) => { setWdrAmt(e.target.value); setWdrErr(''); }}
+                    placeholder="0"
+                    className="flex-1 py-4 bg-transparent text-2xl font-bold text-gray-900 focus:outline-none"
+                  />
+                </div>
+                <div className="flex justify-between mt-2 text-xs text-gray-400">
+                  <span>Available: {currency === 'NGN' ? fmtNGN(balance) : fmtUSDT(usdtBalance)}</span>
+                  <span>Min: {currency === 'NGN' ? fmtNGN(minNgnWithdraw) : `${minUsdtWithdraw} USDT`}</span>
+                </div>
+              </div>
+
+              {/* NGN: bank details */}
+              {currency === 'NGN' && (
+                <div className="space-y-3">
+                  {([
+                    ['Bank Name',      bankName,  setBankName, 'e.g. Zenith Bank',       'text'  ],
+                    ['Account Number', accNum,    setAccNum,   '10-digit account number', 'number'],
+                    ['Account Name',   accName,   setAccName,  "Account holder's name",   'text'  ],
+                  ] as [string, string, React.Dispatch<React.SetStateAction<string>>, string, string][]).map(([lbl, val, setter, ph, type]) => (
+                    <div key={lbl}>
+                      <p className="text-sm font-semibold text-gray-700 mb-1.5">{lbl}</p>
+                      <input
+                        type={type}
+                        value={val}
+                        onChange={(e) => { setter(e.target.value); setWdrErr(''); }}
+                        placeholder={ph}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* USDT: address + network */}
+              {currency === 'USDT' && (
+                <div className="space-y-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">USDT Wallet Address</label>
+                    <p className="text-sm font-semibold text-gray-700 mb-1.5">USDT Wallet Address</p>
                     <input
                       type="text"
-                      value={usdtAddress}
-                      onChange={e => setUsdtAddress(e.target.value)}
-                      className="w-full px-4 py-3 border rounded-lg"
+                      value={wdrAddr}
+                      onChange={(e) => { setWdrAddr(e.target.value); setWdrErr(''); }}
                       placeholder="Enter your USDT address"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-300"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">USDT Network</label>
+                    <p className="text-sm font-semibold text-gray-700 mb-1.5">Network (TRC20 / ERC20 / BEP20)</p>
                     <input
                       type="text"
-                      value={usdtNetwork}
-                      onChange={e => setUsdtNetwork(e.target.value)}
-                      className="w-full px-4 py-3 border rounded-lg"
-                      placeholder="e.g. TRC20 or ERC20"
+                      value={wdrNet}
+                      onChange={(e) => { setWdrNet(e.target.value); setWdrErr(''); }}
+                      placeholder="e.g. TRC20"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-300"
                     />
                   </div>
-                </>
+                  {/* Warning for USDT */}
+                  <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5">
+                    <svg className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <p className="text-xs text-amber-700 leading-relaxed">
+                      Make sure the network matches your wallet. Wrong network = lost funds.
+                    </p>
+                  </div>
+                </div>
               )}
 
-              {/* ACTION BUTTONS */}
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowWdrModal(false)}
-                  disabled={processing}
-                  className="px-5 py-2.5 border rounded-lg text-gray-700 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={processing || !isValidWithdrawalAmount()}
-                  className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {processing ? 'Processing…' : 'Withdraw Funds'}
-                </button>
-              </div>
-            </form>
+              {/* Submit */}
+              <button
+                onClick={submitWithdrawal}
+                disabled={submitting}
+                className="w-full flex items-center justify-center gap-2 bg-red-500 text-white font-bold py-4 rounded-2xl text-base hover:bg-red-600 transition-colors disabled:opacity-60 active:scale-[0.98]"
+              >
+                {submitting ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    Submit Withdrawal Request
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                    </svg>
+                  </>
+                )}
+              </button>
+
+              <p className="text-center text-xs text-gray-400 pb-2">
+                Withdrawals are processed within 24–48 hours
+              </p>
+            </div>
           </div>
         </div>
       )}

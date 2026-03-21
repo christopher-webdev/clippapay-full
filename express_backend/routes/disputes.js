@@ -1,208 +1,375 @@
 // routes/disputes.js
+// Admin dispute management endpoints
+// All actions are admin-only (requireAdminAuth middleware)
+//
+// GET  /api/disputes              — list all disputed applications (paginated, filterable)
+// GET  /api/disputes/:id          — single dispute with full populated data
+// POST /api/disputes/:id/pay-clipper    — release escrow to clipper, mark resolved
+// POST /api/disputes/:id/refund-advertiser — return escrow to advertiser, mark resolved
+// POST /api/disputes/:id/reassign — expire current application so advertiser can pick new creator
+// POST /api/disputes/:id/note     — admin adds an internal note / resolution message
+//
 import express from 'express';
 import Application from '../models/Application.js';
+import Campaign from '../models/Campaign.js';
 import Wallet from '../models/Wallet.js';
 import Notification from '../models/Notification.js';
-import { requireAuth } from '../middleware/auth.js';
+import Transaction from '../models/Transaction.js';
+import User from '../models/User.js';
 import { requireAdminAuth } from '../middleware/adminAuth.js';
 
 const router = express.Router();
 
-// Allowed dispute statuses (you can expand)
-const DISPUTE_STATUSES = {
-  OPEN: 'open',
-  IN_REVIEW: 'in_review',
-  RESOLVED_ADVERTISER: 'resolved_advertiser',   // advertiser wins → gets refund
-  RESOLVED_CLIPPER: 'resolved_clipper',         // clipper wins → gets paid
-  RESOLVED_SPLIT: 'resolved_split',             // partial refund / partial pay
-  CANCELLED: 'cancelled'
-};
-
-// ────────────────────────────────────────────────
-//      CLIPPER or ADVERTISER raises dispute
-//      (usually after 3 revisions or missed deadline)
-// ────────────────────────────────────────────────
-router.post(
-  '/application/:applicationId/raise',
-  requireAuth,
-  async (req, res) => {
-    try {
-      const { reason, evidenceLinks } = req.body; // evidenceLinks = array of URLs or file paths
-
-      const application = await Application.findById(req.params.applicationId)
-        .populate('campaign clipper');
-
-      if (!application) return res.status(404).json({ error: 'Application not found' });
-
-      const isAdvertiser = application.campaign.advertiser.toString() === req.user._id.toString();
-      const isClipper = application.clipper._id.toString() === req.user._id.toString();
-
-      if (!isAdvertiser && !isClipper) {
-        return res.status(403).json({ error: 'Not authorized' });
-      }
-
-      if (application.disputeRaised) {
-        return res.status(400).json({ error: 'Dispute already raised' });
-      }
-
-      if (application.revisionCount < 3 && application.status !== 'expired') {
-        return res.status(403).json({ error: 'Dispute only allowed after 3 revisions or deadline miss' });
-      }
-
-      application.disputeRaised = true;
-      application.disputeRaisedBy = req.user._id;
-      application.disputeReason = reason?.trim();
-      application.disputeEvidence = evidenceLinks || [];
-      application.status = 'disputed'; // Add 'disputed' to Application status enum
-
-      await application.save();
-
-      // Notify the other party
-      const otherParty = isAdvertiser ? application.clipper._id : application.campaign.advertiser._id;
-
-      await new Notification({
-        user: otherParty,
-        type: 'dispute_raised',
-        title: 'Dispute Raised',
-        message: `A dispute has been raised on "${application.campaign.title}". Admin will review.`,
-        data: { applicationId: application._id, raisedBy: req.user._id.toString() },
-        priority: 'urgent'
-      }).save();
-
-      // Notify admin(s) – you can target admin users or a specific admin role
-      // For simplicity, assuming you have admin users with role 'admin'
-      // Or send to a Slack/Discord webhook, etc.
-
-      res.json({ success: true, message: 'Dispute raised successfully. Admin will review.' });
-    } catch (err) {
-      res.status(500).json({ error: err.message || 'Failed to raise dispute' });
-    }
-  }
-);
-
-// ────────────────────────────────────────────────
-//      ADMIN VIEWS ALL OPEN DISPUTES
-// ────────────────────────────────────────────────
-router.get('/admin/open', requireAdminAuth, async (req, res) => {
+// ─── GET /api/disputes ───────────────────────────────────────────────────────
+// Returns all applications with disputeRaised:true, newest first
+router.get('/', requireAdminAuth, async (req, res) => {
   try {
-    const disputes = await Application.find({
-      disputeRaised: true,
-      status: 'disputed'
-    })
-      .populate('campaign advertiser clipper', 'title firstName lastName email')
-      .sort({ updatedAt: -1 });
+    const { status = '', page = 1, limit = 20, search = '' } = req.query;
 
-    res.json({ success: true, disputes });
+    // Base filter — all disputed apps
+    const filter = { disputeRaised: true };
+
+    // Optionally narrow by resolution status
+    if (status === 'open')     filter.status = 'disputed';
+    if (status === 'resolved') filter.status = 'disputed_resolved';
+
+    const [applications, total] = await Promise.all([
+      Application.find(filter)
+        .populate({
+          path: 'campaign',
+          select: 'title category description thumbnailUrl advertiser',
+          populate: { path: 'advertiser', select: 'firstName lastName email phone company profileImage' },
+        })
+        .populate('clipper', 'firstName lastName email phone profileImage rating')
+        .sort({ updatedAt: -1 })
+        .skip((Number(page) - 1) * Number(limit))
+        .limit(Number(limit))
+        .lean(),
+      Application.countDocuments(filter),
+    ]);
+
+    res.json({
+      disputes: applications,
+      total,
+      page: Number(page),
+      totalPages: Math.ceil(total / Number(limit)),
+    });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to load disputes' });
+    console.error('Disputes list error:', err);
+    res.status(500).json({ error: 'Failed to fetch disputes' });
   }
 });
 
-// ────────────────────────────────────────────────
-//      ADMIN RESOLVES DISPUTE
-// ────────────────────────────────────────────────
-router.post(
-  '/admin/:applicationId/resolve',
-  requireAdminAuth,
-  async (req, res) => {
-    try {
-      const { resolution, amountRefunded, notes } = req.body;
-      // resolution: 'advertiser', 'clipper', 'split', 'cancel'
+// ─── GET /api/disputes/:id ───────────────────────────────────────────────────
+router.get('/:id', requireAdminAuth, async (req, res) => {
+  try {
+    const application = await Application.findById(req.params.id)
+      .populate({
+        path: 'campaign',
+        select: 'title category description script thumbnailUrl advertiser createdAt',
+        populate: { path: 'advertiser', select: 'firstName lastName email phone company profileImage country' },
+      })
+      .populate('clipper', 'firstName lastName email phone profileImage rating country categories bio')
+      .lean();
 
-      if (!Object.values(DISPUTE_STATUSES).includes(resolution)) {
-        return res.status(400).json({ error: 'Invalid resolution type' });
-      }
+    if (!application) return res.status(404).json({ error: 'Application not found' });
 
-      const application = await Application.findById(req.params.applicationId)
-        .populate('campaign clipper');
+    // Fetch wallet snapshots for context
+    const [advWallet, clipperWallet] = await Promise.all([
+      Wallet.findOne({ user: application.campaign?.advertiser?._id }).select('balance escrowLocked usdtBalance usdtEscrowLocked').lean(),
+      Wallet.findOne({ user: application.clipper?._id }).select('balance usdtBalance').lean(),
+    ]);
 
-      if (!application || !application.disputeRaised) {
-        return res.status(404).json({ error: 'No active dispute found' });
-      }
-
-      const advertiserWallet = await Wallet.findOne({ user: application.campaign.advertiser });
-      const clipperWallet = await Wallet.findOne({ user: application.clipper._id });
-
-      let finalStatus = 'disputed_resolved';
-      let messageAdvertiser = '';
-      let messageClipper = '';
-
-      if (resolution === DISPUTE_STATUSES.RESOLVED_ADVERTISER) {
-        // Full refund to advertiser
-        if (application.paymentCurrency === 'NGN') {
-          await advertiserWallet.releaseEscrowNGN(application.paymentAmount);
-        } else {
-          await advertiserWallet.releaseEscrowUSDT(application.paymentAmount);
-        }
-        messageAdvertiser = `Dispute resolved in your favor. Full amount (${application.paymentAmount} ${application.paymentCurrency}) returned.`;
-        messageClipper = `Dispute resolved against you. No payment released.`;
-
-      } else if (resolution === DISPUTE_STATUSES.RESOLVED_CLIPPER) {
-        // Full payment to clipper
-        if (application.paymentCurrency === 'NGN') {
-          await advertiserWallet.releaseEscrowNGN(application.paymentAmount);
-          await clipperWallet.creditNGN(application.paymentAmount);
-        } else {
-          await advertiserWallet.releaseEscrowUSDT(application.paymentAmount);
-          await clipperWallet.creditUSDT(application.paymentAmount);
-        }
-        messageAdvertiser = `Dispute resolved in favor of clipper. Full amount paid out.`;
-        messageClipper = `Dispute resolved in your favor. ${application.paymentAmount} ${application.paymentCurrency} credited.`;
-
-      } else if (resolution === DISPUTE_STATUSES.RESOLVED_SPLIT && amountRefunded) {
-        // Partial refund
-        const refundAmount = Number(amountRefunded);
-        if (refundAmount <= 0 || refundAmount > application.paymentAmount) {
-          return res.status(400).json({ error: 'Invalid refund amount' });
-        }
-
-        const payClipper = application.paymentAmount - refundAmount;
-
-        if (application.paymentCurrency === 'NGN') {
-          await advertiserWallet.releaseEscrowNGN(application.paymentAmount);
-          await advertiserWallet.debitNGN(payClipper); // simulate taking platform cut or direct
-          await clipperWallet.creditNGN(payClipper);
-        } else {
-          // similar for USDT
-        }
-
-        messageAdvertiser = `Dispute resolved with split. ₦${refundAmount} refunded, ₦${payClipper} paid to clipper.`;
-        messageClipper = `Dispute resolved with split. You received ${payClipper} ${application.paymentCurrency}.`;
-      }
-
-      application.status = finalStatus;
-      application.disputeResolution = resolution;
-      application.disputeResolvedAt = new Date();
-      application.disputeResolvedBy = req.user._id;
-      application.disputeAdminNotes = notes;
-
-      await application.save();
-
-      // Notifications
-      await new Notification({
-        user: application.campaign.advertiser,
-        type: 'dispute_resolved',
-        title: 'Dispute Resolved',
-        message: messageAdvertiser,
-        priority: 'high',
-        data: { applicationId: application._id, resolution }
-      }).save();
-
-      await new Notification({
-        user: application.clipper._id,
-        type: 'dispute_resolved',
-        title: 'Dispute Resolved',
-        message: messageClipper,
-        priority: 'high',
-        data: { applicationId: application._id, resolution }
-      }).save();
-
-      res.json({ success: true, resolution, application });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: err.message || 'Failed to resolve dispute' });
-    }
+    res.json({ dispute: application, advWallet, clipperWallet });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch dispute' });
   }
-);
+});
+
+// ─── POST /api/disputes/:id/pay-clipper ──────────────────────────────────────
+// Admin rules in favour of the clipper:
+//   escrow → clipper wallet, campaign → completed, application → disputed_resolved
+router.post('/:id/pay-clipper', requireAdminAuth, async (req, res) => {
+  try {
+    const { note = '' } = req.body;
+
+    const application = await Application.findById(req.params.id)
+      .populate('campaign clipper');
+
+    if (!application) return res.status(404).json({ error: 'Not found' });
+    if (application.status === 'disputed_resolved') {
+      return res.status(400).json({ error: 'Dispute already resolved' });
+    }
+    if (!application.paymentAmount) {
+      return res.status(400).json({ error: 'No payment amount set on this application' });
+    }
+
+    const amount   = application.paymentAmount;
+    const currency = application.paymentCurrency;
+    const isNGN    = currency === 'NGN';
+
+    // Get wallets
+    const [advWallet, clipperWallet] = await Promise.all([
+      Wallet.findOne({ user: application.campaign.advertiser }),
+      Wallet.findOne({ user: application.clipper._id }),
+    ]);
+
+    if (!advWallet)    return res.status(404).json({ error: 'Advertiser wallet not found' });
+    if (!clipperWallet) return res.status(404).json({ error: 'Clipper wallet not found' });
+
+    // Release escrow → clipper
+    if (isNGN) {
+      const deduct = Math.min(amount, advWallet.escrowLocked || 0);
+      advWallet.escrowLocked = (advWallet.escrowLocked || 0) - deduct;
+      await advWallet.save();
+      await clipperWallet.creditNGN(amount);
+    } else {
+      const deduct = Math.min(amount, advWallet.usdtEscrowLocked || 0);
+      advWallet.usdtEscrowLocked = (advWallet.usdtEscrowLocked || 0) - deduct;
+      await advWallet.save();
+      await clipperWallet.creditUSDT(amount);
+    }
+
+    // Transaction records
+    await Transaction.create({
+      user: application.clipper._id,
+      type: 'payment',
+      amount, currency, status: 'completed',
+      reference: `dispute-pay:${application._id}`,
+      description: `Dispute resolved — payment released by admin for "${application.campaign.title}"`,
+    });
+    await Transaction.create({
+      user: application.campaign.advertiser,
+      type: 'payment',
+      amount, currency, status: 'completed',
+      reference: `dispute-escrow-release:${application._id}`,
+      description: `Dispute resolved — escrow released by admin for "${application.campaign.title}"`,
+    });
+
+    // Update application
+    application.status         = 'disputed_resolved';
+    application.escrowReleased = true;
+    application.completedAt    = new Date();
+    await application.save();
+
+    // Mark campaign completed
+    try {
+      const campaign = await Campaign.findById(application.campaign._id);
+      if (campaign && !['completed','cancelled'].includes(campaign.status)) {
+        campaign.status = 'completed';
+        campaign.completedAt = new Date();
+        campaign.paymentReleased = true;
+        await campaign.save();
+      }
+    } catch (_) {}
+
+    // Notify both parties
+    const sym = isNGN ? '₦' : '$';
+    const resolutionNote = note.trim() || 'The dispute has been reviewed and resolved by our team.';
+
+    await Notification.create({
+      user: application.clipper._id,
+      type: 'dispute_resolved',
+      title: '✅ Dispute Resolved — Payment Released',
+      message: `Your dispute for "${application.campaign.title}" has been resolved in your favour. ${sym}${amount.toLocaleString()} ${currency} has been credited to your wallet. ${resolutionNote}`,
+      priority: 'high',
+    });
+    await Notification.create({
+      user: application.campaign.advertiser,
+      type: 'dispute_resolved',
+      title: '⚖️ Dispute Resolved',
+      message: `The dispute for "${application.campaign.title}" has been reviewed. Admin ruled in the creator's favour. Payment of ${sym}${amount.toLocaleString()} ${currency} has been released. ${resolutionNote}`,
+      priority: 'high',
+    });
+
+    res.json({
+      success: true,
+      message: `Payment of ${sym}${amount.toLocaleString()} ${currency} released to creator. Dispute resolved.`,
+    });
+  } catch (err) {
+    console.error('pay-clipper error:', err);
+    res.status(500).json({ error: err.message || 'Failed to pay clipper' });
+  }
+});
+
+// ─── POST /api/disputes/:id/refund-advertiser ────────────────────────────────
+// Admin rules in favour of the advertiser:
+//   escrow → advertiser wallet, application → disputed_resolved
+router.post('/:id/refund-advertiser', requireAdminAuth, async (req, res) => {
+  try {
+    const { note = '' } = req.body;
+
+    const application = await Application.findById(req.params.id)
+      .populate('campaign clipper');
+
+    if (!application) return res.status(404).json({ error: 'Not found' });
+    if (application.status === 'disputed_resolved') {
+      return res.status(400).json({ error: 'Dispute already resolved' });
+    }
+
+    const amount   = application.paymentAmount;
+    const currency = application.paymentCurrency;
+    const isNGN    = currency === 'NGN';
+
+    const advWallet = await Wallet.findOne({ user: application.campaign.advertiser });
+    if (!advWallet) return res.status(404).json({ error: 'Advertiser wallet not found' });
+
+    // Return escrow to advertiser
+    if (isNGN) {
+      const deduct = Math.min(amount, advWallet.escrowLocked || 0);
+      advWallet.escrowLocked = (advWallet.escrowLocked || 0) - deduct;
+      advWallet.balance      = (advWallet.balance || 0) + deduct;
+    } else {
+      const deduct = Math.min(amount, advWallet.usdtEscrowLocked || 0);
+      advWallet.usdtEscrowLocked = (advWallet.usdtEscrowLocked || 0) - deduct;
+      advWallet.usdtBalance      = (advWallet.usdtBalance || 0) + deduct;
+    }
+    await advWallet.save();
+
+    if (amount) {
+      await Transaction.create({
+        user: application.campaign.advertiser,
+        type: 'refund',
+        amount, currency, status: 'completed',
+        reference: `dispute-refund:${application._id}`,
+        description: `Dispute resolved — escrow refunded by admin for "${application.campaign.title}"`,
+      });
+    }
+
+    // Update application
+    application.status      = 'disputed_resolved';
+    application.completedAt = new Date();
+    await application.save();
+
+    // Mark campaign cancelled (no creator delivered acceptable work)
+    try {
+      const campaign = await Campaign.findById(application.campaign._id);
+      if (campaign && !['completed','cancelled'].includes(campaign.status)) {
+        campaign.status = 'cancelled';
+        campaign.cancelledAt = new Date();
+        campaign.cancelledReason = 'Dispute resolved — refunded to advertiser';
+        await campaign.save();
+      }
+    } catch (_) {}
+
+    const sym = isNGN ? '₦' : '$';
+    const resolutionNote = note.trim() || 'The dispute has been reviewed and resolved by our team.';
+
+    await Notification.create({
+      user: application.campaign.advertiser,
+      type: 'dispute_resolved',
+      title: '✅ Dispute Resolved — Refund Issued',
+      message: `Your dispute for "${application.campaign.title}" has been resolved in your favour. ${amount ? `${sym}${amount.toLocaleString()} ${currency} has been returned to your wallet.` : ''} ${resolutionNote}`,
+      priority: 'high',
+    });
+    await Notification.create({
+      user: application.clipper._id,
+      type: 'dispute_resolved',
+      title: '⚖️ Dispute Resolved',
+      message: `The dispute for "${application.campaign.title}" has been reviewed. Admin ruled in the advertiser's favour. No payment will be made for this job. ${resolutionNote}`,
+      priority: 'high',
+    });
+
+    res.json({
+      success: true,
+      message: `Escrow refunded to advertiser. Dispute resolved.`,
+    });
+  } catch (err) {
+    console.error('refund-advertiser error:', err);
+    res.status(500).json({ error: err.message || 'Failed to refund advertiser' });
+  }
+});
+
+// ─── POST /api/disputes/:id/reassign ─────────────────────────────────────────
+// Admin allows advertiser to pick a new creator:
+//   - current application → expired (dismissed)
+//   - escrow stays locked (will be used for new selection)
+//   - campaign → active so new applicants can be selected
+//   - both parties notified
+router.post('/:id/reassign', requireAdminAuth, async (req, res) => {
+  try {
+    const { note = '' } = req.body;
+
+    const application = await Application.findById(req.params.id)
+      .populate('campaign clipper');
+
+    if (!application) return res.status(404).json({ error: 'Not found' });
+    if (application.status === 'disputed_resolved') {
+      return res.status(400).json({ error: 'Dispute already resolved' });
+    }
+
+    // Expire the current application
+    application.status      = 'disputed_resolved';
+    application.completedAt = new Date();
+    await application.save();
+
+    // Re-open campaign so advertiser can select new applicant
+    try {
+      const campaign = await Campaign.findById(application.campaign._id);
+      if (campaign) {
+        campaign.status          = 'active';
+        campaign.selectedClipper = undefined;
+        campaign.currentSubmission = undefined;
+        await campaign.save();
+      }
+    } catch (_) {}
+
+    const resolutionNote = note.trim() || 'The dispute has been reviewed by our team.';
+
+    await Notification.create({
+      user: application.campaign.advertiser,
+      type: 'dispute_resolved',
+      title: '🔄 Dispute Resolved — Select a New Creator',
+      message: `Your dispute for "${application.campaign.title}" has been reviewed. You can now select a new creator from your existing applicants. ${resolutionNote}`,
+      priority: 'high',
+    });
+    await Notification.create({
+      user: application.clipper._id,
+      type: 'dispute_resolved',
+      title: '⚖️ Dispute Resolved',
+      message: `The dispute for "${application.campaign.title}" has been reviewed. The advertiser has been allowed to select a new creator. ${resolutionNote}`,
+      priority: 'high',
+    });
+
+    res.json({ success: true, message: 'Current creator dismissed. Advertiser can now select a new creator.' });
+  } catch (err) {
+    console.error('reassign error:', err);
+    res.status(500).json({ error: err.message || 'Failed to reassign' });
+  }
+});
+
+// ─── POST /api/disputes/:id/note ─────────────────────────────────────────────
+// Admin adds an internal note without resolving — useful for logging contact attempts
+router.post('/:id/note', requireAdminAuth, async (req, res) => {
+  try {
+    const { note, notifyBoth = false } = req.body;
+    if (!note?.trim()) return res.status(400).json({ error: 'Note is required' });
+
+    const application = await Application.findById(req.params.id).populate('campaign clipper');
+    if (!application) return res.status(404).json({ error: 'Not found' });
+
+    // If notifyBoth, send update to both parties
+    if (notifyBoth) {
+      await Notification.create({
+        user: application.campaign.advertiser,
+        type: 'system_alert',
+        title: '📋 Dispute Update',
+        message: `Update on your dispute for "${application.campaign.title}": ${note.trim()}`,
+        priority: 'medium',
+      });
+      await Notification.create({
+        user: application.clipper._id,
+        type: 'system_alert',
+        title: '📋 Dispute Update',
+        message: `Update on your dispute for "${application.campaign.title}": ${note.trim()}`,
+        priority: 'medium',
+      });
+    }
+
+    res.json({ success: true, message: notifyBoth ? 'Note saved and both parties notified.' : 'Note saved.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to save note' });
+  }
+});
 
 export default router;

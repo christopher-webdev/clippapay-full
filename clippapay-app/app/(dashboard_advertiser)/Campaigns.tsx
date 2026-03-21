@@ -1,117 +1,85 @@
 // app/(dashboard_advertiser)/Campaigns.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+// Redesigned advertiser UGC campaign hub:
+//  - Shows pending_approval status with clear adworker note
+//  - "Mark Complete" button triggers payment to creator from escrow
+//  - Status badges match the full lifecycle
+//  - Proper empty states per status bucket
+
+import React, { useState, useCallback, useEffect } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, Image,
-  ActivityIndicator, RefreshControl, StyleSheet,
-  Dimensions, ScrollView, Platform,
+  View, Text, TouchableOpacity, ScrollView, StyleSheet,
+  ActivityIndicator, RefreshControl, Platform, Alert, Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import axios from 'axios';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
-const { width: SW } = Dimensions.get('window');
+const API_BASE = process.env.EXPO_PUBLIC_API_URL;
+const { width } = Dimensions.get('window');
+const scale = width / 428;
 
-const API_URL          = process.env.EXPO_PUBLIC_API_URL;
-const UPLOADS_BASE_URL = process.env.EXPO_PUBLIC_UPLOADS_BASE_URL;
-
-const toFullUrl = (p: string | null) => {
-  if (!p) return null;
-  if (p.startsWith('http')) return p;
-  return `${UPLOADS_BASE_URL}${p.startsWith('/') ? p : '/' + p}`;
-};
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-type Status =
-  | 'draft' | 'active' | 'closed' | 'completed'
-  | 'cancelled' | 'video_submitted' | 'revision_submitted';
-
-type Campaign = {
+interface Campaign {
   _id: string;
   title: string;
   description: string;
-  thumbnailUrl: string | null;
   category: string;
-  status: Status;
+  status: string;
   applicationDeadline: string;
   createdAt: string;
+  adworkerNote?: string;
+  paymentReleased?: boolean;
+  thumbnailUrl?: string;
+}
+
+const STATUS_CFG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+  pending_approval:  { label: 'Pending Review',    color: '#D97706', bg: '#FFFBEB', icon: 'time-outline'             },
+  draft:             { label: 'Draft',             color: '#6B7280', bg: '#F3F4F6', icon: 'document-outline'         },
+  active:            { label: 'Live — Accepting',  color: '#059669', bg: '#ECFDF5', icon: 'checkmark-circle-outline' },
+  closed:            { label: 'Closed',            color: '#6B7280', bg: '#F3F4F6', icon: 'lock-closed-outline'      },
+  video_submitted:   { label: 'Video Submitted',   color: '#7C3AED', bg: '#F5F3FF', icon: 'videocam-outline'         },
+  revision_requested:{ label: 'Revision Requested',color: '#F59E0B', bg: '#FFFBEB', icon: 'refresh-outline'          },
+  revision_submitted:{ label: 'Revised — Review',  color: '#8B5CF6', bg: '#F5F3FF', icon: 'cloud-upload-outline'     },
+  completed:         { label: 'Completed ✓',       color: '#10B981', bg: '#ECFDF5', icon: 'trophy-outline'           },
+  cancelled:         { label: 'Cancelled',         color: '#EF4444', bg: '#FEF2F2', icon: 'close-circle-outline'     },
 };
 
-// ─── Status config ────────────────────────────────────────────────────────────
-const STATUS_CFG: Record<Status, {
-  label: string; color: string; bg: string;
-  icon: string; gradient: [string, string];
-}> = {
-  active:             { label: 'Active',            color: '#059669', bg: '#ECFDF5', icon: 'radio-button-on',   gradient: ['#059669', '#10B981'] },
-  draft:              { label: 'Draft',              color: '#B45309', bg: '#FFFBEB', icon: 'create-outline',    gradient: ['#D97706', '#F59E0B'] },
-  video_submitted:    { label: 'Video to Review',    color: '#5B21B6', bg: '#F5F3FF', icon: 'videocam',          gradient: ['#5B21B6', '#7C3AED'] },
-  revision_submitted: { label: 'Revision to Review', color: '#C2410C', bg: '#FFF7ED', icon: 'refresh-circle',   gradient: ['#C2410C', '#EA580C'] },
-  completed:          { label: 'Completed',           color: '#1D4ED8', bg: '#EFF6FF', icon: 'checkmark-circle', gradient: ['#1D4ED8', '#3B82F6'] },
-  closed:             { label: 'Closed',              color: '#374151', bg: '#F9FAFB', icon: 'lock-closed',      gradient: ['#374151', '#6B7280'] },
-  cancelled:          { label: 'Cancelled',           color: '#991B1B', bg: '#FEF2F2', icon: 'close-circle',     gradient: ['#991B1B', '#EF4444'] },
-};
-
-const FILTERS = [
-  { value: 'all',             label: 'All'     },
-  { value: 'active',          label: 'Active'  },
-  { value: 'draft',           label: 'Draft'   },
-  { value: 'video_submitted', label: 'Review'  },
-  { value: 'completed',       label: 'Done'    },
+const TABS: { key: string; label: string }[] = [
+  { key: 'all',           label: 'All'         },
+  { key: 'pending_approval', label: 'Pending'  },
+  { key: 'active',        label: 'Live'        },
+  { key: 'video_submitted',  label: 'Review'   },
+  { key: 'completed',     label: 'Done'        },
 ];
-
-const fmtDate = (s: string) =>
-  new Date(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-
-const getNav = (c: Campaign) => {
-  const base = '/(dashboard_advertiser)/';
-  switch (c.status) {
-    case 'video_submitted':
-    case 'revision_submitted':
-      return { pathname: `${base}review-submission/[campaignId]`, params: { campaignId: c._id } };
-    case 'completed':
-      return { pathname: `${base}completed/[campaignId]`, params: { campaignId: c._id } };
-    default:
-      return { pathname: `${base}campaign-details/[id]`, params: { id: c._id } };
-  }
-};
 
 const getToken = async () => {
   if (Platform.OS === 'web') return AsyncStorage.getItem('userToken');
   return (await SecureStore.getItemAsync('userToken')) || (await AsyncStorage.getItem('userToken'));
 };
 
-// ─── Component ────────────────────────────────────────────────────────────────
-export default function MyCampaignsScreen() {
+const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+export default function CampaignsScreen() {
   const router = useRouter();
-  const [all, setAll]               = useState<Campaign[]>([]);
-  const [loading, setLoading]       = useState(true);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter]         = useState('all');
+  const [tab, setTab]             = useState('all');
+  const [completing, setCompleting] = useState<string | null>(null);
 
-  const filtered = filter === 'all' ? all : all.filter((c) => c.status === filter);
-
-  const counts = FILTERS.reduce((acc, f) => {
-    acc[f.value] = f.value === 'all'
-      ? all.length
-      : all.filter((c) => c.status === f.value).length;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const load = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true); else setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const token = await getToken();
-      if (!token) { router.replace('/(auth)/login'); return; }
-      const res = await fetch(`${API_URL}/campaigns/my`, {
+      if (!token) { router.push('/login'); return; }
+      const { data } = await axios.get(`${API_BASE}/campaigns/my`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed');
-      setAll(data.campaigns || []);
-    } catch (e: any) {
-      console.error('fetch campaigns:', e);
+      setCampaigns(data.campaigns || []);
+    } catch (err) {
+      Alert.alert('Error', 'Could not load your campaigns');
     } finally {
       setLoading(false); setRefreshing(false);
     }
@@ -119,300 +87,277 @@ export default function MyCampaignsScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Card ──────────────────────────────────────────────────────────────────
-  const renderCard = ({ item: c, index }: { item: Campaign; index: number }) => {
-    const cfg = STATUS_CFG[c.status] ?? STATUS_CFG.draft;
-    const needsAction = c.status === 'video_submitted' || c.status === 'revision_submitted';
-
-    return (
-      <Animated.View entering={FadeInDown.delay(index * 55).springify()}>
-        <TouchableOpacity
-          activeOpacity={0.92}
-          style={styles.card}
-          onPress={() => router.push(getNav(c))}
-        >
-          {/* Thumbnail */}
-          <View style={styles.thumbWrap}>
-            {c.thumbnailUrl ? (
-              <Image
-                source={{ uri: toFullUrl(c.thumbnailUrl) ?? undefined }}
-                style={styles.thumb}
-                resizeMode="cover"
-              />
-            ) : (
-              <LinearGradient
-                colors={['#1E1B4B', '#312E81', '#4338CA']}
-                style={[styles.thumb, styles.thumbGrad]}
-              >
-                <MaterialCommunityIcons
-                  name="image-filter-frames"
-                  size={40}
-                  color="rgba(255,255,255,0.15)"
-                />
-                <Text style={styles.thumbNoImgText} numberOfLines={3}>{c.title}</Text>
-              </LinearGradient>
-            )}
-
-            {/* Bottom fade */}
-            <LinearGradient
-              colors={['transparent', 'rgba(0,0,0,0.65)']}
-              style={styles.thumbFade}
-            />
-
-            {/* Status pill */}
-            <View style={[styles.statusPill, { backgroundColor: cfg.color }]}>
-              <Ionicons name={cfg.icon as any} size={11} color="#FFF" />
-              <Text style={styles.statusPillTxt}>{cfg.label}</Text>
-            </View>
-
-            {/* Needs-attention pulse badge */}
-            {needsAction && (
-              <View style={styles.urgentBadge}>
-                <Ionicons name="alert-circle" size={11} color="#FFF" />
-                <Text style={styles.urgentBadgeTxt}>Needs attention</Text>
-              </View>
-            )}
-
-            {/* Category chip bottom left */}
-            <View style={styles.categoryChip}>
-              <Text style={styles.categoryChipTxt}>{c.category}</Text>
-            </View>
-          </View>
-
-          {/* Content */}
-          <View style={styles.content}>
-            <Text style={styles.title} numberOfLines={2}>{c.title}</Text>
-
-            <View style={styles.metaRow}>
-              <View style={styles.metaItem}>
-                <Ionicons name="calendar-outline" size={12} color="#A5B4FC" />
-                <Text style={styles.metaTxt}>Due {fmtDate(c.applicationDeadline)}</Text>
-              </View>
-              <View style={styles.metaDot} />
-              <View style={styles.metaItem}>
-                <Ionicons name="time-outline" size={12} color="#A5B4FC" />
-                <Text style={styles.metaTxt}>{fmtDate(c.createdAt)}</Text>
-              </View>
-            </View>
-
-            {/* CTA */}
-            {needsAction ? (
-              <LinearGradient
-                colors={cfg.gradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.ctaGradBtn}
-              >
-                <Ionicons name={cfg.icon as any} size={15} color="#FFF" />
-                <Text style={styles.ctaBtnTxt}>
-                  {c.status === 'video_submitted' ? 'Review Video' : 'Review Revision'}
-                </Text>
-                <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.8)" />
-              </LinearGradient>
-            ) : (
-              <View style={styles.openBtn}>
-                <Text style={styles.openBtnTxt}>
-                  {c.status === 'active'    ? 'View Applications' :
-                   c.status === 'draft'     ? 'Edit Draft'        :
-                   c.status === 'completed' ? 'View Results'      : 'Open'}
-                </Text>
-                <Ionicons name="chevron-forward" size={15} color="#6366F1" />
-              </View>
-            )}
-          </View>
-        </TouchableOpacity>
-      </Animated.View>
+  const handleComplete = async (c: Campaign) => {
+    Alert.alert(
+      '✅ Accept & Pay Creator',
+      `This will release payment to the creator from escrow and mark "${c.title}" as completed. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Accept & Pay',
+          onPress: async () => {
+            setCompleting(c._id);
+            try {
+              const token = await getToken();
+              await axios.post(`${API_BASE}/campaigns/${c._id}/complete`, {}, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              Alert.alert('🎉 Completed!', 'Payment released to the creator. Campaign marked complete.');
+              load(true);
+            } catch (err: any) {
+              Alert.alert('Error', err.response?.data?.error || 'Could not complete campaign');
+            } finally {
+              setCompleting(null);
+            }
+          },
+        },
+      ]
     );
   };
 
-  // ── Loading ───────────────────────────────────────────────────────────────
+  const filtered = tab === 'all' ? campaigns
+    : campaigns.filter((c) => {
+        if (tab === 'video_submitted') return ['video_submitted','revision_submitted','revision_requested'].includes(c.status);
+        return c.status === tab;
+      });
+
+  // Counts for tab badges
+  const counts: Record<string, number> = {};
+  TABS.forEach((t) => {
+    if (t.key === 'all') counts.all = campaigns.length;
+    else if (t.key === 'video_submitted') counts.video_submitted = campaigns.filter((c) => ['video_submitted','revision_submitted','revision_requested'].includes(c.status)).length;
+    else counts[t.key] = campaigns.filter((c) => c.status === t.key).length;
+  });
+
   if (loading) {
     return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color="#6366F1" />
-        <Text style={styles.loadingTxt}>Loading campaigns…</Text>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F7' }}>
+        <ActivityIndicator size="large" color="#4F46E5" />
+        <Text style={{ color: '#9CA3AF', marginTop: 10 }}>Loading campaigns…</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={{ flex: 1, backgroundColor: '#F5F5F7' }}>
       {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerEye}>UGC CAMPAIGNS</Text>
-          <Text style={styles.headerTitle}>{all.length} Campaign{all.length !== 1 ? 's' : ''}</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.newBtn}
-          onPress={() => router.push('/(dashboard_advertiser)/CreateUgc')}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="add" size={18} color="#FFF" />
-          <Text style={styles.newBtnTxt}>New</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Stats strip */}
-      <View style={styles.strip}>
-        {[
-          { label: 'Active',  val: all.filter(c => c.status === 'active').length,         col: '#10B981' },
-          { label: 'Review',  val: all.filter(c => ['video_submitted','revision_submitted'].includes(c.status)).length, col: '#7C3AED' },
-          { label: 'Done',    val: all.filter(c => c.status === 'completed').length,       col: '#3B82F6' },
-          { label: 'Draft',   val: all.filter(c => c.status === 'draft').length,           col: '#F59E0B' },
-        ].map((s, i) => (
-          <View key={s.label} style={[styles.stripCell, i < 3 && { borderRightWidth: 1, borderRightColor: '#F0F0F8' }]}>
-            <Text style={[styles.stripVal, { color: s.col }]}>{s.val}</Text>
-            <Text style={styles.stripLbl}>{s.label}</Text>
+      <LinearGradient colors={['#312E81','#4338CA','#4F46E5']} style={S.hdr}>
+        <View style={S.navRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={S.navTitle}>My UGC Campaigns</Text>
+            <Text style={S.navSub}>{campaigns.length} total campaigns</Text>
           </View>
-        ))}
-      </View>
-
-      {/* Filter tabs */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.tabsWrap}
-        contentContainerStyle={styles.tabs}
-      >
-        {FILTERS.map((f) => (
           <TouchableOpacity
-            key={f.value}
-            style={[styles.tab, filter === f.value && styles.tabOn]}
-            onPress={() => setFilter(f.value)}
+            style={S.createBtn}
+            onPress={() => router.push('/(dashboard_advertiser)/CreateUgc' as any)}
           >
-            <Text style={[styles.tabTxt, filter === f.value && styles.tabTxtOn]}>{f.label}</Text>
-            {counts[f.value] > 0 && (
-              <View style={[styles.tabBubble, filter === f.value && styles.tabBubbleOn]}>
-                <Text style={[styles.tabBubbleTxt, filter === f.value && { color: '#FFF' }]}>
-                  {counts[f.value]}
-                </Text>
+            <Ionicons name="add" size={20} color="#FFF" />
+            <Text style={S.createBtnTxt}>New</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Quick stats */}
+        <View style={S.statsRow}>
+          {[
+            { label: 'Pending', val: counts.pending_approval || 0, color: '#FCD34D' },
+            { label: 'Live',    val: counts.active || 0,           color: '#6EE7B7' },
+            { label: 'Review',  val: counts.video_submitted || 0,  color: '#C4B5FD' },
+            { label: 'Done',    val: counts.completed || 0,        color: '#A7F3D0' },
+          ].map((s, i) => (
+            <React.Fragment key={s.label}>
+              {i > 0 && <View style={{ width: 1, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 10 }} />}
+              <View style={{ alignItems: 'center' }}>
+                <Text style={[S.statVal, { color: s.color }]}>{s.val}</Text>
+                <Text style={S.statLbl}>{s.label}</Text>
+              </View>
+            </React.Fragment>
+          ))}
+        </View>
+      </LinearGradient>
+
+      {/* Tabs */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={S.tabBar} contentContainerStyle={{ paddingHorizontal: 14, gap: 8, flexDirection: 'row', alignItems: 'center' }}>
+        {TABS.map((t) => (
+          <TouchableOpacity key={t.key} style={[S.tabBtn, tab === t.key && S.tabBtnActive]} onPress={() => setTab(t.key)}>
+            <Text style={[S.tabTxt, tab === t.key && S.tabTxtActive]}>{t.label}</Text>
+            {counts[t.key] > 0 && (
+              <View style={[S.tabBadge, tab === t.key && { backgroundColor: '#4F46E5' }]}>
+                <Text style={[S.tabBadgeTxt, tab === t.key && { color: '#FFF' }]}>{counts[t.key]}</Text>
               </View>
             )}
           </TouchableOpacity>
         ))}
       </ScrollView>
 
-      {/* Campaign list */}
-      <FlatList
-        data={filtered}
-        renderItem={renderCard}
-        keyExtractor={(c) => c._id}
-        contentContainerStyle={styles.list}
+      <ScrollView
+        contentContainerStyle={{ padding: 14, paddingBottom: 60 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor="#4F46E5" />}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => load(true)}
-            tintColor="#6366F1"
-            colors={['#6366F1']}
-          />
-        }
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <LinearGradient
-              colors={['#EEF2FF', '#E0E7FF']}
-              style={styles.emptyIconWrap}
-            >
-              <Ionicons name="megaphone-outline" size={44} color="#6366F1" />
-            </LinearGradient>
-            <Text style={styles.emptyTitle}>
-              {filter === 'all' ? 'No campaigns yet' : `No ${filter.replace(/_/g, ' ')} campaigns`}
+      >
+        {filtered.length === 0 ? (
+          <View style={S.empty}>
+            <MaterialCommunityIcons name="briefcase-outline" size={56} color="#D1D5DB" />
+            <Text style={S.emptyTitle}>No campaigns here</Text>
+            <Text style={S.emptySub}>
+              {tab === 'pending_approval' ? 'No campaigns waiting for review.' :
+               tab === 'active' ? 'None of your campaigns are live yet.' :
+               tab === 'video_submitted' ? 'No videos submitted yet.' :
+               tab === 'completed' ? 'No completed campaigns yet.' :
+               "You haven't created any campaigns yet."}
             </Text>
-            <Text style={styles.emptySub}>
-              {filter === 'all'
-                ? 'Launch your first UGC campaign and start receiving creator applications.'
-                : 'Try a different filter to see your campaigns.'}
-            </Text>
-            {filter === 'all' && (
-              <TouchableOpacity
-                style={styles.emptyBtn}
-                onPress={() => router.push('/(dashboard_advertiser)/CreateUgc')}
-              >
+            {tab === 'all' && (
+              <TouchableOpacity style={S.emptyBtn} onPress={() => router.push('/(dashboard_advertiser)/CreateUgc' as any)}>
                 <Ionicons name="add-circle-outline" size={18} color="#FFF" />
-                <Text style={styles.emptyBtnTxt}>Create Campaign</Text>
+                <Text style={S.emptyBtnTxt}>Create Campaign</Text>
               </TouchableOpacity>
             )}
           </View>
-        }
-      />
+        ) : (
+          filtered.map((c) => {
+            const cfg = STATUS_CFG[c.status] || STATUS_CFG.draft;
+            const needsReview = ['video_submitted','revision_submitted'].includes(c.status);
+            return (
+              <View key={c._id} style={S.card}>
+                {/* Status bar */}
+                <View style={[S.statusBar, { backgroundColor: cfg.bg }]}>
+                  <Ionicons name={cfg.icon as any} size={14} color={cfg.color} />
+                  <Text style={[S.statusTxt, { color: cfg.color }]}>{cfg.label}</Text>
+                  <Text style={S.statusDate}>{fmtDate(c.createdAt)}</Text>
+                </View>
+
+                <View style={S.cardBody}>
+                  <Text style={S.cardTitle} numberOfLines={2}>{c.title}</Text>
+                  <Text style={S.cardDesc} numberOfLines={2}>{c.description}</Text>
+
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                    <View style={S.tag}><Text style={S.tagTxt}>{c.category}</Text></View>
+                    <View style={S.tag}><Text style={S.tagTxt}>Deadline: {fmtDate(c.applicationDeadline)}</Text></View>
+                  </View>
+
+                  {/* Adworker note (pending / rejection) */}
+                  {c.adworkerNote && c.status === 'draft' && (
+                    <View style={S.adworkerNote}>
+                      <Ionicons name="alert-circle-outline" size={16} color="#D97706" />
+                      <View style={{ flex: 1 }}>
+                        <Text style={S.adworkerNoteTitle}>Changes Requested by Review Team</Text>
+                        <Text style={S.adworkerNoteTxt}>{c.adworkerNote}</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Actions */}
+                  <View style={S.actions}>
+                    {/* View details / review submission */}
+                    <TouchableOpacity
+                      style={S.actionSecondary}
+                      onPress={() => {
+                        if (needsReview) {
+                          router.push({ pathname: '/(dashboard_advertiser)/review-submission/[campaignId]', params: { campaignId: c._id } } as any);
+                        } else if (c.status === 'active') {
+                          router.push({ pathname: '/(dashboard_advertiser)/review-applications/[campaignId]', params: { campaignId: c._id } } as any);
+                        } else {
+                          router.push({ pathname: '/(dashboard_advertiser)/campaign-details/[id]', params: { id: c._id } } as any);
+                        }
+                      }}
+                    >
+                      <Ionicons name={needsReview ? 'eye-outline' : c.status === 'active' ? 'people-outline' : 'document-text-outline'} size={16} color="#4F46E5" />
+                      <Text style={S.actionSecondaryTxt}>
+                        {needsReview ? 'Review Video' : c.status === 'active' ? 'View Applicants' : 'Details'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Mark Complete (advertiser accepts work) */}
+                    {needsReview && !c.paymentReleased && (
+                      <TouchableOpacity
+                        style={[S.actionPrimary, completing === c._id && { opacity: 0.6 }]}
+                        onPress={() => handleComplete(c)}
+                        disabled={completing === c._id}
+                      >
+                        {completing === c._id ? (
+                          <ActivityIndicator size="small" color="#FFF" />
+                        ) : (
+                          <>
+                            <Ionicons name="checkmark-circle" size={16} color="#FFF" />
+                            <Text style={S.actionPrimaryTxt}>Accept & Pay</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    )}
+
+                    {/* Resubmit for review after rejection */}
+                    {c.status === 'draft' && c.adworkerNote && (
+                      <TouchableOpacity
+                        style={[S.actionPrimary, { backgroundColor: '#D97706' }]}
+                        onPress={async () => {
+                          try {
+                            const token = await getToken();
+                            await axios.post(`${API_BASE}/campaigns/${c._id}/submit-for-review`, {}, {
+                              headers: { Authorization: `Bearer ${token}` },
+                            });
+                            Alert.alert('✅ Resubmitted!', 'Your campaign has been sent back for review.');
+                            load(true);
+                          } catch (err: any) {
+                            Alert.alert('Error', err.response?.data?.error || 'Could not resubmit');
+                          }
+                        }}
+                      >
+                        <Ionicons name="send-outline" size={16} color="#FFF" />
+                        <Text style={S.actionPrimaryTxt}>Resubmit</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              </View>
+            );
+          })
+        )}
+      </ScrollView>
     </View>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: '#F8F8FC' },
+const S = StyleSheet.create({
+  hdr:       { paddingTop: 56, paddingBottom: 20, paddingHorizontal: 20, marginTop: -50,},
+  navRow:    { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
+  navTitle:  { fontSize: 22, fontWeight: '800', color: '#FFF' },
+  navSub:    { fontSize: 12, color: 'rgba(255,255,255,0.65)', marginTop: 2 },
+  createBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9, marginLeft: 12 },
+  createBtnTxt: { fontSize: 14, fontWeight: '700', color: '#FFF' },
+  statsRow:  { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 14, padding: 14, alignItems: 'center' },
+  statVal:   { fontSize: 20, fontWeight: '800' },
+  statLbl:   { fontSize: 10, color: 'rgba(255,255,255,0.7)', marginTop: 1 },
 
-  // Header
-  header:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14, backgroundColor: '#FFF' },
-  headerEye:      { fontSize: 10, fontWeight: '700', letterSpacing: 2.5, color: '#A5B4FC', marginBottom: 2 },
-  headerTitle:    { fontSize: 24, fontWeight: '800', color: '#0F0F1A', letterSpacing: -0.5 },
-  newBtn:         { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#6366F1', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 22, shadowColor: '#6366F1', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.38, shadowRadius: 8, elevation: 6 },
-  newBtnTxt:      { fontSize: 14, fontWeight: '700', color: '#FFF' },
+  tabBar:    { maxHeight: 50, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  tabBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, marginVertical: 8, borderRadius: 20, backgroundColor: '#F3F4F6' },
+  tabBtnActive: { backgroundColor: '#EEF2FF' },
+  tabTxt:    { fontSize: 13, fontWeight: '500', color: '#6B7280' },
+  tabTxtActive: { color: '#4F46E5', fontWeight: '700' },
+  tabBadge:  { backgroundColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 },
+  tabBadgeTxt: { fontSize: 11, fontWeight: '700', color: '#6B7280' },
 
-  // Stats strip
-  strip:          { flexDirection: 'row', backgroundColor: '#FFF', borderTopWidth: 1, borderTopColor: '#F0F0F8', borderBottomWidth: 1, borderBottomColor: '#F0F0F8' },
-  stripCell:      { flex: 1, alignItems: 'center', paddingVertical: 11 },
-  stripVal:       { fontSize: 19, fontWeight: '800' },
-  stripLbl:       { fontSize: 10, color: '#9CA3AF', fontWeight: '500', marginTop: 1, letterSpacing: 0.3 },
+  card:      { backgroundColor: '#FFF', borderRadius: 18, marginBottom: 12, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 8, elevation: 3 },
+  statusBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
+  statusTxt: { fontSize: 12, fontWeight: '700', flex: 1 },
+  statusDate:{ fontSize: 11, color: '#9CA3AF' },
+  cardBody:  { padding: 14 },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 6 },
+  cardDesc:  { fontSize: 13, color: '#6B7280', lineHeight: 18, marginBottom: 10 },
+  tag:       { backgroundColor: '#F3F4F6', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 14 },
+  tagTxt:    { fontSize: 12, color: '#6B7280' },
 
-  // Filter tabs
-  tabsWrap:       { backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F8', flexGrow: 0, flexShrink: 0 },
-  tabs:           { paddingHorizontal: 16, paddingVertical: 10, gap: 8, alignItems: 'center' },
-  tab:            { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 22, backgroundColor: '#F3F4F6', gap: 5 },
-  tabOn:          { backgroundColor: '#6366F1' },
-  tabTxt:         { fontSize: 13, color: '#6B7280', fontWeight: '600' },
-  tabTxtOn:       { color: '#FFF' },
-  tabBubble:      { backgroundColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 6, minWidth: 20, alignItems: 'center' },
-  tabBubbleOn:    { backgroundColor: 'rgba(255,255,255,0.28)' },
-  tabBubbleTxt:   { fontSize: 11, fontWeight: '700', color: '#6B7280' },
+  adworkerNote:      { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 12, padding: 12, gap: 8, marginBottom: 12 },
+  adworkerNoteTitle: { fontSize: 12, fontWeight: '700', color: '#92400E', marginBottom: 3 },
+  adworkerNoteTxt:   { fontSize: 12, color: '#92400E', lineHeight: 17 },
 
-  // List
-  list:           { padding: 16, paddingBottom: 32 },
+  actions:   { flexDirection: 'row', gap: 10 },
+  actionSecondary: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#EEF2FF', borderRadius: 11, paddingVertical: 11 },
+  actionSecondaryTxt: { fontSize: 13, fontWeight: '600', color: '#4F46E5' },
+  actionPrimary: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#4F46E5', borderRadius: 11, paddingVertical: 11 },
+  actionPrimaryTxt: { fontSize: 13, fontWeight: '700', color: '#FFF' },
 
-  // Card
-  card:           { backgroundColor: '#FFF', borderRadius: 22, marginBottom: 16, overflow: 'hidden', shadowColor: '#4338CA', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.09, shadowRadius: 18, elevation: 5 },
-
-  // Thumbnail
-  thumbWrap:      { width: '100%', height: 175, position: 'relative' },
-  thumb:          { width: '100%', height: '100%' },
-  thumbGrad:      { justifyContent: 'center', alignItems: 'center', gap: 10 },
-  thumbNoImgText: { fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.55)', paddingHorizontal: 20, textAlign: 'center' },
-  thumbFade:      { position: 'absolute', bottom: 0, left: 0, right: 0, height: 75 },
-
-  statusPill:     { position: 'absolute', top: 12, left: 12, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 22, gap: 5 },
-  statusPillTxt:  { fontSize: 11, fontWeight: '700', color: '#FFF', letterSpacing: 0.2 },
-
-  urgentBadge:    { position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, gap: 4 },
-  urgentBadgeTxt: { fontSize: 10, fontWeight: '700', color: '#FFF' },
-
-  categoryChip:   { position: 'absolute', bottom: 10, left: 12, backgroundColor: 'rgba(0,0,0,0.45)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  categoryChipTxt:{ fontSize: 10, fontWeight: '600', color: 'rgba(255,255,255,0.85)', letterSpacing: 0.5 },
-
-  // Content
-  content:        { padding: 16 },
-  title:          { fontSize: 17, fontWeight: '800', color: '#0F0F1A', lineHeight: 23, marginBottom: 9, letterSpacing: -0.2 },
-
-  metaRow:        { flexDirection: 'row', alignItems: 'center', marginBottom: 14, gap: 8, flexWrap: 'wrap' },
-  metaItem:       { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  metaTxt:        { fontSize: 12, color: '#9CA3AF', fontWeight: '500' },
-  metaDot:        { width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#D1D5DB' },
-
-  ctaGradBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 13, borderRadius: 13, gap: 7 },
-  ctaBtnTxt:      { fontSize: 14, fontWeight: '700', color: '#FFF' },
-  openBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 13, borderWidth: 1.5, borderColor: '#E0E7FF', gap: 4 },
-  openBtnTxt:     { fontSize: 14, fontWeight: '700', color: '#6366F1' },
-
-  // Loading
-  loadingWrap:    { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8F8FC', gap: 12 },
-  loadingTxt:     { fontSize: 14, color: '#9CA3AF', fontWeight: '500' },
-
-  // Empty
-  empty:          { alignItems: 'center', paddingTop: 52, paddingHorizontal: 32 },
-  emptyIconWrap:  { width: 90, height: 90, borderRadius: 45, justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
-  emptyTitle:     { fontSize: 20, fontWeight: '800', color: '#0F0F1A', marginBottom: 8, textAlign: 'center' },
-  emptySub:       { fontSize: 14, color: '#9CA3AF', textAlign: 'center', lineHeight: 21, marginBottom: 24 },
-  emptyBtn:       { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: '#6366F1', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14, shadowColor: '#6366F1', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.32, shadowRadius: 8, elevation: 5 },
-  emptyBtnTxt:    { fontSize: 15, fontWeight: '700', color: '#FFF' },
+  empty:     { alignItems: 'center', paddingTop: 60, gap: 12 },
+  emptyTitle:{ fontSize: 17, fontWeight: '600', color: '#374151' },
+  emptySub:  { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 40 },
+  emptyBtn:  { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#4F46E5', borderRadius: 14, paddingVertical: 13, paddingHorizontal: 24, marginTop: 8 },
+  emptyBtnTxt: { fontSize: 14, fontWeight: '700', color: '#FFF' },
 });
