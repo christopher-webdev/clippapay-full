@@ -6,7 +6,6 @@ express_backend/node_modules
 *.env
 .DS_Store
 dist/
-build/
 express_backend/uploads/clips
 express_backend/uploads/deposits
 express_backend/uploads/receipts
