@@ -26,7 +26,7 @@ import { requireAuth, requireClipper } from '../middleware/auth.js';
 const router = express.Router();
 
 // Clipper earns 40% of what advertiser pays; platform keeps 60%
-const CLIPPER_REVENUE_SHARE = 0.40;
+const CLIPPER_REVENUE_SHARE = 0.50;
 
 // ─── Multer config for proof uploads ────────────────────────────────────────
 const proofDir = path.join(process.cwd(), 'uploads/clipping-proofs');
