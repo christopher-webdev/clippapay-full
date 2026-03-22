@@ -7,7 +7,7 @@ import axios from 'axios';
 const API_BASE = import.meta.env.VITE_API_URL || 'https://clippapay.com/api';
 
 const NGN_PER_THOUSAND_VIEWS  = 3000;
-const USDT_PER_THOUSAND_VIEWS = 1.85;
+const USDT_PER_THOUSAND_VIEWS = 1.0;
 
 const PLATFORM_OPTIONS = [
   { id: 'tiktok',     label: 'TikTok',           icon: '🎵' },
