@@ -466,19 +466,41 @@ router.get('/my-submissions', requireAuth, async (req, res) => {
 /**
  * GET /api/clippers/overview
  * Dashboard stats for logged-in clipper
+ * 
+ * CHANGED:
+ *  - joinedCampaigns  → only UGC/normal campaigns joined
+ *  - clippingCampaigns → clipping campaigns joined (new)
+ *  - walletBalance    → NGN available balance (unchanged)
+ *  - usdtBalance      → USDT available balance (new)
+ *  - removed activeCampaigns
  */
 router.get('/overview', requireAuth, async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Campaigns joined = campaigns with at least one submission by this clipper
-    const joinedCampaigns = await ClipSubmission.distinct('campaign', { clipper: userId }).then(arr => arr.length);
+    // All campaign IDs this clipper has a submission for
+    const allJoinedCampaignIds = await ClipSubmission.distinct('campaign', { clipper: userId });
 
-    // Active = campaigns that are still open (campaign status active)
-    const activeCampaigns = await Campaign.countDocuments({
-      _id: { $in: await ClipSubmission.distinct('campaign', { clipper: userId }) },
-      status: 'active'
+    // Split into UGC/normal vs clipping by looking up campaign kinds
+    const joinedCampaignDocs = await Campaign.find(
+      { _id: { $in: allJoinedCampaignIds } },
+      { kind: 1 }
+    ).lean();
+
+    const ugcKinds = ['ugc', 'normal', 'pgc'];
+    const joinedCampaigns   = joinedCampaignDocs.filter(c => ugcKinds.includes(c.kind)).length;
+
+    // Clipping campaigns — from ClippingCampaign model, separate submissions
+    // We check ClipSubmission where the campaign ref is a ClippingCampaign.
+    // Since ClippingCampaign is a separate collection, we query it directly.
+    const ClippingCampaign = (await import('../models/ClippingCampaign.js')).default;
+    const clippingCampaignIds = await ClippingCampaign.distinct('_id', {});
+    // Count distinct clipping campaign IDs this clipper submitted to
+    const clippingSubmissionIds = await ClipSubmission.distinct('campaign', {
+      clipper: userId,
+      campaign: { $in: clippingCampaignIds },
     });
+    const clippingCampaigns = clippingSubmissionIds.length;
 
     // Total submissions (all platforms, all time)
     const submissions = await ClipSubmission.countDocuments({ clipper: userId });
@@ -486,31 +508,32 @@ router.get('/overview', requireAuth, async (req, res) => {
     // Pending verifications = proofs still waiting approval
     const pendingVerifications = await ClipSubmission.aggregate([
       { $match: { clipper: userId } },
-      { $unwind: "$proofs" },
-      { $match: { "proofs.status": "pending" } },
-      { $count: "count" }
-    ]).then(res => res[0]?.count || 0);
+      { $unwind: '$proofs' },
+      { $match: { 'proofs.status': 'pending' } },
+      { $count: 'count' },
+    ]).then(r => r[0]?.count || 0);
 
     // Total earned = sum of all approved proofs' rewardAmount
-    const result = await ClipSubmission.aggregate([
+    const earnedResult = await ClipSubmission.aggregate([
       { $match: { clipper: userId } },
-      { $unwind: "$proofs" },
-      { $match: { "proofs.status": "approved" } },
-      { $group: { _id: null, total: { $sum: "$proofs.rewardAmount" } } }
+      { $unwind: '$proofs' },
+      { $match: { 'proofs.status': 'approved' } },
+      { $group: { _id: null, total: { $sum: '$proofs.rewardAmount' } } },
     ]);
-    const totalEarned = result.length > 0 ? result[0].total : 0;
+    const totalEarned = earnedResult[0]?.total || 0;
 
-    // Wallet balance
-    let walletBalance = 0;
-    const wallet = await Wallet.findOne({ user: userId });
-    if (wallet) walletBalance = wallet.balance;
+    // Wallet — NGN + USDT
+    const wallet       = await Wallet.findOne({ user: userId });
+    const walletBalance = wallet?.balance     || 0;
+    const usdtBalance   = wallet?.usdtBalance || 0;
 
     return res.json({
       joinedCampaigns,
+      clippingCampaigns,
       submissions,
       pendingVerifications,
-      activeCampaigns,
       walletBalance,
+      usdtBalance,
       totalEarned,
     });
   } catch (err) {
@@ -518,7 +541,6 @@ router.get('/overview', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Could not fetch overview.' });
   }
 });
-
 
 // GET /api/clippers/my-ugc-submissions
 router.get('/my-ugc-submissions', requireAuth, async (req, res) => {

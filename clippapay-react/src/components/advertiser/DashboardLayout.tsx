@@ -81,7 +81,7 @@ export default function AdvertiserDashboardLayout() {
 
       {/* Sidebar overlay (mobile) */}
       <div
-        className={`fixed inset-0 z-40 transition-transform duration-300 md:hidden ${
+        className={`mt-9 fixed inset-0 z-40 transition-transform duration-300 md:hidden ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -149,7 +149,7 @@ export default function AdvertiserDashboardLayout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto bg-gray-50">
+      <main className="mt-20 flex-1 overflow-y-auto bg-gray-50">
         <div className="p-6">
           {/* Header */}
           <div className="flex justify-between items-center mb-6">

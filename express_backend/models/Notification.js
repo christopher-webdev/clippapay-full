@@ -34,6 +34,7 @@ const notificationSchema = new mongoose.Schema({
       
       // Wallet/Transactions
       'deposit_confirmed',
+      'withdrawal_approved',
       'withdrawal_processed',
       'withdrawal_rejected',
       'wallet_credited',
@@ -52,7 +53,8 @@ const notificationSchema = new mongoose.Schema({
       'new_ugc_pending',
       'campaign_auto_completed',
       'clipping_joined',
-      'clipping_approved,'
+      'clipping_approved',
+      'offer_declined',
     ],
     required: true
   },

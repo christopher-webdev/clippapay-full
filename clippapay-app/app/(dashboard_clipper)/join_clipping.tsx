@@ -449,7 +449,7 @@ export default function JoinClippingScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#F5F5F7' }}>
-      <LinearGradient colors={['#FF6B35', '#FF6B35', '#FF6B35']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.gradHdr}>
+      <LinearGradient colors={['#f25015', '#e23c00', '#FF6B35']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.gradHdr}>
         <View style={styles.navRow}>
           <TouchableOpacity style={styles.navBtn} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color="#FFF" />

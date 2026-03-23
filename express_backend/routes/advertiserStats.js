@@ -3,6 +3,7 @@
 import express from 'express';
 import { requireAuth, requireAdvertiser } from '../middleware/auth.js';
 import Campaign from '../models/Campaign.js';
+import ClippingCampaign from '../models/ClippingCampaign.js';
 import Submission from '../models/Submission.js';
 import Wallet from '../models/Wallet.js';
 
@@ -11,12 +12,15 @@ const router = express.Router();
 /**
  * GET /api/advertiser/stats
  * Returns:
- *   totalCampaigns: number
- *   totalViewsBought: number (sum of approved verifiedViews)
- *   walletBalance: number
- *   fundsInEscrow: number (amount locked for campaigns)
- *   avgCPV: number
- *   totalClippers: number (unique clippers on your campaigns)
+ *   totalCampaigns        : number  (UGC campaigns)
+ *   totalClippingCampaigns: number  (Clipping campaigns)
+ *   totalViewsBought      : number  (sum of approved verifiedViews)
+ *   walletBalance         : number  (NGN available)
+ *   fundsInEscrow         : number  (NGN locked)
+ *   usdtBalance           : number  (USDT available)
+ *   usdtEscrowLocked      : number  (USDT locked)
+ *   avgCPV                : number
+ *   totalClippers         : number
  */
 router.get(
   '/stats',
@@ -26,12 +30,17 @@ router.get(
     try {
       const advertiserId = req.user._id;
 
-      // 1) Fetch campaigns
-      const campaigns = await Campaign.find({ advertiser: advertiserId });
-      const totalCampaigns = campaigns.length;
-      const campaignIds = campaigns.map(c => c._id);
+      // 1) UGC campaigns + Clipping campaigns in parallel
+      const [campaigns, clippingCampaigns] = await Promise.all([
+        Campaign.find({ advertiser: advertiserId }),
+        ClippingCampaign.find({ advertiser: advertiserId }),
+      ]);
 
-      // 2) Gather submissions & compute views + unique clippers
+      const totalCampaigns         = campaigns.length;
+      const totalClippingCampaigns = clippingCampaigns.length;
+      const campaignIds            = campaigns.map(c => c._id);
+
+      // 2) Submissions → views + unique clippers
       const subs = await Submission.find({ campaign: { $in: campaignIds } });
       let totalViewsBought = 0;
       const clippersSet = new Set();
@@ -45,22 +54,27 @@ router.get(
       });
       const totalClippers = clippersSet.size;
 
-      // 3) Average CPV across your campaigns
+      // 3) Average CPV (UGC campaigns only)
       const avgCPV =
         totalCampaigns > 0
           ? campaigns.reduce((sum, c) => sum + c.rate_per_view, 0) / totalCampaigns
           : 0;
 
-      // 4) Wallet info
-      const wallet = await Wallet.findOne({ user: advertiserId });
-      const walletBalance = wallet?.balance || 0;
-      const fundsInEscrow = wallet?.escrowLocked || 0;
+      // 4) Wallet — NGN + USDT
+      const wallet           = await Wallet.findOne({ user: advertiserId });
+      const walletBalance    = wallet?.balance          || 0;
+      const fundsInEscrow    = wallet?.escrowLocked     || 0;
+      const usdtBalance      = wallet?.usdtBalance      || 0;
+      const usdtEscrowLocked = wallet?.usdtEscrowLocked || 0;
 
       return res.json({
         totalCampaigns,
+        totalClippingCampaigns,
         totalViewsBought,
         walletBalance,
         fundsInEscrow,
+        usdtBalance,
+        usdtEscrowLocked,
         avgCPV,
         totalClippers,
       });

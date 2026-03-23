@@ -171,6 +171,7 @@ const S = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 4,
+    marginTop: 30,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E5E7EB',
     shadowColor: '#000',

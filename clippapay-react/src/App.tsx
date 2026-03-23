@@ -57,6 +57,7 @@ import AdminLogin from '@/components/admin/AdminLogin.tsx';
 import AdminWorkerCreation from '@/components/admin/AdminWorkerCreation.tsx';
 import AdminUGCReview from './components/admin/AdminUGCReview.tsx';
 import AdminDisputeManagement from './components/admin/AdminDisputeManagement.tsx';
+import AdminClippingCampaignsManagement from './components/admin/AdminClippingCampaignsManagement.tsx';
 
 // Ad-Workers
 import AdWorkerDashboard from './components/AdWorkerDashboard';
@@ -134,6 +135,7 @@ export default function App() {
         <Route index element={<AdminOverview />} />
         <Route path="users" element={<AdminUsersManagement />} />
         <Route path="campaigns" element={<AdminCampaignsManagement />} />
+        <Route path="clipping-campaigns" element={<AdminClippingCampaignsManagement />} />
         <Route path="clippings" element={<AdminClippingManagement />} />
         <Route path="ugc" element={<AdminUGCReview />} />
         <Route path="disputes" element={<AdminDisputeManagement />} />

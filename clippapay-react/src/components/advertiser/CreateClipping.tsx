@@ -1,5 +1,11 @@
 // components/advertiser/CreateClipping.tsx
-// 3-step wizard to create a clipping campaign
+// Updated to match mobile:
+//  1. Per-step validation — Next button validates only the current step's fields
+//  2. Inline errors shown immediately below each field
+//  3. Success message updated: campaign goes to "waiting_for_approval" not immediately active
+//  4. Min budget: ₦20,000 NGN / $10 USDT (matches mobile)
+//  5. USDT rate corrected to $1.85 (matches mobile)
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -7,12 +13,16 @@ import axios from 'axios';
 const API_BASE = import.meta.env.VITE_API_URL || 'https://clippapay.com/api';
 
 const NGN_PER_THOUSAND_VIEWS  = 3000;
-const USDT_PER_THOUSAND_VIEWS = 1.0;
+const USDT_PER_THOUSAND_VIEWS = 1.00;
+
+// Realistic minimums — matches mobile
+const MIN_NGN_BUDGET  = 20_000;
+const MIN_USDT_BUDGET = 10;
 
 const PLATFORM_OPTIONS = [
   { id: 'tiktok',     label: 'TikTok',           icon: '🎵' },
   { id: 'instagram',  label: 'Instagram Reels',   icon: '📸' },
-  { id: 'youtube',    label: 'YouTube Shorts',    icon: '▶️' },
+  { id: 'youtube',    label: 'YouTube Shorts',    icon: '▶️'  },
   { id: 'facebook',   label: 'Facebook Reels',    icon: '👥' },
   { id: 'twitter',    label: 'X (Twitter)',       icon: '🐦' },
 ] as const;
@@ -37,13 +47,13 @@ const getToken = () => localStorage.getItem('token');
 
 export default function CreateClipping() {
   const navigate = useNavigate();
-  const [loading, setLoading]           = useState(false);
-  const [walletLoading, setWalletLoading] = useState(true);
-  const [wallet, setWallet]             = useState<WalletData | null>(null);
-  const [activeStep, setActiveStep]     = useState(1);
+  const [loading, setLoading]               = useState(false);
+  const [walletLoading, setWalletLoading]   = useState(true);
+  const [wallet, setWallet]                 = useState<WalletData | null>(null);
+  const [activeStep, setActiveStep]         = useState(1);
   const [estimatedViews, setEstimatedViews] = useState(0);
-  const [errors, setErrors]             = useState<FormErrors>({});
-  const [successId, setSuccessId]       = useState<string | null>(null);
+  const [errors, setErrors]                 = useState<FormErrors>({});
+  const [submitted, setSubmitted]           = useState(false);
 
   const [form, setForm] = useState<CampaignForm>({
     title: '', videoUrl: '', budget: '', currency: 'NGN',
@@ -51,7 +61,7 @@ export default function CreateClipping() {
   });
 
   useEffect(() => {
-    const fetchWallet = async () => {
+    (async () => {
       try {
         const token = getToken();
         if (!token) return;
@@ -59,8 +69,7 @@ export default function CreateClipping() {
         setWallet(res.data);
         setForm((prev) => ({ ...prev, currency: res.data.preferredCurrency || 'NGN' }));
       } catch { /* silent */ } finally { setWalletLoading(false); }
-    };
-    fetchWallet();
+    })();
   }, []);
 
   useEffect(() => {
@@ -85,83 +94,139 @@ export default function CreateClipping() {
     setErrors((e) => ({ ...e, categories: undefined }));
   };
 
-  const validate = (): boolean => {
+  // ── Per-step validation (matches mobile logic) ─────────────────────────────
+  const validateStep = (step: number): boolean => {
     const e: FormErrors = {};
-    if (!form.title.trim() || form.title.length < 5)       e.title    = 'Title must be at least 5 characters';
-    if (!form.videoUrl.trim())                              e.videoUrl = 'Video URL is required';
-    else try { new URL(form.videoUrl); } catch { e.videoUrl = 'Please enter a valid URL'; }
 
-    const budgetNum = parseFloat(form.budget);
-    if (!form.budget || isNaN(budgetNum) || budgetNum <= 0) {
-      e.budget = 'Please enter a valid budget amount';
-    } else {
-      const min = form.currency === 'NGN' ? 3000 : 1.85;
-      if (budgetNum < min) e.budget = `Minimum budget is ${form.currency === 'NGN' ? '₦3,000' : '$1.85 USDT'}`;
-      const avail = form.currency === 'NGN' ? wallet?.balance || 0 : wallet?.usdtBalance || 0;
-      if (budgetNum > avail) e.budget = `Insufficient ${form.currency} balance`;
+    if (step === 1) {
+      if (!form.title.trim()) {
+        e.title = 'Campaign title is required';
+      } else if (form.title.length < 5) {
+        e.title = 'Title must be at least 5 characters';
+      } else if (form.title.length > 100) {
+        e.title = 'Title must be less than 100 characters';
+      }
+
+      if (!form.videoUrl.trim()) {
+        e.videoUrl = 'Video URL is required';
+      } else {
+        try {
+          new URL(form.videoUrl);
+          const isValid =
+            form.videoUrl.match(/\.(mp4|mov|avi|mkv|webm)$/i) ||
+            form.videoUrl.includes('youtube.com') ||
+            form.videoUrl.includes('youtu.be') ||
+            form.videoUrl.includes('vimeo.com') ||
+            form.videoUrl.includes('drive.google.com');
+          if (!isValid)
+            e.videoUrl = 'Please enter a valid video URL (YouTube, Vimeo, Google Drive, or direct MP4)';
+        } catch {
+          e.videoUrl = 'Please enter a valid URL starting with https://';
+        }
+      }
     }
-    if (form.platforms.length === 0) e.platforms = 'Select at least one platform';
-    if (form.categories.length === 0) e.categories = 'Select at least one category';
+
+    if (step === 2) {
+      const budgetNum = parseFloat(form.budget);
+      if (!form.budget) {
+        e.budget = 'Budget is required';
+      } else if (isNaN(budgetNum) || budgetNum <= 0) {
+        e.budget = 'Please enter a valid budget amount';
+      } else {
+        const minBudget = form.currency === 'NGN' ? MIN_NGN_BUDGET : MIN_USDT_BUDGET;
+        if (budgetNum < minBudget) {
+          e.budget = `Minimum budget is ${form.currency === 'NGN' ? `₦${MIN_NGN_BUDGET.toLocaleString()}` : `$${MIN_USDT_BUDGET} USDT`}`;
+        } else {
+          const avail = form.currency === 'NGN' ? wallet?.balance || 0 : wallet?.usdtBalance || 0;
+          if (budgetNum > avail) {
+            e.budget = `Insufficient ${form.currency} balance (available: ${
+              form.currency === 'NGN' ? `₦${avail.toLocaleString()}` : `$${avail.toFixed(2)} USDT`
+            })`;
+          }
+        }
+      }
+
+      if (form.platforms.length === 0) {
+        e.platforms = 'Select at least one platform';
+      }
+    }
+
+    if (step === 3) {
+      if (form.categories.length === 0) {
+        e.categories = 'Select at least one category';
+      }
+    }
+
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
+  const handleNext = (nextStep: number) => {
+    if (validateStep(activeStep)) setActiveStep(nextStep);
+  };
+
   const handleSubmit = async () => {
-    if (!validate()) return;
+    if (!validateStep(3)) return;
     setLoading(true);
     try {
       const token    = getToken();
       const budgetNum = parseFloat(form.budget);
       const payload  = {
-        title:            form.title.trim(),
-        videoUrl:         form.videoUrl.trim(),
-        budget:           budgetNum,
-        currency:         form.currency,
-        platforms:        form.platforms,
-        hashtags:         form.hashtags.split(',').map((t) => t.trim()).filter(Boolean),
-        directions:       form.directions.split('\n').filter((l) => l.trim()),
-        categories:       form.categories,
-        ctaUrl:           form.ctaUrl.trim() || undefined,
+        title:           form.title.trim(),
+        videoUrl:        form.videoUrl.trim(),
+        budget:          budgetNum,
+        currency:        form.currency,
+        platforms:       form.platforms,
+        hashtags:        form.hashtags.split(',').map((t) => t.trim()).filter(Boolean),
+        directions:      form.directions.split('\n').filter((l) => l.trim()),
+        categories:      form.categories,
+        ctaUrl:          form.ctaUrl.trim() || undefined,
         estimatedViews,
-        costPerThousand:  form.currency === 'NGN' ? NGN_PER_THOUSAND_VIEWS : USDT_PER_THOUSAND_VIEWS,
+        costPerThousand: form.currency === 'NGN' ? NGN_PER_THOUSAND_VIEWS : USDT_PER_THOUSAND_VIEWS,
       };
-      const res = await axios.post(`${API_BASE}/campaigns/clipping`, payload, {
+      await axios.post(`${API_BASE}/campaigns/clipping`, payload, {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
-      setSuccessId(res.data.campaignId);
+      setSubmitted(true);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to create campaign. Please try again.');
+      const msg = err.response?.data?.errors?.[0]?.msg
+        || err.response?.data?.error
+        || 'Failed to create campaign. Please try again.';
+      alert(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Success screen ─────────────────────────────────────────────────────────
-  if (successId) {
+  // ── Success screen — admin approval messaging ──────────────────────────────
+  if (submitted) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-600 via-purple-600 to-indigo-700 flex items-center justify-center p-5">
         <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl">
-          <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-9 h-9 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+          <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-9 h-9 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <h2 className="text-xl font-extrabold text-gray-900 mb-2">Campaign Created! 🎉</h2>
-          <p className="text-sm text-gray-500 mb-6 leading-relaxed">
-            Your clipping campaign is now active. Clippers can start joining and submitting proofs.
+          <h2 className="text-xl font-extrabold text-gray-900 mb-2">Campaign Submitted! 🎉</h2>
+          <p className="text-sm text-gray-500 mb-2 leading-relaxed">
+            Your clipping campaign has been submitted for admin review.
+          </p>
+          <p className="text-sm text-amber-600 font-semibold mb-6">
+            It will go live once approved (usually within 24 hours).
           </p>
           <div className="flex flex-col gap-2">
             <button
-              onClick={() => navigate(`../${successId}`)}
+              onClick={() => navigate('..')}
               className="w-full bg-indigo-500 text-white font-bold py-3 rounded-xl text-sm hover:bg-indigo-600 transition-colors"
             >
-              Manage Campaign
+              View My Campaigns
             </button>
             <button
-              onClick={() => navigate('..')}
+              onClick={() => { setSubmitted(false); setActiveStep(1); setForm({ title: '', videoUrl: '', budget: '', currency: 'NGN', platforms: [], hashtags: '', directions: '', categories: [], ctaUrl: '' }); }}
               className="w-full border border-gray-200 text-gray-600 font-semibold py-3 rounded-xl text-sm hover:bg-gray-50 transition-colors"
             >
-              View All Campaigns
+              Create Another
             </button>
           </div>
         </div>
@@ -170,12 +235,15 @@ export default function CreateClipping() {
   }
 
   const stepLabels = ['Basic Info', 'Budget & Platforms', 'Guidelines'];
-  const fmtCur = (n: number) => form.currency === 'NGN' ? `₦${n.toLocaleString()}` : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2 })} USDT`;
-  const avail  = form.currency === 'NGN' ? wallet?.balance || 0 : wallet?.usdtBalance || 0;
+  const fmtCur = (n: number) => form.currency === 'NGN'
+    ? `₦${n.toLocaleString()}`
+    : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2 })} USDT`;
+  const avail = form.currency === 'NGN' ? wallet?.balance || 0 : wallet?.usdtBalance || 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-600 via-purple-600 to-indigo-800">
       <div className="max-w-2xl mx-auto px-5 pt-8 pb-20">
+
         {/* Header */}
         <div className="flex items-center gap-4 mb-6">
           <button
@@ -200,7 +268,9 @@ export default function CreateClipping() {
             </svg>
           </div>
           {walletLoading ? (
-            <div className="flex items-center"><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /></div>
+            <div className="flex items-center">
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            </div>
           ) : wallet ? (
             <div className="flex gap-6">
               <div>
@@ -225,12 +295,14 @@ export default function CreateClipping() {
           </svg>
           <p className="text-sm text-gray-600 leading-relaxed">
             Creators will download your video and create engaging clips. You pay{' '}
-            <strong>{form.currency === 'NGN' ? '₦3,000' : '$1.85 USDT'}</strong> per 1,000 views generated.
+            <strong>{form.currency === 'NGN' ? '₦3,000' : '$1.00 USDT'}</strong> per 1,000 views generated.
+            Campaign goes live after admin review (usually within 5 days).
           </p>
         </div>
 
         {/* Form card */}
         <div className="bg-white rounded-3xl p-6 shadow-2xl">
+
           {/* Step indicator */}
           <div className="flex items-center mb-8">
             {[1, 2, 3].map((step) => (
@@ -256,28 +328,43 @@ export default function CreateClipping() {
             ))}
           </div>
 
-          {/* ── Step 1 ── */}
+          {/* ── Step 1: Basic Info ── */}
           {activeStep === 1 && (
             <div className="space-y-5">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Campaign Title</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Campaign Title <span className="text-red-400">*</span>
+                </label>
                 <input
                   type="text"
                   value={form.title}
                   onChange={(e) => { setField('title', e.target.value); setErrors((err) => ({ ...err, title: undefined })); }}
                   placeholder="e.g., Summer Fashion Lookbook Clips"
                   maxLength={100}
-                  className={`w-full bg-gray-50 border rounded-xl px-4 py-3 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 ${errors.title ? 'border-red-400' : 'border-gray-200'}`}
+                  className={`w-full bg-gray-50 border rounded-xl px-4 py-3 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-colors ${
+                    errors.title ? 'border-red-400 bg-red-50' : 'border-gray-200'
+                  }`}
                 />
-                <div className="flex justify-between mt-1">
-                  {errors.title ? <p className="text-red-500 text-xs">{errors.title}</p> : <span />}
+                <div className="flex justify-between mt-1.5">
+                  {errors.title ? (
+                    <p className="text-red-500 text-xs flex items-center gap-1">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      {errors.title}
+                    </p>
+                  ) : <span />}
                   <p className="text-gray-400 text-xs">{form.title.length}/100</p>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Video URL</label>
-                <div className={`flex items-center bg-gray-50 border rounded-xl px-4 ${errors.videoUrl ? 'border-red-400' : 'border-gray-200'}`}>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Video URL <span className="text-red-400">*</span>
+                </label>
+                <div className={`flex items-center bg-gray-50 border rounded-xl px-4 transition-colors ${
+                  errors.videoUrl ? 'border-red-400 bg-red-50' : 'border-gray-200'
+                }`}>
                   <svg className="w-4 h-4 text-gray-400 shrink-0 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                   </svg>
@@ -289,12 +376,20 @@ export default function CreateClipping() {
                     className="flex-1 bg-transparent py-3 text-sm text-gray-900 focus:outline-none"
                   />
                 </div>
-                {errors.videoUrl && <p className="text-red-500 text-xs mt-1">{errors.videoUrl}</p>}
-                <p className="text-gray-400 text-xs mt-1">Supported: YouTube, Vimeo, Google Drive, or direct MP4 links</p>
+                {errors.videoUrl ? (
+                  <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {errors.videoUrl}
+                  </p>
+                ) : (
+                  <p className="text-gray-400 text-xs mt-1">Supported: YouTube, Vimeo, Google Drive, or direct MP4 links</p>
+                )}
               </div>
 
               <button
-                onClick={() => setActiveStep(2)}
+                onClick={() => handleNext(2)}
                 className="w-full flex items-center justify-center gap-2 bg-orange-500 text-white font-bold py-3 rounded-xl hover:bg-orange-600 transition-colors"
               >
                 Next: Budget & Platforms
@@ -305,16 +400,18 @@ export default function CreateClipping() {
             </div>
           )}
 
-          {/* ── Step 2 ── */}
+          {/* ── Step 2: Budget & Platforms ── */}
           {activeStep === 2 && (
             <div className="space-y-5">
+
+              {/* Currency toggle */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Currency</label>
                 <div className="flex bg-gray-100 rounded-xl p-1">
                   {(['NGN', 'USDT'] as const).map((c) => (
                     <button
                       key={c}
-                      onClick={() => setField('currency', c)}
+                      onClick={() => { setField('currency', c); setField('budget', ''); setErrors((e) => ({ ...e, budget: undefined })); setEstimatedViews(0); }}
                       className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${
                         form.currency === c ? 'bg-white shadow-sm text-indigo-600' : 'text-gray-500'
                       }`}
@@ -325,20 +422,35 @@ export default function CreateClipping() {
                 </div>
               </div>
 
+              {/* Budget */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Budget</label>
-                <div className={`flex items-center bg-gray-50 border rounded-xl px-4 ${errors.budget ? 'border-red-400' : 'border-gray-200'}`}>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Budget <span className="text-red-400">*</span>
+                </label>
+                <div className={`flex items-center bg-gray-50 border rounded-xl px-4 transition-colors ${
+                  errors.budget ? 'border-red-400 bg-red-50' : 'border-gray-200'
+                }`}>
                   <span className="text-xl font-bold text-gray-400 mr-2">{form.currency === 'NGN' ? '₦' : '$'}</span>
                   <input
                     type="number"
                     value={form.budget}
                     onChange={(e) => { setField('budget', e.target.value.replace(/[^0-9.]/g, '')); setErrors((err) => ({ ...err, budget: undefined })); }}
-                    placeholder="0.00"
+                    placeholder={form.currency === 'NGN' ? '20000' : '10.00'}
                     className="flex-1 bg-transparent py-3 text-lg font-bold text-gray-900 focus:outline-none"
                   />
                 </div>
-                {errors.budget && <p className="text-red-500 text-xs mt-1">{errors.budget}</p>}
-                <p className="text-gray-400 text-xs mt-1">Available: {fmtCur(avail)}</p>
+                {errors.budget ? (
+                  <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {errors.budget}
+                  </p>
+                ) : (
+                  <p className="text-gray-400 text-xs mt-1">
+                    Min: {form.currency === 'NGN' ? `₦${MIN_NGN_BUDGET.toLocaleString()}` : `$${MIN_USDT_BUDGET} USDT`} · Available: {fmtCur(avail)}
+                  </p>
+                )}
 
                 {estimatedViews > 0 && (
                   <div className="bg-blue-50 rounded-xl p-3 mt-2">
@@ -351,8 +463,11 @@ export default function CreateClipping() {
                 )}
               </div>
 
+              {/* Platforms */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Platforms</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Platforms <span className="text-red-400">*</span>
+                </label>
                 <div className="grid grid-cols-2 gap-2">
                   {PLATFORM_OPTIONS.map((p) => (
                     <button
@@ -369,7 +484,14 @@ export default function CreateClipping() {
                     </button>
                   ))}
                 </div>
-                {errors.platforms && <p className="text-red-500 text-xs mt-1">{errors.platforms}</p>}
+                {errors.platforms && (
+                  <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {errors.platforms}
+                  </p>
+                )}
               </div>
 
               <div className="flex gap-3">
@@ -383,7 +505,7 @@ export default function CreateClipping() {
                   Back
                 </button>
                 <button
-                  onClick={() => setActiveStep(3)}
+                  onClick={() => handleNext(3)}
                   className="flex-1 flex items-center justify-center gap-2 bg-orange-500 text-white font-bold py-3 rounded-xl hover:bg-orange-600 transition-colors"
                 >
                   Next: Guidelines
@@ -395,7 +517,7 @@ export default function CreateClipping() {
             </div>
           )}
 
-          {/* ── Step 3 ── */}
+          {/* ── Step 3: Guidelines ── */}
           {activeStep === 3 && (
             <div className="space-y-5">
               <div>
@@ -422,7 +544,9 @@ export default function CreateClipping() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Categories</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Categories <span className="text-red-400">*</span>
+                </label>
                 <div className="flex flex-wrap gap-2">
                   {CATEGORY_OPTIONS.map((cat) => (
                     <button
@@ -438,11 +562,20 @@ export default function CreateClipping() {
                     </button>
                   ))}
                 </div>
-                {errors.categories && <p className="text-red-500 text-xs mt-2">{errors.categories}</p>}
+                {errors.categories && (
+                  <p className="text-red-500 text-xs mt-2 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {errors.categories}
+                  </p>
+                )}
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Call-to-Action URL <span className="text-gray-400 font-normal">(Optional)</span></label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Call-to-Action URL <span className="text-gray-400 font-normal">(Optional)</span>
+                </label>
                 <input
                   type="url"
                   value={form.ctaUrl}
@@ -452,7 +585,7 @@ export default function CreateClipping() {
                 />
               </div>
 
-              {/* Summary */}
+              {/* Campaign Summary */}
               {estimatedViews > 0 && (
                 <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Campaign Summary</p>
@@ -492,7 +625,7 @@ export default function CreateClipping() {
                       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                       </svg>
-                      Create Campaign
+                      Submit for Review
                     </>
                   )}
                 </button>

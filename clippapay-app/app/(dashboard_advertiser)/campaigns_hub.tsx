@@ -91,7 +91,7 @@ export default function CampaignsHubScreen() {
     <View style={styles.container}>
       {/* ── Header ── */}
       <LinearGradient
-        colors={['#6366F1', '#6366F1', '#6366F1']}
+        colors={['#4F46E5', '#4F46E5', '#4F46E5']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.gradHdr}
@@ -148,7 +148,7 @@ export default function CampaignsHubScreen() {
               ]}
               actions={[
                 {
-                  label: 'View UGC Campaigns',
+                  label: 'UGC Campaigns',
                   icon: 'grid-outline',
                   onPress: () => router.push('/(dashboard_advertiser)/Campaigns'),
                   primary: true,
@@ -177,7 +177,7 @@ export default function CampaignsHubScreen() {
               ]}
               actions={[
                 {
-                  label: 'View Clipping Campaigns',
+                  label: 'Clipping Campaigns',
                   icon: 'grid-outline',
                   onPress: () => router.push('/(dashboard_advertiser)/my_clipping_campaigns'),
                   primary: true,
@@ -192,7 +192,7 @@ export default function CampaignsHubScreen() {
             />
 
             {/* ── Quick actions ── */}
-            <Text style={styles.sectionLabel}>QUICK ACTIONS</Text>
+            {/* <Text style={styles.sectionLabel}>QUICK ACTIONS</Text>
             <View style={styles.quickRow}>
               <QuickBtn
                 icon="add-circle-outline"
@@ -212,7 +212,7 @@ export default function CampaignsHubScreen() {
                 color="#10B981"
                 onPress={() => router.push('/(dashboard_advertiser)/WalletScreen')}
               />
-            </View>
+            </View> */}
           </>
         )}
       </ScrollView>

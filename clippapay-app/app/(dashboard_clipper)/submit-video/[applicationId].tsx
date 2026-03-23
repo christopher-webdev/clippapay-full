@@ -219,44 +219,7 @@ export default function SubmitVideoScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Thumbnail */}
-        <View style={S.section}>
-          <Text style={S.sectionTitle}>Thumbnail <Text style={S.opt}>(optional)</Text></Text>
-          <Text style={S.sectionSub}>16:9 ratio — helps advertisers find your video</Text>
-
-          <TouchableOpacity style={S.thumbBox} onPress={pickThumbnail}>
-            {thumbPreview ? (
-              <Image source={{ uri: thumbPreview }} style={S.thumbImg} resizeMode="cover" />
-            ) : (
-              <View style={S.thumbEmpty}>
-                <Ionicons name="image-outline" size={28} color="#C4B5FD" />
-                <Text style={S.thumbEmptyTxt}>Add thumbnail</Text>
-              </View>
-            )}
-            {thumbPreview && (
-              <View style={S.thumbEditBadge}>
-                <Ionicons name="pencil" size={13} color="#FFF" />
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* Note */}
-        <View style={S.section}>
-          <Text style={S.sectionTitle}>Note to Advertiser <Text style={S.opt}>(optional)</Text></Text>
-          <Text style={S.sectionSub}>Any context about creative choices or revision info</Text>
-          <TextInput
-            style={S.textarea}
-            placeholder="e.g. I followed the brief closely. Let me know if you'd like any tweaks..."
-            placeholderTextColor="#9CA3AF"
-            value={note}
-            onChangeText={setNote}
-            multiline
-            numberOfLines={4}
-            textAlignVertical="top"
-          />
-        </View>
-
+       
         {/* Submit */}
         <TouchableOpacity
           style={[S.submitBtn, (!videoFile || uploading || deadlinePast) && { opacity: 0.5 }]}

@@ -4,40 +4,89 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import {
   HiClipboardList,
-  HiEye,
+  HiFilm,
   HiCurrencyDollar,
-  HiOutlineChartBar,
-  HiOutlineUsers,
   HiLockClosed,
 } from 'react-icons/hi';
 
 interface OverviewStats {
-  totalCampaigns: number;
-  walletBalance: number;
-  fundsInEscrow: number;
-  totalClippers: number;
-
+  totalCampaigns:         number;
+  totalClippingCampaigns: number;
+  totalViewsBought:       number;
+  walletBalance:          number;
+  fundsInEscrow:          number;
+  usdtBalance:            number;
+  usdtEscrowLocked:       number;
+  avgCPV:                 number;
+  totalClippers:          number;
 }
 
-const ICONS = {
-  totalCampaigns: HiClipboardList,
+// ─── Card definitions ─────────────────────────────────────────────────────────
+type CardKey =
+  | 'totalCampaigns'
+  | 'totalClippingCampaigns'
+  | 'walletBalance'
+  | 'fundsInEscrow'
+  | 'usdtBalance'
+  | 'usdtEscrowLocked';
 
-  totalViewsBought: HiEye,
-  walletBalance: HiCurrencyDollar,
-  // avgCPV: HiCurrencyDollar,
-  totalClippers: HiOutlineUsers,
-  fundsInEscrow: HiLockClosed,
-} as const;
+interface CardDef {
+  key:     CardKey;
+  label:   string;
+  variant: string;
+  Icon:    React.ElementType;
+  format:  (v: number) => string;
+}
 
-const VARIANTS = {
-  totalCampaigns: 'blue',
-  totalViewsBought: 'cyan',
-  walletBalance: 'teal',
-  avgCPV: 'cyan',
-  totalClippers: 'amber',
-  fundsInEscrow: 'rose',
-} as const;
+const fmtNGN  = (v: number) => `₦${v.toLocaleString('en-NG', { minimumFractionDigits: 0 })}`;
+const fmtUSDT = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+const CARDS: CardDef[] = [
+  {
+    key:     'totalCampaigns',
+    label:   'UGC Campaigns',
+    variant: 'blue',
+    Icon:    HiClipboardList,
+    format:  (v) => String(v),
+  },
+  {
+    key:     'totalClippingCampaigns',
+    label:   'Clipping Campaigns',
+    variant: 'cyan',
+    Icon:    HiFilm,
+    format:  (v) => String(v),
+  },
+  {
+    key:     'walletBalance',
+    label:   'NGN Balance',
+    variant: 'teal',
+    Icon:    HiCurrencyDollar,
+    format:  fmtNGN,
+  },
+  {
+    key:     'fundsInEscrow',
+    label:   'NGN in Escrow',
+    variant: 'rose',
+    Icon:    HiLockClosed,
+    format:  fmtNGN,
+  },
+  {
+    key:     'usdtBalance',
+    label:   'USDT Balance',
+    variant: 'amber',
+    Icon:    HiCurrencyDollar,
+    format:  fmtUSDT,
+  },
+  {
+    key:     'usdtEscrowLocked',
+    label:   'USDT in Escrow',
+    variant: 'purple',
+    Icon:    HiLockClosed,
+    format:  fmtUSDT,
+  },
+];
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function AdvertiserDashboardOverview() {
   const [stats, setStats] = useState<OverviewStats | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,57 +101,22 @@ export default function AdvertiserDashboardOverview() {
       });
   }, []);
 
-  if (error) {
-    return <p className="text-center py-10 text-red-500">{error}</p>;
-  }
-  if (!stats) {
-    return <p className="text-center py-10 text-gray-500">Loading overview…</p>;
-  }
-
-  const allowedKeys = [
-    'totalCampaigns',
-    // 'totalViewsBought',
-    'walletBalance',
-    'fundsInEscrow',
-    // 'totalClippers'
-  ];
-
-  const cards = (Object.entries(stats) as [keyof OverviewStats, number][])
-    .filter(([key]) => allowedKeys.includes(key))
-    .map(([key, value]) => ({
-      key,
-      label: {
-        totalCampaigns: 'Campaigns',
-        totalViewsBought: 'Views Bought',
-        walletBalance: 'Wallet Balance',
-        fundsInEscrow: 'Funds in Escrow',    // <--- Add this label
-        totalClippers: 'Clippers Engaged',
-      }[key],
-      display:
-        key === 'walletBalance' || key === 'fundsInEscrow'
-          ? `₦${value.toLocaleString()}`
-          : key === 'totalViewsBought'
-            ? value.toLocaleString()
-            : value,
-    }));
-
-
+  if (error) return <p className="text-center py-10 text-red-500">{error}</p>;
+  if (!stats) return <p className="text-center py-10 text-gray-500">Loading overview…</p>;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-      {cards.map(({ key, label, display }) => {
-        const Icon = ICONS[key];
-        const variant = VARIANTS[key];
-        return (
-          <div key={key} className="card p-6" data-variant={variant}>
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium opacity-90">{label}</p>
-              <Icon className="w-6 h-6 opacity-80" />
-            </div>
-            <p className="mt-3 text-3xl font-extrabold">{display}</p>
+    <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+      {CARDS.map(({ key, label, variant, Icon, format }) => (
+        <div key={key} className="card p-6" data-variant={variant}>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium opacity-90">{label}</p>
+            <Icon className="w-6 h-6 opacity-80" />
           </div>
-        );
-      })}
+          <p className="mt-3 text-3xl font-extrabold">
+            {format(stats[key])}
+          </p>
+        </div>
+      ))}
     </div>
   );
 }

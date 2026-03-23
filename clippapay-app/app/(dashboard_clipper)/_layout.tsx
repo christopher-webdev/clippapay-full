@@ -1,55 +1,63 @@
-// app/(dashboard)/_layout.tsx
+// app/(dashboard_clipper)/_layout.tsx
+// Same pattern as the fixed advertiser layout:
+// — ProfileHeader rendered once here, fixed at top
+// — Footer fixed at bottom
+// — body View holds paddingTop/paddingBottom so Stack content is never hidden
 import { Stack } from 'expo-router';
 import { View, StyleSheet, Dimensions } from 'react-native';
 import ProfileHeader from './ProfileHeader';
-import Footer from './FooterClipper';
-import { LinearGradient } from 'expo-linear-gradient';
+import FooterClipper from './FooterClipper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NotificationsProvider } from '../../hooks/useNotifications';
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
 
-export default function DashboardLayout() {
+const HEADER_HEIGHT = 42;
+const FOOTER_HEIGHT = Math.round(98 * scale);
+
+export default function DashboardClipperLayout() {
   return (
     <NotificationsProvider>
-    <SafeAreaView style={styles.safeArea}>
-      <LinearGradient
-        colors={['#34D3991A', '#D6CF8D80', '#ffffffb2']}
-        style={styles.background}
-      >
-        {/* Fixed Header */}
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+
+        {/* ── Fixed header ── */}
         <View style={styles.headerContainer}>
           <ProfileHeader />
         </View>
 
-        {/* Content Area (changes with navigation) */}
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: styles.stackContent,
-            animation: 'slide_from_right',
-            gestureEnabled: true,
-            gestureDirection: 'horizontal',
-          }}
-        >
-          <Stack.Screen name="clipper_dashboard" />
-          {/* <Stack.Screen name="advertiser_dashboard" />
-          <Stack.Screen name="Campaigns" />
-          <Stack.Screen name="WalletScreen" />
-          <Stack.Screen name="profile" />
-          <Stack.Screen name="CreatePgc" />
-          <Stack.Screen name="onboarding_ugc" />
-          <Stack.Screen name="onboarding_clipping" /> */}
+        {/* ── Stack sits between header and footer ── */}
+        <View style={styles.body}>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: styles.stackContent,
+              animation: 'slide_from_right',
+              gestureEnabled: true,
+              gestureDirection: 'horizontal',
+            }}
+          >
+            {/* Main tabs */}
+            <Stack.Screen name="clipper_dashboard"       options={{ animation: 'fade' }} />
+            <Stack.Screen name="join_clipping"           options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="join_ugc"                options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="my_clipping"             options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="my-applications"         options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="wallet"                  options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="clipper_profile_edit"    options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="notifications"           options={{ animation: 'slide_from_right' }} />
 
-        </Stack>
-
-        {/* Fixed Footer */}
-        <View style={styles.footerContainer}>
-          <Footer />
+            {/* Sub-screens */}
+            <Stack.Screen name="submit_clipping"         options={{ animation: 'slide_from_right' }} />
+          </Stack>
         </View>
-      </LinearGradient>
-    </SafeAreaView>
+
+        {/* ── Fixed footer ── */}
+        <View style={styles.footerContainer}>
+          <FooterClipper />
+        </View>
+
+      </SafeAreaView>
     </NotificationsProvider>
   );
 }
@@ -59,38 +67,44 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  background: {
-    flex: 1,
-  },
+
   headerContainer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 1000,
+    zIndex: 100,
     backgroundColor: '#FFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.07,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 6,
   },
+
+  // Reserves space under the header and above the footer
+  body: {
+    flex: 1,
+    paddingTop: HEADER_HEIGHT,
+    paddingBottom: FOOTER_HEIGHT,
+  },
+
+  stackContent: {
+    flex: 1,
+    backgroundColor: '#F5F5F7',
+  },
+
   footerContainer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    zIndex: 1000,
+    zIndex: 100,
     backgroundColor: '#FFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.07,
     shadowRadius: 4,
-    elevation: 3,
-  },
-  stackContent: {
-    flex: 1,
-    paddingTop: 72,            // matches ProfileHeader HEADER_HEIGHT = 72px
-    paddingBottom: 90 * scale, // Space for footer
+    elevation: 6,
   },
 });

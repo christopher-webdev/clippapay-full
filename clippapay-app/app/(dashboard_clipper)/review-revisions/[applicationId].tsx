@@ -1,14 +1,12 @@
 // app/(dashboard_clipper)/review-revisions/[applicationId].tsx
-// Clean revision screen: shows advertiser feedback prominently,
-// deadline countdown, previous video, and inline resubmit without a modal
+// NO SafeAreaView — _layout.tsx owns safe area + header height padding.
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, ScrollView, TextInput, TouchableOpacity, Image,
+  View, Text, ScrollView, TouchableOpacity, Image,
   ActivityIndicator, Alert, StyleSheet, Platform, Modal, Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -34,9 +32,9 @@ const fmtDeadline = (d?: string) => {
   if (!d) return null;
   const diff = new Date(d).getTime() - Date.now();
   if (diff <= 0) return { text: 'Deadline passed', expired: true };
-  const hrs = Math.floor(diff / 3600000);
+  const hrs = Math.floor(diff / 3_600_000);
   if (hrs < 24) return { text: `${hrs}h remaining`, expired: false };
-  return { text: `${Math.floor(diff / 86400000)}d ${hrs % 24}h remaining`, expired: false };
+  return { text: `${Math.floor(diff / 86_400_000)}d ${hrs % 24}h remaining`, expired: false };
 };
 
 const advName = (a?: any) =>
@@ -46,18 +44,15 @@ export default function ReviewRevisionsScreen() {
   const { applicationId } = useLocalSearchParams<{ applicationId: string }>();
   const router = useRouter();
 
-  const [app, setApp]           = useState<any>(null);
-  const [loading, setLoading]   = useState(true);
+  const [app, setApp]               = useState<any>(null);
+  const [loading, setLoading]       = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // New video for resubmission
   const [videoFile, setVideoFile]       = useState<any>(null);
   const [thumbFile, setThumbFile]       = useState<any>(null);
   const [thumbPreview, setThumbPreview] = useState<string | null>(null);
   const [note, setNote]                 = useState('');
-
-  // Video player
-  const [videoModal, setVideoModal] = useState(false);
+  const [videoModal, setVideoModal]     = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -77,7 +72,7 @@ export default function ReviewRevisionsScreen() {
   const pickVideo = async () => {
     try {
       const r = await DocumentPicker.getDocumentAsync({
-        type: ['video/mp4','video/quicktime','video/webm'],
+        type: ['video/mp4', 'video/quicktime', 'video/webm'],
         copyToCacheDirectory: true,
       });
       if (!r.canceled && r.assets?.[0]) {
@@ -89,7 +84,7 @@ export default function ReviewRevisionsScreen() {
 
   const pickThumbnail = async () => {
     const r = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'] as any, allowsEditing: true, aspect: [16,9], quality: 0.85,
+      mediaTypes: ['images'] as any, allowsEditing: true, aspect: [16, 9], quality: 0.85,
     });
     if (!r.canceled && r.assets?.[0]) {
       setThumbFile({ uri: r.assets[0].uri, name: r.assets[0].fileName || `thumb-${Date.now()}.jpg`, type: r.assets[0].mimeType || 'image/jpeg' });
@@ -121,41 +116,42 @@ export default function ReviewRevisionsScreen() {
     } finally { setSubmitting(false); }
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={S.safe}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator size="large" color="#7C3AED" />
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // ── Loading ──
+  if (loading) return (
+    <View style={S.container}>
+      <View style={S.center}>
+        <ActivityIndicator size="large" color="#7C3AED" />
+      </View>
+    </View>
+  );
 
-  if (!app) {
-    return (
-      <SafeAreaView style={S.safe}>
-        <View style={S.center}>
-          <Ionicons name="alert-circle-outline" size={56} color="#EF4444" />
-          <Text style={{ color: '#EF4444', marginTop: 12 }}>Application not found</Text>
-          <TouchableOpacity onPress={() => router.back()} style={S.goBackBtn}>
-            <Text style={{ color: '#FFF', fontWeight: '600' }}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // ── Not found ──
+  if (!app) return (
+    <View style={S.container}>
+      <View style={S.center}>
+        <Ionicons name="alert-circle-outline" size={56} color="#EF4444" />
+        <Text style={{ color: '#EF4444', marginTop: 12 }}>Application not found</Text>
+        <TouchableOpacity onPress={() => router.back()} style={S.goBackBtn}>
+          <Text style={{ color: '#FFF', fontWeight: '600' }}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
-  const deadline     = fmtDeadline(app.submissionDeadline);
-  const prevVideoUrl = toUrl(app.currentVideoUrl);
-  const prevThumbUrl = toUrl(app.currentThumbnailUrl);
+  const deadline      = fmtDeadline(app.submissionDeadline);
+  const prevVideoUrl  = toUrl(app.currentVideoUrl);
+  const prevThumbUrl  = toUrl(app.currentThumbnailUrl);
   const revisionsLeft = Math.max(0, 3 - (app.revisionCount || 0));
 
   return (
-    <SafeAreaView style={S.safe}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-
-        {/* Header */}
-        <LinearGradient colors={['#F97316','#EA580C']} style={S.header}>
+    <View style={S.container}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 60 }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Header — paddingTop: 16, layout already cleared the ProfileHeader */}
+        <LinearGradient colors={['#F97316', '#EA580C']} style={S.header}>
           <TouchableOpacity style={S.hdrBack} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color="#FFF" />
           </TouchableOpacity>
@@ -165,7 +161,7 @@ export default function ReviewRevisionsScreen() {
 
         <View style={{ padding: 16 }}>
 
-          {/* Campaign + revisions count */}
+          {/* Campaign + revision count */}
           <View style={S.campaignRow}>
             <View style={{ flex: 1 }}>
               <Text style={S.campTitle} numberOfLines={2}>{app.campaign?.title}</Text>
@@ -197,7 +193,7 @@ export default function ReviewRevisionsScreen() {
             </View>
           )}
 
-          {/* FEEDBACK — most important, visually prominent */}
+          {/* Feedback — most prominent */}
           <View style={S.feedbackCard}>
             <View style={S.feedbackHeader}>
               <Ionicons name="chatbubble-outline" size={18} color="#D97706" />
@@ -211,7 +207,7 @@ export default function ReviewRevisionsScreen() {
             </Text>
           </View>
 
-          {/* Previous video */}
+          {/* Previous submission */}
           {prevVideoUrl && (
             <View style={S.section}>
               <Text style={S.sectionTitle}>Your Previous Submission</Text>
@@ -248,43 +244,11 @@ export default function ReviewRevisionsScreen() {
               <Text style={[S.uploadTxt, videoFile && { color: '#059669' }]}>
                 {videoFile ? videoFile.name : 'Select revised video'}
               </Text>
-              {videoFile?.size && <Text style={S.uploadSub}>{(videoFile.size / 1048576).toFixed(1)} MB</Text>}
+              {videoFile?.size && <Text style={S.uploadSub}>{(videoFile.size / 1_048_576).toFixed(1)} MB</Text>}
             </TouchableOpacity>
           </View>
 
-          {/* Thumbnail */}
-          <View style={S.section}>
-            <Text style={S.sectionTitle}>Thumbnail <Text style={S.opt}>(optional)</Text></Text>
-            <TouchableOpacity style={S.thumbBox} onPress={pickThumbnail}>
-              {thumbPreview ? (
-                <Image source={{ uri: thumbPreview }} style={S.thumbImg} resizeMode="cover" />
-              ) : (
-                <View style={S.thumbEmpty}>
-                  <Ionicons name="image-outline" size={26} color="#C4B5FD" />
-                  <Text style={{ fontSize: 13, color: '#A78BFA', marginTop: 6 }}>Add thumbnail</Text>
-                </View>
-              )}
-              {thumbPreview && (
-                <View style={S.thumbEdit}><Ionicons name="pencil" size={13} color="#FFF" /></View>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* Note */}
-          <View style={S.section}>
-            <Text style={S.sectionTitle}>Note on Changes <Text style={S.opt}>(optional)</Text></Text>
-            <TextInput
-              style={S.textarea}
-              placeholder="Explain what you changed based on the feedback..."
-              placeholderTextColor="#9CA3AF"
-              value={note}
-              onChangeText={setNote}
-              multiline numberOfLines={4}
-              textAlignVertical="top"
-            />
-          </View>
-
-          {/* Submit */}
+          {/* Submit / blocked states */}
           {deadline?.expired ? (
             <View style={S.expiredBox}>
               <Ionicons name="alert-circle-outline" size={28} color="#EF4444" />
@@ -301,7 +265,7 @@ export default function ReviewRevisionsScreen() {
               onPress={handleResubmit}
               disabled={!videoFile || submitting}
             >
-              <LinearGradient colors={['#F97316','#EA580C']} style={S.submitGrad}>
+              <LinearGradient colors={['#F97316', '#EA580C']} style={S.submitGrad}>
                 {submitting ? (
                   <><ActivityIndicator color="#FFF" /><Text style={S.submitTxt}>Uploading…</Text></>
                 ) : (
@@ -323,82 +287,73 @@ export default function ReviewRevisionsScreen() {
             <Video
               source={{ uri: prevVideoUrl }}
               style={{ width, height: height * 0.65 }}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay
+              useNativeControls resizeMode={ResizeMode.CONTAIN} shouldPlay
             />
           )}
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const S = StyleSheet.create({
-  safe:    { flex: 1, backgroundColor: '#F5F5F7' },
-  center:  { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  goBackBtn:{ backgroundColor: '#7C3AED', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, marginTop: 16 },
+  container: { flex: 1, backgroundColor: '#F5F5F7' },
+  center:    { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  goBackBtn: { backgroundColor: '#7C3AED', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, marginTop: 16 },
 
-  header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  // paddingTop: 16 — layout body already cleared the ProfileHeader
+  header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 14 },
   hdrBack: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center' },
   hdrTitle:{ fontSize: 18, fontWeight: '700', color: '#FFF' },
 
-  campaignRow:  { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FFF', borderRadius: 16, padding: 14, marginBottom: 10, gap: 12 },
-  campTitle:    { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 3 },
-  campBy:       { fontSize: 12, color: '#9CA3AF' },
-  revCountBadge:{ alignItems: 'center', backgroundColor: '#FFF7ED', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1.5, borderColor: '#FED7AA' },
-  revCountNum:  { fontSize: 22, fontWeight: '800', color: '#F97316' },
-  revCountLbl:  { fontSize: 10, color: '#F97316', fontWeight: '600' },
+  campaignRow:   { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FFF', borderRadius: 16, padding: 14, marginBottom: 10, gap: 12 },
+  campTitle:     { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 3 },
+  campBy:        { fontSize: 12, color: '#9CA3AF' },
+  revCountBadge: { alignItems: 'center', backgroundColor: '#FFF7ED', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1.5, borderColor: '#FED7AA' },
+  revCountNum:   { fontSize: 22, fontWeight: '800', color: '#F97316' },
+  revCountLbl:   { fontSize: 10, color: '#F97316', fontWeight: '600' },
 
-  deadlinePill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFF7ED', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7, marginBottom: 10, alignSelf: 'flex-start' },
-  deadlinePillRed:{ backgroundColor: '#FEF2F2' },
-  deadlineTxt:  { fontSize: 13, fontWeight: '600', color: '#F97316' },
+  deadlinePill:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFF7ED', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7, marginBottom: 10, alignSelf: 'flex-start' },
+  deadlinePillRed: { backgroundColor: '#FEF2F2' },
+  deadlineTxt:     { fontSize: 13, fontWeight: '600', color: '#F97316' },
 
   payBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ECFDF5', borderRadius: 12, padding: 12, marginBottom: 14 },
   payTxt:    { fontSize: 13, fontWeight: '600', color: '#065F46' },
 
-  feedbackCard:  { backgroundColor: '#FFFBEB', borderWidth: 1.5, borderColor: '#FDE68A', borderRadius: 16, padding: 16, marginBottom: 16 },
-  feedbackHeader:{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  feedbackTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: '#92400E' },
-  revBadge:      { backgroundColor: '#FCD34D', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
-  revBadgeTxt:   { fontSize: 11, fontWeight: '700', color: '#78350F' },
-  feedbackTxt:   { fontSize: 14, color: '#78350F', lineHeight: 21 },
+  feedbackCard:   { backgroundColor: '#FFFBEB', borderWidth: 1.5, borderColor: '#FDE68A', borderRadius: 16, padding: 16, marginBottom: 16 },
+  feedbackHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  feedbackTitle:  { flex: 1, fontSize: 15, fontWeight: '700', color: '#92400E' },
+  revBadge:       { backgroundColor: '#FCD34D', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  revBadgeTxt:    { fontSize: 11, fontWeight: '700', color: '#78350F' },
+  feedbackTxt:    { fontSize: 14, color: '#78350F', lineHeight: 21 },
 
-  section:    { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 12 },
-  sectionTitle:{ fontSize: 15, fontWeight: '700', color: '#1F2937', marginBottom: 12 },
-  req:        { color: '#EF4444' },
-  opt:        { fontSize: 12, color: '#9CA3AF', fontWeight: '400' },
+  section:      { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 12 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#1F2937', marginBottom: 12 },
+  req:          { color: '#EF4444' },
 
-  prevVideoBox: { height: 180, borderRadius: 14, overflow: 'hidden', backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center' },
-  prevThumb:    { width: '100%', height: '100%', position: 'absolute' },
-  prevThumbEmpty: { width: '100%', height: '100%', backgroundColor: '#1E293B', justifyContent: 'center', alignItems: 'center' },
-  playBtnOverlay:{ alignItems: 'center', gap: 8 },
-  playBtn:      { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)' },
-  playBtnTxt:   { fontSize: 12, color: 'rgba(255,255,255,0.8)' },
+  prevVideoBox:    { height: 180, borderRadius: 14, overflow: 'hidden', backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center' },
+  prevThumb:       { width: '100%', height: '100%', position: 'absolute' },
+  prevThumbEmpty:  { width: '100%', height: '100%', backgroundColor: '#1E293B', justifyContent: 'center', alignItems: 'center' },
+  playBtnOverlay:  { alignItems: 'center', gap: 8 },
+  playBtn:         { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)' },
+  playBtnTxt:      { fontSize: 12, color: 'rgba(255,255,255,0.8)' },
 
   divider:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 8 },
   dividerLine: { flex: 1, height: 1, backgroundColor: '#E5E7EB' },
   dividerTxt:  { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
 
-  uploadBox:    { borderWidth: 2, borderColor: '#FED7AA', borderStyle: 'dashed', borderRadius: 14, padding: 22, alignItems: 'center', gap: 8, backgroundColor: '#FAFAFA' },
-  uploadBoxDone:{ borderColor: '#6EE7B7', backgroundColor: '#F0FDF4', borderStyle: 'solid' },
-  uploadTxt:    { fontSize: 14, fontWeight: '600', color: '#F97316', textAlign: 'center' },
-  uploadSub:    { fontSize: 12, color: '#9CA3AF' },
+  uploadBox:     { borderWidth: 2, borderColor: '#FED7AA', borderStyle: 'dashed', borderRadius: 14, padding: 22, alignItems: 'center', gap: 8, backgroundColor: '#FAFAFA' },
+  uploadBoxDone: { borderColor: '#6EE7B7', backgroundColor: '#F0FDF4', borderStyle: 'solid' },
+  uploadTxt:     { fontSize: 14, fontWeight: '600', color: '#F97316', textAlign: 'center' },
+  uploadSub:     { fontSize: 12, color: '#9CA3AF' },
 
-  thumbBox:     { height: 120, borderRadius: 14, overflow: 'hidden', backgroundColor: '#F5F3FF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#EDE9FE' },
-  thumbImg:     { width: '100%', height: '100%' },
-  thumbEmpty:   { alignItems: 'center' },
-  thumbEdit:    { position: 'absolute', bottom: 8, right: 8, width: 28, height: 28, borderRadius: 14, backgroundColor: '#7C3AED', justifyContent: 'center', alignItems: 'center' },
+  submitBtn:  { borderRadius: 16, overflow: 'hidden', marginTop: 6 },
+  submitGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 17 },
+  submitTxt:  { fontSize: 17, fontWeight: '700', color: '#FFF' },
 
-  textarea:    { borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 12, padding: 14, fontSize: 14, color: '#1F2937', minHeight: 90, textAlignVertical: 'top', backgroundColor: '#FAFAFA' },
+  expiredBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: '#FEF2F2', borderRadius: 14, padding: 16 },
+  expiredTxt: { flex: 1, fontSize: 14, color: '#B91C1C', lineHeight: 20 },
 
-  submitBtn:   { borderRadius: 16, overflow: 'hidden', marginTop: 6 },
-  submitGrad:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 17 },
-  submitTxt:   { fontSize: 17, fontWeight: '700', color: '#FFF' },
-
-  expiredBox:  { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: '#FEF2F2', borderRadius: 14, padding: 16 },
-  expiredTxt:  { flex: 1, fontSize: 14, color: '#B91C1C', lineHeight: 20 },
-
-  videoModalBg:   { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
-  videoModalClose:{ position: 'absolute', top: 52, right: 20, zIndex: 10, padding: 10, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20 },
+  videoModalBg:    { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
+  videoModalClose: { position: 'absolute', top: 52, right: 20, zIndex: 10, padding: 10, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20 },
 });

@@ -1,235 +1,73 @@
-// app/(dashboard)/_layout.tsx
+// app/(dashboard_advertiser)/_layout.tsx
 import { Stack } from 'expo-router';
-import { View, StyleSheet, Dimensions, Platform } from 'react-native';
+import { View, StyleSheet, Dimensions } from 'react-native';
 import ProfileHeader from './ProfileHeader';
 import Footer from './Footer';
-import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NotificationsProvider } from '../../hooks/useNotifications';
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
 
+// ProfileHeader is fixed at 72px. Footer is ~98px * scale.
+// stackContent paddingTop = 72 (header), paddingBottom = footer height.
+const HEADER_HEIGHT = 42;
+const FOOTER_HEIGHT = Math.round(98 * scale);
 
 export default function DashboardLayout() {
   return (
     <NotificationsProvider>
-    <SafeAreaView style={styles.safeArea}>
-      <LinearGradient
-        colors={['#ffffff1a', '#ffffff80', '#ffffffb2']}
-        style={styles.background}
-      >
-        {/* Fixed Header */}
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+
+        {/* ── Fixed header — sits above everything ── */}
         <View style={styles.headerContainer}>
           <ProfileHeader />
         </View>
 
-        {/* Content Area (changes with navigation) */}
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: styles.stackContent,
-            animation: 'slide_from_right',
-            gestureEnabled: true,
-            gestureDirection: 'horizontal',
-          }}
-        >
-          {/* Main Dashboard Screens */}
-          <Stack.Screen 
-            name="advertiser_dashboard" 
-            options={{ 
-              title: 'Browse',
-              animation: 'fade' 
-            }} 
-          />
-          <Stack.Screen 
-            name="campaigns" 
-            options={{ 
-              title: 'Campaigns',
-              animation: 'slide_from_right'
-            }} 
-          />
-          <Stack.Screen
-            name="campaigns_hub"
-            options={{
-              title: 'My Campaigns',
-              animation: 'fade'
+        {/* ── Stack fills remaining height between header and footer ── */}
+        <View style={styles.body}>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: styles.stackContent,
+              animation: 'slide_from_right',
+              gestureEnabled: true,
+              gestureDirection: 'horizontal',
             }}
-          />
-          <Stack.Screen 
-            name="applications" 
-            options={{ 
-              title: 'Applications',
-              animation: 'slide_from_right'
-            }} 
-          />
-          <Stack.Screen 
-            name="wallet" 
-            options={{ 
-              title: 'Wallet',
-              animation: 'slide_from_right'
-            }} 
-          />
-          <Stack.Screen 
-            name="profile" 
-            options={{ 
-              title: 'Profile',
-              animation: 'slide_from_right'
-            }} 
-          />
+          >
+            {/* ── Main tabs ── */}
+            <Stack.Screen name="advertiser_dashboard"    options={{ animation: 'fade' }} />
+            <Stack.Screen name="campaigns_hub"           options={{ animation: 'fade' }} />
+            <Stack.Screen name="Campaigns"               options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="my_clipping_campaigns"   options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="WalletScreen"            options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="Profile"                 options={{ animation: 'slide_from_right' }} />
 
-          {/* Campaign Creation Screens */}
-          <Stack.Screen 
-            name="create-pgc" 
-            options={{ 
-              title: 'Create PGC Campaign',
-              animation: 'slide_from_bottom'
-            }} 
-          />
-          <Stack.Screen 
-            name="create-ugc" 
-            options={{ 
-              title: 'Create UGC Campaign',
-              animation: 'slide_from_bottom'
-            }} 
-          />
-          <Stack.Screen 
-            name="create-clipping" 
-            options={{ 
-              title: 'Create Clipping Campaign',
-              animation: 'slide_from_bottom'
-            }} 
-          />
-          <Stack.Screen
-            name="create_clipping"
-            options={{
-              title: 'Create Clipping Campaign',
-              animation: 'slide_from_bottom'
-            }}
-          />
-          <Stack.Screen
-            name="my_clipping_campaigns"
-            options={{
-              title: 'My Clipping Campaigns',
-              animation: 'slide_from_right'
-            }}
-          />
-          <Stack.Screen
-            name="clipping_campaign_detail"
-            options={{
-              title: 'Campaign Detail',
-              animation: 'slide_from_right'
-            }}
-          />
+            {/* ── Campaign creation ── */}
+            <Stack.Screen name="create-clipping"         options={{ animation: 'slide_from_bottom' }} />
+            <Stack.Screen name="create_clipping"         options={{ animation: 'slide_from_bottom' }} />
+            <Stack.Screen name="create-ugc"              options={{ animation: 'slide_from_bottom' }} />
 
-          {/* Onboarding Screens */}
-          <Stack.Screen 
-            name="onboarding-ugc" 
-            options={{ 
-              title: 'UGC Onboarding',
-              animation: 'slide_from_bottom',
-              gestureEnabled: false
-            }} 
-          />
-          <Stack.Screen 
-            name="onboarding-clipping" 
-            options={{ 
-              title: 'Clipping Onboarding',
-              animation: 'slide_from_bottom',
-              gestureEnabled: false
-            }} 
-          />
+            {/* ── Onboarding ── */}
+            <Stack.Screen name="onboarding_ugc"          options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
+            <Stack.Screen name="onboarding_clipping"     options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
 
-          {/* Application Detail Screens */}
-          <Stack.Screen 
-            name="applications/[id]" 
-            options={{ 
-              title: 'Application Details',
-              animation: 'slide_from_right'
-            }} 
-          />
-          
-          {/* Campaign Detail Screens */}
-          <Stack.Screen 
-            name="campaigns/[id]" 
-            options={{ 
-              title: 'Campaign Details',
-              animation: 'slide_from_right'
-            }} 
-          />
-          <Stack.Screen 
-            name="campaigns/[id]/analytics" 
-            options={{ 
-              title: 'Campaign Analytics',
-              animation: 'slide_from_right'
-            }} 
-          />
+            {/* ── Detail / sub-screens — these have their own back button headers
+                 so we DON'T want the shared ProfileHeader showing.
+                 We handle this by hiding the layout header on those screens. ── */}
+            <Stack.Screen name="clipping_campaign_detail" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="notifications"            options={{ animation: 'slide_from_right' }} />
 
-          {/* Video/Media Screens */}
-          <Stack.Screen 
-            name="video-player" 
-            options={{ 
-              title: 'Video Player',
-              animation: 'fade',
-              gestureEnabled: true
-            }} 
-          />
+            {/* ── Catch-all for any other screens in this group ── */}
+          </Stack>
+        </View>
 
-          {/* Creator Profile Screens */}
-          <Stack.Screen 
-            name="creator/[id]" 
-            options={{ 
-              title: 'Creator Profile',
-              animation: 'slide_from_right'
-            }} 
-          />
-
-          {/* Settings Screens */}
-          <Stack.Screen 
-            name="settings" 
-            options={{ 
-              title: 'Settings',
-              animation: 'slide_from_right'
-            }} 
-          />
-          <Stack.Screen 
-            name="settings/notifications" 
-            options={{ 
-              title: 'Notification Settings',
-              animation: 'slide_from_right'
-            }} 
-          />
-          <Stack.Screen 
-            name="settings/payment" 
-            options={{ 
-              title: 'Payment Settings',
-              animation: 'slide_from_right'
-            }} 
-          />
-
-          {/* Help & Support */}
-          <Stack.Screen 
-            name="help" 
-            options={{ 
-              title: 'Help Center',
-              animation: 'slide_from_right'
-            }} 
-          />
-          <Stack.Screen 
-            name="help/faq" 
-            options={{ 
-              title: 'FAQ',
-              animation: 'slide_from_right'
-            }} 
-          />
-        </Stack>
-
-        {/* Fixed Footer */}
+        {/* ── Fixed footer ── */}
         <View style={styles.footerContainer}>
           <Footer />
         </View>
-      </LinearGradient>
-    </SafeAreaView>
+
+      </SafeAreaView>
     </NotificationsProvider>
   );
 }
@@ -239,40 +77,50 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  background: {
-    flex: 1,
-  },
+
+  // ProfileHeader — fixed at top, full width, sits above body
   headerContainer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 1000,
+    zIndex: 100,
     backgroundColor: '#FFF',
+    // shadow cast downward
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.07,
     shadowRadius: 4,
-    elevation: 3,
-
+    elevation: 6,
   },
+
+  // Body fills flex=1 between safe-area top and bottom. We add top/bottom
+  // padding equal to the fixed header/footer so content is never hidden.
+  body: {
+    flex: 1,
+    paddingTop: HEADER_HEIGHT,       // slides content below header
+    paddingBottom: FOOTER_HEIGHT,    // slides content above footer
+  },
+
+  // Stack screens themselves should be transparent — no extra padding needed
+  // because the body already provides it.
+  stackContent: {
+    flex: 1,
+    backgroundColor: '#F5F5F7',
+  },
+
+  // Footer — fixed at bottom, full width
   footerContainer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    zIndex: 1000,
+    zIndex: 100,
     backgroundColor: '#FFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.07,
     shadowRadius: 4,
-    elevation: 3,
-  },
-  stackContent: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    paddingTop: 72,        // matches the new ProfileHeader height (72px fixed)
-    paddingBottom: 90 * scale, // Space for footer
+    elevation: 6,
   },
 });

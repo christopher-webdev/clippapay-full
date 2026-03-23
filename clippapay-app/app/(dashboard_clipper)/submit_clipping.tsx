@@ -286,7 +286,7 @@ export default function SubmitClippingScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: '#F5F5F7' }}>
       {/* ── Header ── */}
-      <LinearGradient colors={['#FF6B35', '#FF6B35']} style={S.gradHdr}>
+      <LinearGradient colors={['#f25015', '#e23c00', '#FF6B35']} style={S.gradHdr}>
         <View style={S.navRow}>
           <TouchableOpacity style={S.navBtn} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color="#FFF" />
@@ -792,7 +792,7 @@ function Row({
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const S = StyleSheet.create({
-  gradHdr:      { paddingTop: 56, paddingBottom: 16, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
+  gradHdr:      { paddingTop: 6, paddingBottom: 16, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
   navRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, marginBottom: 16 },
   navBtn:       { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.22)', justifyContent: 'center', alignItems: 'center' },
   navTitle:     { fontSize: 16, fontWeight: '700', color: '#FFF' },

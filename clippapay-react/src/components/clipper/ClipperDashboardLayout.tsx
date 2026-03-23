@@ -17,9 +17,9 @@ import { getUserFromToken } from '@/utils/getUserFromToken';
 
 const navItems = [
   { name: 'Overview',             to: '',                  icon: <HiHome className="w-5 h-5" />                       },
-  { name: 'Browse Campaigns',     to: 'campaigns',         icon: <HiCollection className="w-5 h-5" />                 },
-  { name: 'My Clipping',          to: 'my-clipping',       icon: <HiFilm className="w-5 h-5" />                       },
+  { name: 'Notice Hub',     to: 'campaigns',         icon: <HiCollection className="w-5 h-5" />                 },
   { name: 'Join Clipping',        to: 'join-clipping',     icon: <HiFilm className="w-5 h-5" />                       },
+  { name: 'Manage Clipping',          to: 'my-clipping',       icon: <HiFilm className="w-5 h-5" />                       },
   // { name: 'Submissions',          to: 'submissions',       icon: <HiUpload className="w-5 h-5" />                     },
   // { name: 'PGC Submissions',      to: 'pgc-submissions',   icon: <HiUpload className="w-5 h-5" />                     },
   { name: 'Earnings',             to: 'wallet',            icon: <HiCurrencyDollar className="w-5 h-5" />             },
@@ -72,7 +72,7 @@ export default function ClipperDashboardLayout() {
 
       {/* Sidebar overlay (mobile) */}
       <div
-        className={`fixed inset-0 z-40 transition-transform duration-300 md:hidden ${
+        className={`mt-20 fixed inset-0 z-40 transition-transform duration-300 md:hidden ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

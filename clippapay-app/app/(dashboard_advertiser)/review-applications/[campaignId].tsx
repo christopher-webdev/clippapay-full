@@ -1,37 +1,80 @@
-// app/(dashboard)/advertiser/review-applications/[campaignId].tsx (updated)
-
-import React, { useState, useEffect, useRef } from 'react';
+// app/(dashboard_advertiser)/review-applications/[campaignId].tsx
+// Updated for new flow:
+//  - 'pending' applicants stay selectable even after someone was selected
+//  - 'selected' shows countdown timer + "Awaiting response" — no select button
+//  - 'declined' / 'expired' shown clearly so advertiser knows to pick again
+//  - Select button blocked if another offer is still active (server also blocks it)
+//  - Confirm modal shows remaining applicant count for context
+//  - No SafeAreaView — _layout.tsx owns it
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  Image,
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  SafeAreaView,
-  ScrollView,
-  Modal,
-  Dimensions,
+  View, Text, FlatList, TouchableOpacity, Image,
+  ActivityIndicator, Alert, StyleSheet, ScrollView,
+  Modal, Dimensions, StatusBar, Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Video, ResizeMode } from 'expo-av';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
+import { useFocusEffect } from '@react-navigation/native';
 
 const { width, height } = Dimensions.get('window');
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-const UPLOADS_BASE_URL = process.env.EXPO_PUBLIC_UPLOADS_BASE_URL;
+const API_URL           = process.env.EXPO_PUBLIC_API_URL;
+const UPLOADS_BASE_URL  = process.env.EXPO_PUBLIC_UPLOADS_BASE_URL || '';
 
-const toFullUrl = (path: string | null) => {
+const toFullUrl = (path: string | null | undefined): string | null => {
   if (!path) return null;
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
   return `${UPLOADS_BASE_URL}${path.startsWith('/') ? path : '/' + path}`;
 };
 
+const getToken = async () => {
+  if (Platform.OS === 'web') return AsyncStorage.getItem('userToken');
+  return (await SecureStore.getItemAsync('userToken')) || (await AsyncStorage.getItem('userToken'));
+};
+
+const C = {
+  bg:           '#F5F5F7',
+  surface:      '#FFFFFF',
+  surfaceHi:    '#F9FAFB',
+  border:       '#E5E7EB',
+  borderLight:  '#F3F4F6',
+  indigo:       '#4F46E5',
+  indigoDark:   '#4F46E5',
+  indigoLight:  '#ffffff',
+  orange:       '#6366F1',
+  orangeDark:   '#6366F1',
+  orangeLight:  '#FFF7ED',
+  purple:       '#8B5CF6',
+  purpleLight:  '#F5F3FF',
+  emerald:      '#10B981',
+  emeraldLight: '#ECFDF5',
+  amber:        '#F59E0B',
+  amberLight:   '#FFFBEB',
+  red:          '#da4f0e',
+  redLight:     '#FEF2F2',
+  textPri:      '#111827',
+  textSec:      '#6B7280',
+  textMuted:    '#9CA3AF',
+};
+
+// Status config — updated for new statuses
+const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string; label: string }> = {
+  pending:  { bg: '#F9FAFB',      text: C.textMuted, dot: C.textMuted, label: 'PENDING'   },
+  selected: { bg: C.amberLight,   text: C.amber,     dot: C.amber,     label: 'OFFER SENT'},
+  accepted: { bg: C.emeraldLight, text: C.emerald,   dot: C.emerald,   label: 'ACCEPTED'  },
+  declined: { bg: C.redLight,     text: C.red,       dot: C.red,       label: 'DECLINED'  },
+  expired:  { bg: '#F3F4F6',      text: C.textSec,   dot: C.textMuted, label: 'EXPIRED'   },
+  rejected: { bg: '#F3F4F6',      text: C.textMuted, dot: C.textMuted, label: 'CLOSED'    },
+};
+
 type Application = {
   _id: string;
+  status: string;
+  offerExpiresAt?: string;
   clipper: {
     _id: string;
     firstName: string;
@@ -45,595 +88,571 @@ type Application = {
   proposedRateNGN?: number;
   proposedRateUSDT?: number;
   note?: string;
-  status: string;
   createdAt: string;
 };
+
+// Countdown hook for a single selected application
+function useCountdown(expiresAt?: string, status?: string) {
+  const [timeLeft, setTimeLeft] = useState('');
+  const ref = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (status !== 'selected' || !expiresAt) return;
+    const tick = () => {
+      const diff = new Date(expiresAt).getTime() - Date.now();
+      if (diff <= 0) { setTimeLeft('Expired'); clearInterval(ref.current!); return; }
+      const h = Math.floor(diff / 3_600_000);
+      const m = Math.floor((diff % 3_600_000) / 60_000);
+      const s = Math.floor((diff % 60_000) / 1_000);
+      setTimeLeft(`${h}h ${m}m ${s}s`);
+    };
+    tick();
+    ref.current = setInterval(tick, 1000);
+    return () => clearInterval(ref.current!);
+  }, [expiresAt, status]);
+
+  return timeLeft;
+}
 
 export default function ReviewApplicationsScreen() {
   const { campaignId } = useLocalSearchParams<{ campaignId: string }>();
   const router = useRouter();
 
-  const [applications, setApplications] = useState<Application[]>([]);
-  const [campaignTitle, setCampaignTitle] = useState('');
+  const [applications, setApplications]       = useState<Application[]>([]);
+  const [campaignTitle, setCampaignTitle]     = useState('');
   const [campaignCurrency, setCampaignCurrency] = useState<'NGN' | 'USDT' | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [wallet, setWallet] = useState<{ balance: number; usdtBalance: number } | null>(null);
-
-  // Video player state
-  const [videoModalVisible, setVideoModalVisible] = useState(false);
-  const [currentVideoUrl, setCurrentVideoUrl] = useState<string | null>(null);
+  const [loading, setLoading]                 = useState(true);
+  const [actionLoading, setActionLoading]     = useState<string | null>(null);
+  const [wallet, setWallet]                   = useState<{ balance: number; usdtBalance: number } | null>(null);
+  const [videoModal, setVideoModal]           = useState<string | null>(null);
+  const [confirmModal, setConfirmModal]       = useState<{ applicationId: string; currency: 'NGN' | 'USDT'; amount: number } | null>(null);
   const videoRef = useRef<Video>(null);
 
-  const fetchApplications = async () => {
+  const fetchApplications = useCallback(async () => {
     setLoading(true);
     try {
-      const token = await SecureStore.getItemAsync('userToken');
-      if (!token) {
-        Alert.alert('Session expired', 'Please log in again.');
-        router.replace('/(auth)/login');
-        return;
-      }
-
-      const res = await fetch(`${API_URL}/applications/campaign/${campaignId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const data = await res.json();
+      const token = await getToken();
+      if (!token) { router.replace('/(auth)/login'); return; }
+      const [res, walletRes] = await Promise.all([
+        fetch(`${API_URL}/applications/campaign/${campaignId}`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/wallet`,                              { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      const data       = await res.json();
+      const walletData = await walletRes.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load');
-
       setApplications(data.applications || []);
       setCampaignTitle(data.campaign?.title || 'Review Applications');
-      setCampaignCurrency(data.campaign?.currency || 'NGN'); // Assuming campaign has currency preference
-
-      // Fetch wallet for balance check
-      const walletRes = await fetch(`${API_URL}/wallet`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const walletData = await walletRes.json();
+      setCampaignCurrency(data.campaign?.currency || 'NGN');
       setWallet(walletData);
-
     } catch (err: any) {
-      console.error('Fetch error:', err);
       Alert.alert('Error', err.message || 'Could not load applications');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (campaignId) fetchApplications();
+    } finally { setLoading(false); }
   }, [campaignId]);
 
-  const handleFundWallet = (currency: 'NGN' | 'USDT') => {
-    router.push({
-      pathname: '/(dashboard)/wallet',
-      params: { activeTab: 'deposit', currency }
-    });
-  };
+  // Refresh on focus so after a decline/expiry the list updates
+  useFocusEffect(useCallback(() => { fetchApplications(); }, [fetchApplications]));
 
-  const handleSelectClipper = async (applicationId: string, currency: 'NGN' | 'USDT') => {
-    if (!wallet) {
-      Alert.alert('Wallet Error', 'Could not check your balance. Please try again.');
+  const handleFundWallet = (currency: 'NGN' | 'USDT') =>
+    router.push({ pathname: '/(dashboard_advertiser)/WalletScreen', params: { activeTab: 'deposit', currency } });
+
+  // Is there currently an active (non-expired) selected offer?
+  const activeOffer = applications.find(
+    a => a.status === 'selected' && a.offerExpiresAt && new Date(a.offerExpiresAt) > new Date()
+  );
+
+  const initiateSelect = (applicationId: string, currency: 'NGN' | 'USDT') => {
+    if (!wallet) { Alert.alert('Wallet Error', 'Could not check your balance. Please try again.'); return; }
+
+    // Block if another offer is still pending
+    if (activeOffer && activeOffer._id !== applicationId) {
+      Alert.alert(
+        'Offer Already Sent',
+        `Another creator is reviewing your offer. Wait for them to respond or for the 2-hour window to expire before selecting someone else.`,
+        [{ text: 'OK' }]
+      );
       return;
     }
 
     const app = applications.find(a => a._id === applicationId);
     if (!app) return;
-
-    const amount = currency === 'NGN' ? app.proposedRateNGN! : app.proposedRateUSDT!;
+    const amount  = currency === 'NGN' ? app.proposedRateNGN! : app.proposedRateUSDT!;
     const balance = currency === 'NGN' ? wallet.balance : wallet.usdtBalance;
-    const shortfall = amount - balance;
 
     if (balance < amount) {
+      const shortfall = amount - balance;
+      const sym = currency === 'NGN' ? '₦' : '$';
       Alert.alert(
         'Insufficient Balance',
-        `You need ${currency === 'NGN' ? '₦' : ''}${shortfall.toLocaleString()} more in your ${currency} wallet to select this clipper.\n\nYour current ${currency} balance: ${currency === 'NGN' ? '₦' : ''}${balance.toLocaleString()}\nRequired amount: ${currency === 'NGN' ? '₦' : ''}${amount.toLocaleString()}`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Fund Wallet', 
-            onPress: () => handleFundWallet(currency)
-          },
-        ]
+        `You need ${sym}${shortfall.toLocaleString()} more ${currency}.\n\nAvailable: ${sym}${balance.toLocaleString()}\nRequired: ${sym}${amount.toLocaleString()}`,
+        [{ text: 'Cancel', style: 'cancel' }, { text: 'Fund Wallet', onPress: () => handleFundWallet(currency) }]
       );
       return;
     }
+    setConfirmModal({ applicationId, currency, amount });
+  };
 
-    Alert.alert(
-      'Confirm Selection',
-      `Select this clipper for ${currency === 'NGN' ? '₦' : ''}${amount.toLocaleString()}? Other applicants will be rejected.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Select',
-          onPress: async () => {
-            setActionLoading(applicationId);
-            try {
-              const token = await SecureStore.getItemAsync('userToken');
-              const res = await fetch(`${API_URL}/applications/${applicationId}/select`, {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ currency }),
-              });
-
-              const data = await res.json();
-              if (!res.ok) throw new Error(data.error || 'Failed');
-
-              Alert.alert('Success', 'Clipper selected! They have 2 hours to accept.');
-              fetchApplications();
-            } catch (err: any) {
-              Alert.alert('Error', err.message || 'Selection failed');
-            } finally {
-              setActionLoading(null);
-            }
-          },
-        },
-      ]
-    );
+  const confirmSelect = async () => {
+    if (!confirmModal) return;
+    setActionLoading(confirmModal.applicationId);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/applications/${confirmModal.applicationId}/select`, {
+        method:  'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ currency: confirmModal.currency }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      setConfirmModal(null);
+      Alert.alert('✅ Offer Sent!', 'The creator has 2 hours to accept. You\'ll be notified the moment they respond. Other applicants remain available if they decline or don\'t respond.');
+      fetchApplications();
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Selection failed');
+    } finally { setActionLoading(null); }
   };
 
   const openVideo = (url: string) => {
-    const fullUrl = toFullUrl(url);
-    if (fullUrl) {
-      setCurrentVideoUrl(fullUrl);
-      setVideoModalVisible(true);
-    }
+    const full = toFullUrl(url);
+    if (full) setVideoModal(full);
   };
-
   const closeVideoModal = async () => {
-    if (videoRef.current) {
-      await videoRef.current.pauseAsync();
-      await videoRef.current.unloadAsync();
-    }
-    setVideoModalVisible(false);
-    setCurrentVideoUrl(null);
+    if (videoRef.current) { await videoRef.current.pauseAsync(); await videoRef.current.unloadAsync(); }
+    setVideoModal(null);
   };
 
-  const renderApplication = ({ item }: { item: Application }) => {
-    const clipper = item.clipper;
-    const hasNGN = item.proposedRateNGN && item.proposedRateNGN > 0;
-    const hasUSDT = item.proposedRateUSDT && item.proposedRateUSDT > 0;
+  const pendingCount   = applications.filter(a => a.status === 'pending').length;
+  const acceptedCount  = applications.filter(a => a.status === 'accepted').length;
 
-    // Determine which currency to use based on campaign preference or clipper's rates
-    const availableCurrencies = [];
-    if (hasNGN) availableCurrencies.push('NGN');
-    if (hasUSDT) availableCurrencies.push('USDT');
+  // ── Application card ──────────────────────────────────────────────────────
+  const renderApplication = ({ item, index }: { item: Application; index: number }) => {
+    const cl         = item.clipper;
+    const hasNGN     = (item.proposedRateNGN  || 0) > 0;
+    const hasUSDT    = (item.proposedRateUSDT || 0) > 0;
+    const isPending  = item.status === 'pending';
+    const isSelected = item.status === 'selected';
+    const isAccepted = item.status === 'accepted';
+    const statusCfg  = STATUS_CONFIG[item.status] || STATUS_CONFIG.pending;
+
+    // Countdown only for the selected card
+    const countdown = isSelected
+      ? (item.offerExpiresAt && new Date(item.offerExpiresAt) > new Date()
+          ? (() => {
+              const diff = new Date(item.offerExpiresAt!).getTime() - Date.now();
+              if (diff <= 0) return 'Expired';
+              const h = Math.floor(diff / 3_600_000);
+              const m = Math.floor((diff % 3_600_000) / 60_000);
+              const s = Math.floor((diff % 60_000) / 1_000);
+              return `${h}h ${m}m ${s}s`;
+            })()
+          : 'Expired')
+      : null;
+
+    // Is this card's select blocked because another active offer exists?
+    const blocked = isPending && !!activeOffer;
 
     return (
-      <View style={styles.card}>
-        {/* Profile */}
-        <View style={styles.profileRow}>
-          <Image
-            source={{ uri: toFullUrl(clipper.profileImage) || 'https://via.placeholder.com/60' }}
-            style={styles.avatar}
-          />
-          <View style={styles.profileInfo}>
-            <Text style={styles.name}>
-              {clipper.firstName} {clipper.lastName}
-            </Text>
-            <View style={styles.ratingRow}>
-              <Ionicons name="star" size={16} color="#fbbf24" />
-              <Text style={styles.rating}>{clipper.rating.toFixed(1)}</Text>
+      <Animated.View entering={FadeInDown.delay(index * 60).springify()}>
+        <View style={[
+          S.card,
+          isSelected && { borderColor: C.amber,   borderWidth: 2 },
+          isAccepted && { borderColor: C.emerald,  borderWidth: 2 },
+        ]}>
+
+          {/* Header row */}
+          <View style={S.cardHeader}>
+            <View style={S.avatarWrap}>
+              <Image
+                source={{ uri: toFullUrl(cl.profileImage) || `https://i.pravatar.cc/80?u=${cl._id}` }}
+                style={S.avatar}
+              />
+              <View style={S.onlineDot} />
             </View>
-            <Text style={styles.bio} numberOfLines={2}>
-              {clipper.bio || 'No bio provided'}
-            </Text>
-            {clipper.categories?.length > 0 && (
-              <Text style={styles.categories} numberOfLines={1}>
-                {clipper.categories.join(' • ')}
-              </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={S.creatorName}>{cl.firstName} {cl.lastName}</Text>
+              <View style={S.metaRow}>
+                <Ionicons name="star" size={12} color={C.amber} />
+                <Text style={S.ratingTxt}>{cl.rating?.toFixed(1) || '0.0'}</Text>
+                {cl.categories?.[0] && (
+                  <View style={S.categoryChip}><Text style={S.categoryChipTxt}>{cl.categories[0]}</Text></View>
+                )}
+              </View>
+              {cl.bio ? <Text style={S.bio} numberOfLines={2}>{cl.bio}</Text> : null}
+            </View>
+          </View>
+
+          {/* Rate badges */}
+          <View style={S.ratesRow}>
+            {hasNGN && (
+              <View style={[S.rateBadge, { backgroundColor: C.purpleLight, borderColor: '#DDD6FE' }]}>
+                <Text style={[S.rateAmount, { color: C.purple }]}>₦{item.proposedRateNGN?.toLocaleString()}</Text>
+                <Text style={S.rateCur}>NGN</Text>
+                {campaignCurrency === 'NGN' && <Text style={[S.rateTag, { color: C.purple }]}>Campaign rate</Text>}
+              </View>
+            )}
+            {hasUSDT && (
+              <View style={[S.rateBadge, { backgroundColor: C.emeraldLight, borderColor: '#A7F3D0' }]}>
+                <Text style={[S.rateAmount, { color: C.emerald }]}>{item.proposedRateUSDT}</Text>
+                <Text style={S.rateCur}>USDT</Text>
+                {campaignCurrency === 'USDT' && <Text style={[S.rateTag, { color: C.emerald }]}>Campaign rate</Text>}
+              </View>
+            )}
+          </View>
+
+          {/* Note */}
+          {item.note && (
+            <View style={S.noteBox}>
+              <Ionicons name="chatbubble-ellipses-outline" size={13} color={C.indigo} style={{ marginRight: 7 }} />
+              <Text style={S.noteTxt} numberOfLines={3}>{item.note}</Text>
+            </View>
+          )}
+
+          {/* Sample videos */}
+          <View style={S.samplesSection}>
+            <Text style={S.sectionLabel}>SAMPLE WORK {cl.sampleVideos?.length ? `· ${cl.sampleVideos.length}` : ''}</Text>
+            {cl.sampleVideos?.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                {cl.sampleVideos.map((url, i) => (
+                  <TouchableOpacity key={i} style={S.videoThumb} onPress={() => openVideo(url)}>
+                    <LinearGradient colors={[C.indigoLight, '#DDE1FF']} style={S.videoThumbInner}>
+                      <Ionicons name="play-circle" size={32} color={C.indigo} />
+                    </LinearGradient>
+                    <Text style={S.videoIdx}>#{i + 1}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : (
+              <Text style={S.noSamples}>No samples uploaded yet</Text>
+            )}
+          </View>
+
+          {/* Action / Status footer */}
+          <View style={{ paddingTop: 4 }}>
+            {/* PENDING — show select buttons, or blocked message */}
+            {isPending && !blocked && (
+              <View style={S.actionRow}>
+                {hasNGN && (
+                  <TouchableOpacity
+                    style={[S.btnSelect, { backgroundColor: C.purple }]}
+                    onPress={() => initiateSelect(item._id, 'NGN')}
+                    disabled={actionLoading === item._id}
+                  >
+                    {actionLoading === item._id
+                      ? <ActivityIndicator color="#FFF" size="small" />
+                      : <Text style={S.btnTxt}>Select · ₦{item.proposedRateNGN?.toLocaleString()}</Text>
+                    }
+                  </TouchableOpacity>
+                )}
+                {hasUSDT && (
+                  <TouchableOpacity
+                    style={[S.btnSelect, { backgroundColor: C.emerald }]}
+                    onPress={() => initiateSelect(item._id, 'USDT')}
+                    disabled={actionLoading === item._id}
+                  >
+                    {actionLoading === item._id
+                      ? <ActivityIndicator color="#FFF" size="small" />
+                      : <Text style={S.btnTxt}>Select · {item.proposedRateUSDT} USDT</Text>
+                    }
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            {/* PENDING but another offer is active — show waiting note */}
+            {isPending && blocked && (
+              <View style={S.blockedNote}>
+                <Ionicons name="time-outline" size={14} color={C.textMuted} />
+                <Text style={S.blockedTxt}>Available once current offer resolves</Text>
+              </View>
+            )}
+
+            {/* SELECTED — show countdown */}
+            {isSelected && (
+              <View style={S.selectedBanner}>
+                <View>
+                  <Text style={S.selectedBannerTitle}>⏳ Offer Sent — Awaiting Response</Text>
+                  {countdown && countdown !== 'Expired' && (
+                    <Text style={S.selectedBannerTimer}>Time remaining: {countdown}</Text>
+                  )}
+                  {countdown === 'Expired' && (
+                    <Text style={[S.selectedBannerTimer, { color: C.red }]}>Offer expired — refreshing…</Text>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* ACCEPTED / DECLINED / EXPIRED / REJECTED */}
+            {!isPending && !isSelected && (
+              <View style={[S.statusPill, { backgroundColor: statusCfg.bg }]}>
+                <View style={[S.statusDot, { backgroundColor: statusCfg.dot }]} />
+                <Text style={[S.statusTxt, { color: statusCfg.text }]}>{statusCfg.label}</Text>
+                {(item.status === 'declined' || item.status === 'expired') && (
+                  <Text style={[S.statusSubTxt, { color: statusCfg.text }]}>· Funds returned to wallet</Text>
+                )}
+              </View>
             )}
           </View>
         </View>
-
-        {/* Rates */}
-        <View style={styles.ratesRow}>
-          {hasNGN && (
-            <View style={[styles.rateBadge, campaignCurrency === 'NGN' && styles.preferredRateBadge]}>
-              <Text style={styles.rateText}>₦{item.proposedRateNGN?.toLocaleString()}</Text>
-              {campaignCurrency === 'NGN' && (
-                <Text style={styles.preferredTag}>Campaign currency</Text>
-              )}
-            </View>
-          )}
-          {hasUSDT && (
-            <View style={[styles.rateBadge, campaignCurrency === 'USDT' && styles.preferredRateBadge]}>
-              <Text style={styles.rateText}>{item.proposedRateUSDT} USDT</Text>
-              {campaignCurrency === 'USDT' && (
-                <Text style={styles.preferredTag}>Campaign currency</Text>
-              )}
-            </View>
-          )}
-        </View>
-
-        {/* Note */}
-        {item.note && (
-          <View style={styles.noteContainer}>
-            <Text style={styles.noteLabel}>Clipper's Message:</Text>
-            <Text style={styles.note}>{item.note}</Text>
-          </View>
-        )}
-
-        {/* Sample Videos */}
-        <View style={styles.samplesSection}>
-          <Text style={styles.samplesTitle}>
-            Sample Videos {clipper.sampleVideos?.length ? `(${clipper.sampleVideos.length})` : ''}
-          </Text>
-
-          {clipper.sampleVideos?.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.videoScroll}>
-              {clipper.sampleVideos.map((url, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={styles.videoThumb}
-                  onPress={() => openVideo(url)}
-                >
-                  <View style={styles.videoThumbPlaceholder}>
-                    <Ionicons name="videocam" size={32} color="#6366f1" />
-                  </View>
-                  <View style={styles.playOverlay}>
-                    <Ionicons name="play-circle" size={48} color="#fff" />
-                  </View>
-                  <Text style={styles.videoLabel}>Video {index + 1}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          ) : (
-            <Text style={styles.noSamples}>This clipper has not uploaded any sample videos yet.</Text>
-          )}
-        </View>
-
-        {/* Action */}
-        {item.status === 'pending' && (
-          <View style={styles.actionContainer}>
-            {availableCurrencies.map(currency => (
-              <TouchableOpacity
-                key={currency}
-                style={[
-                  styles.btnSelect,
-                  currency === 'NGN' ? styles.btnNGN : styles.btnUSDT
-                ]}
-                onPress={() => handleSelectClipper(item._id, currency as 'NGN' | 'USDT')}
-                disabled={actionLoading === item._id}
-              >
-                {actionLoading === item._id ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.btnText}>
-                    Select with {currency === 'NGN' ? '₦' : ''}{currency === 'NGN' ? item.proposedRateNGN : item.proposedRateUSDT} {currency}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {item.status !== 'pending' && (
-          <View style={[styles.statusContainer, 
-            item.status === 'selected' ? styles.statusSelected : 
-            item.status === 'rejected' ? styles.statusRejected : 
-            styles.statusAccepted
-          ]}>
-            <Text style={styles.statusText}>
-              Status: {item.status.toUpperCase()}
-            </Text>
-          </View>
-        )}
-      </View>
+      </Animated.View>
     );
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#1e293b" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Review Applications</Text>
-        <View style={{ width: 24 }} />
-      </View>
+    <View style={S.safe}>
+      <StatusBar barStyle="light-content" backgroundColor={C.orange} />
 
-      <Text style={styles.campaignTitle}>{campaignTitle}</Text>
+      {/* Header */}
+      <Animated.View entering={FadeInUp.duration(350)}>
+        <LinearGradient colors={[C.orange, C.orangeDark]} style={S.headerGrad}>
+          <View style={S.headerRow}>
+            <TouchableOpacity style={S.navBtn} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={20} color="#FFF" />
+            </TouchableOpacity>
+            <View style={{ flex: 1, marginHorizontal: 12 }}>
+              <Text style={S.headerTitle}>Applications</Text>
+              {campaignTitle ? <Text style={S.headerSub} numberOfLines={1}>{campaignTitle}</Text> : null}
+            </View>
+            <View style={S.countBadge}>
+              <Text style={S.countTxt}>{applications.length}</Text>
+            </View>
+          </View>
 
-      {/* Wallet Summary */}
-      {wallet && (
-        <View style={styles.walletSummary}>
-          <View style={styles.walletItem}>
-            <Ionicons name="wallet-outline" size={16} color="#4F46E5" />
-            <Text style={styles.walletText}>
-              NGN: ₦{wallet.balance.toLocaleString()}
-            </Text>
+          {/* Stats */}
+          <View style={S.statsBanner}>
+            {[
+              { label: 'Total',    value: applications.length },
+              { label: 'Pending',  value: pendingCount        },
+              { label: 'Accepted', value: acceptedCount       },
+            ].map((s, i) => (
+              <React.Fragment key={s.label}>
+                {i > 0 && <View style={S.statDiv} />}
+                <View style={S.statCell}>
+                  <Text style={S.statVal}>{s.value}</Text>
+                  <Text style={S.statLbl}>{s.label}</Text>
+                </View>
+              </React.Fragment>
+            ))}
           </View>
-          <View style={styles.walletDivider} />
-          <View style={styles.walletItem}>
-            <Ionicons name="logo-usd" size={16} color="#10B981" />
-            <Text style={styles.walletText}>
-              USDT: {wallet.usdtBalance.toLocaleString()}
-            </Text>
-          </View>
+        </LinearGradient>
+      </Animated.View>
+
+      {/* Active offer banner */}
+      {activeOffer && (
+        <View style={S.activeOfferBanner}>
+          <Ionicons name="timer-outline" size={16} color={C.amber} />
+          <Text style={S.activeOfferTxt}>
+            An offer is pending — waiting for creator's response. Other applicants are on hold.
+          </Text>
         </View>
       )}
 
+      {/* Wallet strip */}
+      {wallet && (
+        <Animated.View entering={FadeInDown.delay(80)} style={S.walletStrip}>
+          <View style={S.walletCell}>
+            <Text style={S.walletLabel}>NGN Balance</Text>
+            <Text style={[S.walletAmt, { color: C.purple }]}>₦{wallet.balance.toLocaleString()}</Text>
+          </View>
+          <View style={S.walletDiv} />
+          <View style={S.walletCell}>
+            <Text style={S.walletLabel}>USDT Balance</Text>
+            <Text style={[S.walletAmt, { color: C.emerald }]}>${wallet.usdtBalance.toLocaleString()}</Text>
+          </View>
+          <TouchableOpacity style={S.fundBtn} onPress={() => handleFundWallet('NGN')}>
+            <Ionicons name="add" size={15} color={C.indigo} />
+            <Text style={S.fundTxt}>Fund</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
       {loading ? (
-        <ActivityIndicator size="large" color="#6366f1" style={styles.center} />
+        <View style={S.center}>
+          <ActivityIndicator size="large" color={C.orange} />
+          <Text style={S.loadingTxt}>Loading applications…</Text>
+        </View>
       ) : (
         <FlatList
           data={applications}
           renderItem={renderApplication}
           keyExtractor={(item) => item._id}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={S.list}
+          showsVerticalScrollIndicator={false}
+          onRefresh={fetchApplications}
+          refreshing={loading}
           ListEmptyComponent={
-            <View style={styles.empty}>
-              <Ionicons name="people-outline" size={64} color="#9CA3AF" />
-              <Text style={styles.emptyText}>No applications received yet</Text>
-              <Text style={styles.emptySub}>Share your campaign link to attract more creators</Text>
+            <View style={S.empty}>
+              <View style={[S.emptyIcon, { backgroundColor: C.orangeLight }]}>
+                <Ionicons name="people-outline" size={38} color={C.orange} />
+              </View>
+              <Text style={S.emptyTitle}>No applications yet</Text>
+              <Text style={S.emptySub}>Share your campaign to attract creators</Text>
             </View>
           }
         />
       )}
 
-      {/* Video Player Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={videoModalVisible}
-        onRequestClose={closeVideoModal}
-      >
-        <View style={styles.modalContainer}>
-          <TouchableOpacity style={styles.closeButton} onPress={closeVideoModal}>
-            <Ionicons name="close" size={32} color="#fff" />
+      {/* Video modal */}
+      <Modal animationType="fade" transparent visible={!!videoModal} onRequestClose={closeVideoModal}>
+        <View style={S.videoModal}>
+          <TouchableOpacity style={S.videoClose} onPress={closeVideoModal}>
+            <View style={S.videoCloseBtn}>
+              <Ionicons name="close" size={22} color="#FFF" />
+            </View>
           </TouchableOpacity>
-          
-          {currentVideoUrl && (
-            <Video
-              ref={videoRef}
-              source={{ uri: currentVideoUrl }}
-              style={styles.videoPlayer}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              isLooping={false}
-              shouldPlay={true}
-              onError={(error) => {
-                console.error('Video playback error:', error);
-                Alert.alert('Error', 'Failed to load video');
-                closeVideoModal();
-              }}
+          {videoModal && (
+            <Video ref={videoRef} source={{ uri: videoModal }} style={S.videoPlayer}
+              useNativeControls resizeMode={ResizeMode.CONTAIN} isLooping={false} shouldPlay
+              onError={() => { Alert.alert('Error', 'Failed to load video'); closeVideoModal(); }}
             />
           )}
         </View>
       </Modal>
-    </SafeAreaView>
+
+      {/* Confirm modal */}
+      <Modal animationType="slide" transparent visible={!!confirmModal} onRequestClose={() => setConfirmModal(null)}>
+        <View style={S.overlay}>
+          <View style={S.bottomSheet}>
+            <View style={S.sheetHandle} />
+            <View style={[S.sheetIconWrap, { backgroundColor: C.indigoLight }]}>
+              <Ionicons name="person-circle-outline" size={32} color={C.indigo} />
+            </View>
+            <Text style={S.sheetTitle}>Send Offer</Text>
+            {confirmModal && (
+              <>
+                <Text style={S.sheetAmountLabel}>You'll lock into escrow</Text>
+                <Text style={S.sheetAmount}>
+                  {confirmModal.currency === 'NGN'
+                    ? `₦${confirmModal.amount.toLocaleString()}`
+                    : `${confirmModal.amount} USDT`}
+                </Text>
+              </>
+            )}
+            <Text style={S.sheetBody}>
+              The creator gets 2 hours to accept or decline.{'\n'}
+              Other applicants remain available — if this creator declines or doesn't respond, you can pick someone else and your funds are returned.
+            </Text>
+            <View style={S.sheetBtns}>
+              <TouchableOpacity style={S.sheetBtnGhost} onPress={() => setConfirmModal(null)}>
+                <Text style={S.sheetBtnGhostTxt}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[S.sheetBtnSolid, { backgroundColor: C.indigo }, actionLoading && { opacity: 0.6 }]}
+                onPress={confirmSelect}
+                disabled={!!actionLoading}
+              >
+                {actionLoading
+                  ? <ActivityIndicator color="#FFF" size="small" />
+                  : <Text style={S.sheetBtnSolidTxt}>Send Offer</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#f8fafc' },
+const S = StyleSheet.create({
+  safe:   { flex: 1, backgroundColor: C.bg },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+  headerGrad: { paddingTop: 16, paddingBottom: 0, paddingHorizontal: 18 },
+  headerRow:  { flexDirection: 'row', alignItems: 'center', paddingBottom: 14 },
+  navBtn:     { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+  headerTitle:{ fontSize: 17, fontWeight: '800', color: '#FFF' },
+  headerSub:  { fontSize: 11, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
+  countBadge: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
+  countTxt:   { fontSize: 13, fontWeight: '800', color: '#FFF' },
 
-  },
+  statsBanner:{ backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 14, padding: 14, marginBottom: 16, flexDirection: 'row' },
+  statCell:   { flex: 1, alignItems: 'center' },
+  statVal:    { fontSize: 18, fontWeight: '800', color: '#FFF' },
+  statLbl:    { fontSize: 10, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+  statDiv:    { width: 1, backgroundColor: 'rgba(255,255,255,0.3)', marginHorizontal: 8 },
 
-  headerTitle: { fontSize: 20, fontWeight: '700', color: '#1e293b' },
+  activeOfferBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: C.amberLight, paddingHorizontal: 16, paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: '#FDE68A',
+  },
+  activeOfferTxt: { flex: 1, fontSize: 12, color: '#92400E', fontWeight: '500' },
 
-  campaignTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#4b5563',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#fff',
-  },
+  walletStrip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: C.borderLight, paddingHorizontal: 18, paddingVertical: 12 },
+  walletCell:  { flex: 1 },
+  walletLabel: { fontSize: 10, color: C.textMuted, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 },
+  walletAmt:   { fontSize: 15, fontWeight: '800' },
+  walletDiv:   { width: 1, height: 28, backgroundColor: C.border, marginHorizontal: 14 },
+  fundBtn:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.indigoLight, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: '#C7D2FE' },
+  fundTxt:     { fontSize: 12, fontWeight: '700', color: C.indigo },
 
-  walletSummary: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-  },
-  walletItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  walletText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  walletDivider: {
-    width: 1,
-    height: 20,
-    backgroundColor: '#e5e7eb',
-  },
+  list: { padding: 16, paddingBottom: 60 },
 
-  list: { padding: 16 },
+  card: { backgroundColor: C.surface, borderRadius: 18, padding: 18, marginBottom: 12, borderWidth: 1, borderColor: C.borderLight, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
 
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
+  cardHeader: { flexDirection: 'row', gap: 12, marginBottom: 14 },
+  avatarWrap: { position: 'relative' },
+  avatar:     { width: 50, height: 50, borderRadius: 25, borderWidth: 2, borderColor: C.border },
+  onlineDot:  { position: 'absolute', bottom: 1, right: 1, width: 11, height: 11, borderRadius: 6, backgroundColor: C.emerald, borderWidth: 2, borderColor: '#FFF' },
+  creatorName:{ fontSize: 15, fontWeight: '800', color: C.textPri, marginBottom: 4 },
+  metaRow:    { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  ratingTxt:  { fontSize: 12, color: C.amber, fontWeight: '700' },
+  categoryChip:   { backgroundColor: C.indigoLight, borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 },
+  categoryChipTxt:{ fontSize: 10, color: C.indigo, fontWeight: '600' },
+  bio:        { fontSize: 13, color: C.textSec, lineHeight: 18, marginTop: 5 },
 
-  profileRow: { flexDirection: 'row', marginBottom: 16 },
-  avatar: { width: 60, height: 60, borderRadius: 30, marginRight: 12 },
-  profileInfo: { flex: 1 },
-  name: { fontSize: 17, fontWeight: '600', marginBottom: 4 },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  rating: { marginLeft: 4, fontSize: 14, color: '#4b5563' },
-  bio: { 
-    fontSize: 15, 
-    color: '#374151', 
-    lineHeight: 22, 
-    marginBottom: 6 
-  },
-  categories: { 
-    fontSize: 14, 
-    color: '#6366f1', 
-    marginTop: 4 
-  },
+  ratesRow:   { flexDirection: 'row', gap: 10, marginBottom: 14, flexWrap: 'wrap' },
+  rateBadge:  { flex: 1, minWidth: 110, borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 10, alignItems: 'center' },
+  rateAmount: { fontSize: 18, fontWeight: '800', letterSpacing: -0.5 },
+  rateCur:    { fontSize: 10, color: C.textMuted, fontWeight: '600', letterSpacing: 0.5, marginTop: 1 },
+  rateTag:    { fontSize: 9, marginTop: 3, fontStyle: 'italic' },
 
-  ratesRow: { 
-    flexDirection: 'row', 
-    gap: 12, 
-    marginBottom: 12,
-    flexWrap: 'wrap',
-  },
-  rateBadge: {
-    backgroundColor: '#f1f5f9',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: 100,
-  },
-  preferredRateBadge: {
-    backgroundColor: '#e0f2fe',
-    borderWidth: 1,
-    borderColor: '#38bdf8',
-  },
-  rateText: { 
-    fontSize: 16, 
-    fontWeight: '700', 
-    color: '#1e293b',
-    textAlign: 'center',
-  },
-  preferredTag: {
-    fontSize: 10,
-    color: '#0369a1',
-    textAlign: 'center',
-    marginTop: 2,
-  },
+  noteBox:  { flexDirection: 'row', backgroundColor: '#F9FAFB', borderRadius: 10, padding: 12, marginBottom: 14, alignItems: 'flex-start', borderWidth: 1, borderColor: C.borderLight },
+  noteTxt:  { flex: 1, fontSize: 13, color: C.textSec, lineHeight: 19 },
 
-  noteContainer: { marginBottom: 16 },
-  noteLabel: { fontSize: 14, fontWeight: '600', marginBottom: 4 },
-  note: { fontSize: 14, color: '#374151', lineHeight: 20 },
+  samplesSection: { marginBottom: 14 },
+  sectionLabel:   { fontSize: 10, fontWeight: '700', color: C.textMuted, letterSpacing: 0.8 },
+  videoThumb:     { width: 96, height: 68, marginRight: 10, borderRadius: 10, overflow: 'hidden', position: 'relative' },
+  videoThumbInner:{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
+  videoIdx:       { position: 'absolute', bottom: 4, right: 6, fontSize: 10, color: C.indigo, fontWeight: '800' },
+  noSamples:      { fontSize: 13, color: C.textMuted, fontStyle: 'italic', marginTop: 8 },
 
-  samplesSection: { marginTop: 12 },
-  samplesTitle: { fontSize: 15, fontWeight: '600', marginBottom: 8 },
-  videoScroll: { marginLeft: -4 },
-  videoThumb: {
-    width: 140,
-    height: 100,
-    marginHorizontal: 4,
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: '#1f2937',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  videoThumbPlaceholder: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#374151',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  playOverlay: {
-    position: 'absolute',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  videoLabel: {
-    position: 'absolute',
-    bottom: 4,
-    left: 4,
-    fontSize: 12,
-    color: '#fff',
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  noSamples: { 
-    fontSize: 14, 
-    color: '#9ca3af', 
-    fontStyle: 'italic',
-    marginTop: 8 
-  },
+  actionRow: { gap: 8 },
+  btnSelect: { paddingVertical: 13, borderRadius: 12, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 3 },
+  btnTxt:    { color: '#FFF', fontWeight: '700', fontSize: 14 },
 
-  actionContainer: {
-    gap: 8,
-    marginTop: 16,
-  },
-  btnSelect: {
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  btnNGN: {
-    backgroundColor: '#4F46E5',
-  },
-  btnUSDT: {
-    backgroundColor: '#10B981',
-  },
-  btnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  blockedNote: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
+  blockedTxt:  { fontSize: 12, color: C.textMuted, fontStyle: 'italic' },
 
-  statusContainer: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  statusSelected: {
-    backgroundColor: '#fef3c7',
-  },
-  statusAccepted: {
-    backgroundColor: '#d1fae5',
-  },
-  statusRejected: {
-    backgroundColor: '#fee2e2',
-  },
-  statusText: { 
-    fontSize: 14, 
-    color: '#374151',
-    fontWeight: '500',
-  },
+  selectedBanner:      { backgroundColor: C.amberLight, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#FDE68A' },
+  selectedBannerTitle: { fontSize: 13, fontWeight: '700', color: '#92400E' },
+  selectedBannerTimer: { fontSize: 12, color: '#B45309', marginTop: 3 },
 
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
-  empty: { padding: 40, alignItems: 'center' },
-  emptyText: { fontSize: 18, fontWeight: '600', color: '#64748b', marginTop: 16 },
-  emptySub: { fontSize: 15, color: '#9ca3af', marginTop: 8, textAlign: 'center' },
+  statusPill:   { flexDirection: 'row', alignItems: 'center', gap: 7, alignSelf: 'flex-start', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 7 },
+  statusDot:    { width: 7, height: 7, borderRadius: 4 },
+  statusTxt:    { fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  statusSubTxt: { fontSize: 11, fontWeight: '500' },
 
-  // Modal styles
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  videoPlayer: {
-    width: width,
-    height: height * 0.7,
-  },
-  closeButton: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    zIndex: 10,
-    padding: 10,
-  },
+  loadingTxt: { color: C.textSec, marginTop: 12, fontSize: 14 },
+  empty:      { alignItems: 'center', paddingVertical: 80 },
+  emptyIcon:  { width: 76, height: 76, borderRadius: 38, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  emptyTitle: { fontSize: 17, fontWeight: '700', color: C.textPri, marginBottom: 6 },
+  emptySub:   { fontSize: 13, color: C.textSec, textAlign: 'center' },
+
+  videoModal:   { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
+  videoPlayer:  { width, height: height * 0.72 },
+  videoClose:   { position: 'absolute', top: 54, right: 18, zIndex: 10 },
+  videoCloseBtn:{ width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+
+  overlay:          { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' },
+  bottomSheet:      { backgroundColor: '#FFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, alignItems: 'center', borderTopWidth: 1, borderColor: C.borderLight },
+  sheetHandle:      { width: 36, height: 4, backgroundColor: C.border, borderRadius: 2, marginBottom: 20 },
+  sheetIconWrap:    { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
+  sheetTitle:       { fontSize: 20, fontWeight: '800', color: C.textPri, marginBottom: 6 },
+  sheetAmountLabel: { fontSize: 13, color: C.textSec, marginBottom: 4 },
+  sheetAmount:      { fontSize: 28, fontWeight: '800', color: C.indigo, marginBottom: 8 },
+  sheetBody:        { fontSize: 13, color: C.textSec, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
+  sheetBtns:        { flexDirection: 'row', gap: 12, width: '100%' },
+  sheetBtnGhost:    { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: C.borderLight, alignItems: 'center' },
+  sheetBtnGhostTxt: { color: C.textSec, fontSize: 15, fontWeight: '600' },
+  sheetBtnSolid:    { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  sheetBtnSolidTxt: { color: '#FFF', fontSize: 15, fontWeight: '700' },
 });

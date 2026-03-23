@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-const API_BASE = 'https://clippapay.com/api';
+const API_BASE =  process.env.EXPO_PUBLIC_API_URL;
 
 export interface Notification {
   _id: string;

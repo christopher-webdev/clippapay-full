@@ -208,18 +208,7 @@ export default function ClipperHowTo() {
           })}
         </ol>
 
-        {/* Support videos */}
-        <section className="mt-20 text-center space-y-8">
-          <h2 className="text-3xl font-bold text-gray-800">Still Not Sure How to Upload Proof?</h2>
-          <p className="text-lg text-gray-600 max-w-xl mx-auto">
-            Watch these short videos to learn how to capture and upload correct proof for each platform.
-          </p>
-          <div className="flex flex-wrap gap-6 justify-center">
-            <video controls preload="auto" className="w-full max-w-sm rounded-xl shadow-lg" src="/instagram.mp4#t=1" />
-            <video controls preload="auto" className="w-full max-w-sm rounded-xl shadow-lg" src="/youtube.mp4#t=1" />
-            <video controls preload="auto" className="w-full max-w-sm rounded-xl shadow-lg" src="/tiktok.mp4#t=1" />
-          </div>
-        </section>
+  
       </div>
 
       {/* Zoom modal */}
