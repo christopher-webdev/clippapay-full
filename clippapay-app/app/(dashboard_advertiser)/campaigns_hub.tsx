@@ -299,7 +299,7 @@ function QuickBtn({ icon, label, color, onPress }: { icon: string; label: string
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#F5F5F7' },
+  container:    { flex: 1, backgroundColor: '#F5F5F7', },
   gradHdr:      { paddingTop: 60, paddingBottom: 24, paddingHorizontal: 20, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, marginTop: -50},
   hdrTitle:     { fontSize: 26, fontWeight: '800', color: '#FFF', letterSpacing: -0.5 },
   hdrSub:       { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 4, marginBottom: 18 },

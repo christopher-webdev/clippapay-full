@@ -1,393 +1,300 @@
-// mobile_app/hooks/useNotifications.ts (updated)
+// hooks/useNotifications.tsx
+// Fixed: imports, auth check via SecureStore (no useAuth dependency),
+//        proper polling, badge sync, push registration on login.
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
-import { notificationService, Notification, NotificationsResponse } from '../services/notificationService';
-import { pushNotificationService } from '../services/pushNotificationService';
-import { useAuth } from './useAuth';
+import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import { useRouter } from 'expo-router';
 
+import {
+  notificationService,
+  type Notification,
+  type NotificationsResponse,
+} from '../services/notificationService';
+import { pushNotificationService } from '../services/pushNotificationService';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface UseNotificationsReturn {
-  // Data
-  notifications: Notification[];
-  unreadCount: number;
-  loading: boolean;
-  refreshing: boolean;
-  hasMore: boolean;
-  error: string | null;
-  pushToken: string | null;
-  
-  // Actions
-  loadInitial: () => Promise<void>;
-  loadMore: () => Promise<void>;
-  refresh: () => Promise<void>;
-  markAsRead: (notificationId: string) => Promise<void>;
-  markAllAsRead: () => Promise<void>;
-  deleteNotification: (notificationId: string) => Promise<void>;
-  deleteAllRead: () => Promise<void>;
+  notifications:    Notification[];
+  unreadCount:      number;
+  loading:          boolean;
+  refreshing:       boolean;
+  hasMore:          boolean;
+  error:            string | null;
+  pushToken:        string | null;
+
+  loadInitial:             () => Promise<void>;
+  loadMore:                () => Promise<void>;
+  refresh:                 () => Promise<void>;
+  markAsRead:              (id: string) => Promise<void>;
+  markAllAsRead:           () => Promise<void>;
+  deleteNotification:      (id: string) => Promise<void>;
+  deleteAllRead:           () => Promise<void>;
   registerPushNotifications: () => Promise<void>;
-  
-  // State helpers
-  getNotificationById: (id: string) => Notification | undefined;
-  getUnreadByType: (type: string) => number;
+  getUnreadByType:         (type: string) => number;
 }
 
-export function useNotifications(): UseNotificationsReturn {
-  const { user, isAuthenticated } = useAuth();
-  const router = useRouter();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [totalPages, setTotalPages] = useState(1);
-  const [pushToken, setPushToken] = useState<string | null>(null);
-  
-  const appState = useRef(AppState.currentState);
-  const pollingInterval = useRef<NodeJS.Timeout>();
-  const notificationListeners = useRef<{ remove: () => void }[]>([]);
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const getToken = async (): Promise<string | null> => {
+  try {
+    if (Platform.OS === 'web') return await AsyncStorage.getItem('userToken');
+    const t = await SecureStore.getItemAsync('userToken');
+    return t ?? (await AsyncStorage.getItem('userToken'));
+  } catch {
+    return null;
+  }
+};
 
-  // Cleanup polling and listeners on unmount
+// ── Hook ──────────────────────────────────────────────────────────────────────
+export function useNotifications(): UseNotificationsReturn {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount,   setUnreadCount]   = useState(0);
+  const [loading,       setLoading]       = useState(true);
+  const [refreshing,    setRefreshing]    = useState(false);
+  const [error,         setError]         = useState<string | null>(null);
+  const [page,          setPage]          = useState(1);
+  const [hasMore,       setHasMore]       = useState(false);
+  const [pushToken,     setPushToken]     = useState<string | null>(null);
+  const [isAuthed,      setIsAuthed]      = useState(false);
+
+  const appState          = useRef(AppState.currentState);
+  const pollingInterval   = useRef<ReturnType<typeof setInterval>>();
+  const notifListeners    = useRef<{ remove: () => void }[]>([]);
+
+  // ── Check auth on mount ─────────────────────────────────────────────────
+  useEffect(() => {
+    getToken().then(t => setIsAuthed(!!t));
+  }, []);
+
+  // ── Cleanup ─────────────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
-      if (pollingInterval.current) {
-        clearInterval(pollingInterval.current);
-      }
-      // Remove notification listeners
-      notificationListeners.current.forEach(listener => listener.remove());
+      if (pollingInterval.current) clearInterval(pollingInterval.current);
+      notifListeners.current.forEach(l => l.remove());
     };
   }, []);
 
-  // Handle app state changes (stop polling when app is in background)
+  // ── App state: resume/pause polling ─────────────────────────────────────
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription.remove();
-  }, []);
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (
+        appState.current.match(/inactive|background/) &&
+        next === 'active'
+      ) {
+        refresh();
+        _startPolling();
+      } else if (next.match(/inactive|background/)) {
+        _stopPolling();
+      }
+      appState.current = next;
+    });
+    return () => sub.remove();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Set up push notification listeners
+  // ── Push notification listeners ──────────────────────────────────────────
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthed) return;
 
-    // Set up listeners for incoming notifications
     const listeners = pushNotificationService.addNotificationListeners(
-      // When notification is received while app is foregrounded
-      (notification) => {
-        console.log('Notification received:', notification);
-        // You can show an in-app alert here if needed
+      (_notification) => {
+        // Notification received while app is foregrounded — refresh list
+        _loadUnreadCount();
       },
-      // When user taps on notification
       (response) => {
-        console.log('Notification response:', response);
-        handleNotificationResponse(response);
+        // User tapped notification — mark related as read if we have its id
+        const data = response.notification.request.content.data as any;
+        if (data?.notificationId) {
+          markAsRead(data.notificationId);
+        }
+        // Refresh list regardless
+        refresh();
       }
     );
 
-    notificationListeners.current = listeners;
-
-    // Register for push notifications
-    registerPushNotifications();
-
+    notifListeners.current = listeners;
     return () => {
-      notificationListeners.current.forEach(listener => listener.remove());
+      notifListeners.current.forEach(l => l.remove());
+      notifListeners.current = [];
     };
-  }, [isAuthenticated]);
+  }, [isAuthed]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
-    const data = response.notification.request.content.data;
-    
-    if (!data) return;
-
-    // Navigate based on notification type
-    if (data.type === 'deposit' && data.depositId) {
-      router.push(`../(dashboard_advertiser)/wallet?tab=deposits&highlight=${data.depositId}`);
-    } else if (data.type === 'withdrawal' && data.withdrawalId) {
-      router.push(`../(dashboard_advertiser)/wallet?tab=withdrawals&highlight=${data.withdrawalId}`);
-    } else if (data.type === 'campaign' && data.campaignId) {
-      router.push(`../(dashboard_advertiser)/campaigns/${data.campaignId}`);
-    } else if (data.type === 'application' && data.applicationId) {
-      router.push(`../(dashboard_advertiser)/applications/${data.applicationId}`);
+  // ── Register push on auth ────────────────────────────────────────────────
+  useEffect(() => {
+    if (isAuthed) {
+      registerPushNotifications();
+      loadInitial();
     } else {
-      // Default: go to notifications screen
-      router.push('../(dashboard)/notifications');
+      setNotifications([]);
+      setUnreadCount(0);
+      setLoading(false);
+      _stopPolling();
     }
-  };
+  }, [isAuthed]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const registerPushNotifications = useCallback(async () => {
-    try {
-      const token = await pushNotificationService.registerForPushNotificationsAsync();
-      setPushToken(token);
-    } catch (err) {
-      console.error('Failed to register for push notifications:', err);
-    }
+  // ── Internal: polling ────────────────────────────────────────────────────
+  const _startPolling = useCallback(() => {
+    if (pollingInterval.current) clearInterval(pollingInterval.current);
+    pollingInterval.current = setInterval(() => {
+      getToken().then(t => { if (t) _loadUnreadCount(); });
+    }, 30_000);
   }, []);
 
-  const handleAppStateChange = (nextAppState: AppStateStatus) => {
-    if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-      // App came to foreground - refresh data
-      refresh();
-      startPolling();
-      
-      // Update badge count
-      updateBadgeCount();
-    } else if (nextAppState.match(/inactive|background/)) {
-      // App went to background - stop polling
-      stopPolling();
-    }
-    appState.current = nextAppState;
-  };
-
-  const updateBadgeCount = useCallback(async () => {
-    try {
-      await pushNotificationService.setBadgeCount(unreadCount);
-    } catch (err) {
-      console.error('Failed to update badge count:', err);
-    }
-  }, [unreadCount]);
-
-  const startPolling = useCallback(() => {
-    if (pollingInterval.current) {
-      clearInterval(pollingInterval.current);
-    }
-    // Poll for unread count every 30 seconds
-    pollingInterval.current = setInterval(() => {
-      if (isAuthenticated) {
-        loadUnreadCount();
-      }
-    }, 30000);
-  }, [isAuthenticated]);
-
-  const stopPolling = useCallback(() => {
+  const _stopPolling = useCallback(() => {
     if (pollingInterval.current) {
       clearInterval(pollingInterval.current);
       pollingInterval.current = undefined;
     }
   }, []);
 
-  // Load unread count
-  const loadUnreadCount = useCallback(async () => {
-    if (!isAuthenticated) return;
-    
+  // ── Internal: unread count ───────────────────────────────────────────────
+  const _loadUnreadCount = useCallback(async () => {
     try {
       const count = await notificationService.getUnreadCount();
       setUnreadCount(count);
-      
-      // Update badge count
       await pushNotificationService.setBadgeCount(count);
-    } catch (err) {
-      console.error('Failed to load unread count:', err);
+    } catch {
+      // silent
     }
-  }, [isAuthenticated]);
+  }, []);
 
-  // Load notifications with pagination
-  const loadNotifications = useCallback(async (pageNum: number, refreshMode = false) => {
-    if (!isAuthenticated) {
-      setNotifications([]);
-      setUnreadCount(0);
-      setLoading(false);
-      return;
-    }
+  // ── Load notifications ───────────────────────────────────────────────────
+  const _loadPage = useCallback(
+    async (pageNum: number, refreshMode = false) => {
+      try {
+        setError(null);
+        const resp: NotificationsResponse =
+          await notificationService.getNotifications(pageNum);
 
-    try {
-      setError(null);
-      const response: NotificationsResponse = await notificationService.getNotifications(pageNum);
-      
-      setNotifications(prev => 
-        refreshMode ? response.notifications : [...prev, ...response.notifications]
-      );
-      
-      setTotalPages(response.pagination.pages);
-      setHasMore(response.pagination.page < response.pagination.pages);
-      
-      // Also load unread count
-      await loadUnreadCount();
-      
-    } catch (err: any) {
-      console.error('Failed to load notifications:', err);
-      setError(err.message || 'Failed to load notifications');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [isAuthenticated, loadUnreadCount]);
+        setNotifications(prev =>
+          refreshMode
+            ? resp.notifications
+            : [...prev, ...resp.notifications]
+        );
+        setUnreadCount(resp.unreadCount);
+        setHasMore(resp.pagination.page < resp.pagination.pages);
+        await pushNotificationService.setBadgeCount(resp.unreadCount);
+      } catch (err: any) {
+        setError(err.message || 'Failed to load notifications');
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    []
+  );
 
-  // Load initial data
   const loadInitial = useCallback(async () => {
     setLoading(true);
     setPage(1);
-    await loadNotifications(1, true);
-    startPolling();
-  }, [loadNotifications, startPolling]);
+    await _loadPage(1, true);
+    _startPolling();
+  }, [_loadPage, _startPolling]);
 
-  // Load more (pagination)
   const loadMore = useCallback(async () => {
     if (!hasMore || loading || refreshing) return;
-    
-    const nextPage = page + 1;
-    setPage(nextPage);
-    await loadNotifications(nextPage, false);
-  }, [hasMore, loading, refreshing, page, loadNotifications]);
+    const next = page + 1;
+    setPage(next);
+    await _loadPage(next, false);
+  }, [hasMore, loading, refreshing, page, _loadPage]);
 
-  // Refresh (pull to refresh)
   const refresh = useCallback(async () => {
     setRefreshing(true);
     setPage(1);
-    await loadNotifications(1, true);
-  }, [loadNotifications]);
+    await _loadPage(1, true);
+  }, [_loadPage]);
 
-  // Mark single notification as read
-  const markAsRead = useCallback(async (notificationId: string) => {
+  // ── markAsRead ───────────────────────────────────────────────────────────
+  const markAsRead = useCallback(async (id: string) => {
+    // Optimistic
+    setNotifications(prev =>
+      prev.map(n => (n._id === id ? { ...n, read: true } : n))
+    );
+    setUnreadCount(prev => Math.max(0, prev - 1));
+
     try {
-      // Optimistic update
-      setNotifications(prev =>
-        prev.map(n => 
-          n._id === notificationId ? { ...n, read: true } : n
-        )
+      await notificationService.markAsRead(id);
+      await pushNotificationService.setBadgeCount(
+        Math.max(0, unreadCount - 1)
       );
-      setUnreadCount(prev => Math.max(0, prev - 1));
-
-      // Update badge
-      await pushNotificationService.setBadgeCount(unreadCount - 1);
-
-      // API call
-      await notificationService.markAsRead(notificationId);
-      
-    } catch (err) {
-      console.error('Failed to mark as read:', err);
-      // Revert on error
+    } catch (err: any) {
+      // Revert
       setNotifications(prev =>
-        prev.map(n => 
-          n._id === notificationId ? { ...n, read: false } : n
-        )
+        prev.map(n => (n._id === id ? { ...n, read: false } : n))
       );
       setUnreadCount(prev => prev + 1);
-      setError('Failed to mark notification as read');
+      setError(err.message);
     }
-  }, [notifications, unreadCount]);
+  }, [unreadCount]);
 
-  // Mark all as read
+  // ── markAllAsRead ────────────────────────────────────────────────────────
   const markAllAsRead = useCallback(async () => {
+    const snapshot = notifications;
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    setUnreadCount(0);
+    await pushNotificationService.clearBadge();
+
     try {
-      // Optimistic update
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-      setUnreadCount(0);
-
-      // Update badge
-      await pushNotificationService.setBadgeCount(0);
-
-      // API call
       await notificationService.markAllAsRead();
-      
-    } catch (err) {
-      console.error('Failed to mark all as read:', err);
-      // Revert on error
-      setNotifications(prev => 
-        prev.map(n => ({ ...n, read: false }))
-      );
-      setUnreadCount(notifications.filter(n => !n.read).length);
-      setError('Failed to mark all as read');
+    } catch (err: any) {
+      setNotifications(snapshot);
+      setUnreadCount(snapshot.filter(n => !n.read).length);
+      setError(err.message);
     }
   }, [notifications]);
 
-  // Delete single notification
-  const deleteNotification = useCallback(async (notificationId: string) => {
-    try {
-      // Optimistic update
-      const deletedNotification = notifications.find(n => n._id === notificationId);
-      const wasUnread = deletedNotification && !deletedNotification.read;
-      
-      setNotifications(prev => prev.filter(n => n._id !== notificationId));
-      if (wasUnread) {
-        setUnreadCount(prev => Math.max(0, prev - 1));
-        await pushNotificationService.setBadgeCount(unreadCount - 1);
-      }
-
-      // API call
-      await notificationService.delete(notificationId);
-      
-    } catch (err) {
-      console.error('Failed to delete notification:', err);
-      // Refresh to get correct state
-      await refresh();
-      setError('Failed to delete notification');
+  // ── deleteNotification ───────────────────────────────────────────────────
+  const deleteNotification = useCallback(async (id: string) => {
+    const item = notifications.find(n => n._id === id);
+    setNotifications(prev => prev.filter(n => n._id !== id));
+    if (item && !item.read) {
+      setUnreadCount(prev => Math.max(0, prev - 1));
     }
-  }, [notifications, unreadCount, refresh]);
 
-  // Delete all read notifications
-  const deleteAllRead = useCallback(async () => {
     try {
-      // Optimistic update
-      setNotifications(prev => prev.filter(n => !n.read));
+      await notificationService.delete(id);
+    } catch (err: any) {
+      setError(err.message);
+      refresh();
+    }
+  }, [notifications, refresh]);
 
-      // API call
+  // ── deleteAllRead ────────────────────────────────────────────────────────
+  const deleteAllRead = useCallback(async () => {
+    setNotifications(prev => prev.filter(n => !n.read));
+    try {
       await notificationService.deleteAllRead();
-      
-    } catch (err) {
-      console.error('Failed to delete read notifications:', err);
-      // Refresh to get correct state
-      await refresh();
-      setError('Failed to delete read notifications');
+    } catch (err: any) {
+      setError(err.message);
+      refresh();
     }
   }, [refresh]);
 
-  // Get notification by ID
-  const getNotificationById = useCallback((id: string) => {
-    return notifications.find(n => n._id === id);
-  }, [notifications]);
-
-  // Get unread count by type
-  const getUnreadByType = useCallback((type: string) => {
-    return notifications.filter(n => n.type === type && !n.read).length;
-  }, [notifications]);
-
-  // Initial load when authenticated
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadInitial();
-    } else {
-      setNotifications([]);
-      setUnreadCount(0);
-      setLoading(false);
-      stopPolling();
+  // ── registerPushNotifications ────────────────────────────────────────────
+  const registerPushNotifications = useCallback(async () => {
+    try {
+      const token = await pushNotificationService.registerForPushNotificationsAsync();
+      if (token) setPushToken(token);
+    } catch (err) {
+      console.error('[useNotifications] Push registration failed:', err);
     }
-  }, [isAuthenticated, loadInitial, stopPolling]);
+  }, []);
 
-  // Set up real-time connection (WebSocket) if available
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    // You can implement WebSocket connection here for real-time notifications
-    // Example with Socket.io:
-    /*
-    const socket = io(API_BASE, {
-      auth: { token: getToken() }
-    });
-
-    socket.on('new_notification', (notification: Notification) => {
-      setNotifications(prev => [notification, ...prev]);
-      if (!notification.read) {
-        setUnreadCount(prev => prev + 1);
-        // Show local notification if app is in background
-        if (AppState.currentState !== 'active') {
-          pushNotificationService.scheduleLocalNotification(
-            notification.title,
-            notification.message,
-            notification.data,
-            notification.type.includes('deposit') ? 'deposits' : 
-            notification.type.includes('withdrawal') ? 'withdrawals' : 'wallet'
-          );
-        }
-      }
-    });
-
-    return () => socket.disconnect();
-    */
-  }, [isAuthenticated]);
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  const getUnreadByType = useCallback(
+    (type: string) => notifications.filter(n => n.type === type && !n.read).length,
+    [notifications]
+  );
 
   return {
-    // Data
     notifications,
     unreadCount,
     loading,
@@ -395,8 +302,6 @@ export function useNotifications(): UseNotificationsReturn {
     hasMore,
     error,
     pushToken,
-    
-    // Actions
     loadInitial,
     loadMore,
     refresh,
@@ -405,32 +310,26 @@ export function useNotifications(): UseNotificationsReturn {
     deleteNotification,
     deleteAllRead,
     registerPushNotifications,
-    
-    // State helpers
-    getNotificationById,
     getUnreadByType,
   };
 }
 
-// Optional: Create a context provider for global notification state
-import React, { createContext, useContext } from 'react';
-
+// ── Context ───────────────────────────────────────────────────────────────────
 const NotificationsContext = createContext<UseNotificationsReturn | undefined>(undefined);
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
-  const notifications = useNotifications();
-  
+  const value = useNotifications();
   return (
-    <NotificationsContext.Provider value={notifications}>
+    <NotificationsContext.Provider value={value}>
       {children}
     </NotificationsContext.Provider>
   );
 }
 
-export function useNotificationsContext() {
-  const context = useContext(NotificationsContext);
-  if (context === undefined) {
-    throw new Error('useNotificationsContext must be used within a NotificationsProvider');
+export function useNotificationsContext(): UseNotificationsReturn {
+  const ctx = useContext(NotificationsContext);
+  if (!ctx) {
+    throw new Error('useNotificationsContext must be used inside <NotificationsProvider>');
   }
-  return context;
+  return ctx;
 }

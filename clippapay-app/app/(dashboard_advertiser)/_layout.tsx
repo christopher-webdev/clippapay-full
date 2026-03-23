@@ -11,7 +11,7 @@ const scale = width / 428;
 
 // ProfileHeader is fixed at 72px. Footer is ~98px * scale.
 // stackContent paddingTop = 72 (header), paddingBottom = footer height.
-const HEADER_HEIGHT = 42;
+const HEADER_HEIGHT = 72;
 const FOOTER_HEIGHT = Math.round(98 * scale);
 
 export default function DashboardLayout() {
@@ -100,6 +100,8 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingTop: HEADER_HEIGHT,       // slides content below header
     paddingBottom: FOOTER_HEIGHT,    // slides content above footer
+    marginTop: -9,    
+    backgroundColor: '#F5F5F7', 
   },
 
   // Stack screens themselves should be transparent — no extra padding needed

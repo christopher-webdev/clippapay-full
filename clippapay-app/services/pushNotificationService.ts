@@ -1,218 +1,212 @@
-// mobile_app/services/pushNotificationService.ts
-
+// services/pushNotificationService.ts  — MOBILE / FRONTEND
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL;
 
-// Configure notification handler
+// ── Configure how notifications are presented when app is in foreground ───────
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
-    shouldSetBadge: true,
+    shouldSetBadge:  true,
   }),
 });
+
+// ── Auth helper ───────────────────────────────────────────────────────────────
+const getAuthToken = async (): Promise<string | null> => {
+  try {
+    if (Platform.OS === 'web') return await AsyncStorage.getItem('userToken');
+    const t = await SecureStore.getItemAsync('userToken');
+    return t ?? await AsyncStorage.getItem('userToken');
+  } catch {
+    return null;
+  }
+};
 
 class PushNotificationService {
   private expoPushToken: string | null = null;
 
-  // Register for push notifications
-  async registerForPushNotificationsAsync(): Promise<string | null> {
-    let token;
+  // ── Set up Android notification channels ──────────────────────────────────
+  private async setupAndroidChannels(): Promise<void> {
+    if (Platform.OS !== 'android') return;
 
+    const channels = [
+      {
+        id:         'default',
+        name:       'General',
+        importance: Notifications.AndroidImportance.HIGH,
+        color:      '#4F46E5',
+      },
+      {
+        id:         'wallet',
+        name:       'Wallet Transactions',
+        importance: Notifications.AndroidImportance.HIGH,
+        color:      '#10B981',
+      },
+      {
+        id:         'deposits',
+        name:       'Deposits',
+        importance: Notifications.AndroidImportance.HIGH,
+        color:      '#4F46E5',
+      },
+      {
+        id:         'withdrawals',
+        name:       'Withdrawals',
+        importance: Notifications.AndroidImportance.HIGH,
+        color:      '#EF4444',
+      },
+      {
+        id:         'campaigns',
+        name:       'Campaigns',
+        importance: Notifications.AndroidImportance.DEFAULT,
+        color:      '#F59E0B',
+      },
+    ];
+
+    for (const ch of channels) {
+      await Notifications.setNotificationChannelAsync(ch.id, {
+        name:              ch.name,
+        importance:        ch.importance,
+        vibrationPattern:  [0, 250, 250, 250],
+        lightColor:        ch.color,
+        sound:             'default',
+        showBadge:         true,
+        enableVibrate:     true,
+      });
+    }
+  }
+
+  // ── Register device for push notifications ────────────────────────────────
+  async registerForPushNotificationsAsync(): Promise<string | null> {
+    // Push notifications require a real device
     if (!Device.isDevice) {
-      console.log('Must use physical device for push notifications');
+      console.log('[Push] Emulator detected — skipping push registration');
       return null;
     }
 
-    // Check permissions
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
+    // 1. Check / request permission
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let finalStatus = existing;
 
-    if (existingStatus !== 'granted') {
+    if (existing !== 'granted') {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
 
     if (finalStatus !== 'granted') {
-      console.log('Failed to get push token for push notification!');
+      console.log('[Push] Permission not granted');
       return null;
     }
 
-    // Get Expo push token
-    token = (await Notifications.getExpoPushTokenAsync({
-      projectId: process.env.EXPO_PROJECT_ID,
-    })).data;
+    // 2. Set up Android channels
+    await this.setupAndroidChannels();
 
-    this.expoPushToken = token;
-
-    // Set up Android channel
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#4F46E5',
-        sound: 'default',
-        showBadge: true,
-        enableVibrate: true,
-      });
-
-      // Wallet notifications channel
-      await Notifications.setNotificationChannelAsync('wallet', {
-        name: 'Wallet Transactions',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#10B981',
-        sound: 'default',
-        showBadge: true,
-        enableVibrate: true,
-      });
-
-      // Deposit notifications channel
-      await Notifications.setNotificationChannelAsync('deposits', {
-        name: 'Deposits',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#4F46E5',
-        sound: 'default',
-        showBadge: true,
-        enableVibrate: true,
-      });
-
-      // Withdrawal notifications channel
-      await Notifications.setNotificationChannelAsync('withdrawals', {
-        name: 'Withdrawals',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#EF4444',
-        sound: 'default',
-        showBadge: true,
-        enableVibrate: true,
-      });
-    }
-
-    // Save token to backend
-    await this.savePushToken(token);
-
-    return token;
-  }
-
-  // Save push token to backend
-  async savePushToken(token: string): Promise<void> {
+    // 3. Get Expo push token
+    //    projectId comes from app.json → extra.eas.projectId via Constants
+    //    or from EXPO_PUBLIC_PROJECT_ID env var
     try {
-      // Get auth token
-      let authToken: string | null = null;
-      if (Platform.OS === 'web') {
-        authToken = await AsyncStorage.getItem('userToken');
-      } else {
-        authToken = await SecureStore.getItemAsync('userToken');
-        if (!authToken) authToken = await AsyncStorage.getItem('userToken');
-      }
+      const projectId =
+        process.env.EXPO_PUBLIC_PROJECT_ID ??
+        // fallback: read from expo Constants at runtime
+        (await import('expo-constants').then(m => m.default.expoConfig?.extra?.eas?.projectId ?? null));
 
-      if (!authToken) return;
-
-      await axios.post(
-        `${API_BASE}/user/push-token`,
-        { token },
-        { headers: { Authorization: `Bearer ${authToken}` } }
+      const tokenData = await Notifications.getExpoPushTokenAsync(
+        projectId ? { projectId } : undefined
       );
+
+      this.expoPushToken = tokenData.data;
+      console.log('[Push] Token registered:', this.expoPushToken);
+
+      // 4. Save token to backend
+      await this.savePushToken(this.expoPushToken);
+
+      return this.expoPushToken;
     } catch (err) {
-      console.error('Failed to save push token:', err);
+      console.error('[Push] Failed to get push token:', err);
+      return null;
     }
   }
 
-  // Schedule local notification (for testing or offline alerts)
-  async scheduleLocalNotification(
-    title: string,
-    body: string,
-    data: any = {},
-    channelId: string = 'default'
-  ): Promise<string> {
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title,
-        body,
-        data,
-        sound: true,
-        badge: 1,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-        channelId,
-      },
-      trigger: null, // Show immediately
-    });
+  // ── Save / update push token on backend ──────────────────────────────────
+  async savePushToken(token: string): Promise<void> {
+    const authToken = await getAuthToken();
+    if (!authToken) return;
 
-    return notificationId;
+    try {
+      const res = await fetch(`${API_BASE}/user/push-token`, {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          Authorization:   `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          token,
+          platform: Platform.OS,
+        }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        console.error('[Push] Save token error:', json.error);
+      }
+    } catch (err) {
+      console.error('[Push] Failed to save token to backend:', err);
+    }
   }
 
-  // Schedule a notification for later
-  async scheduleFutureNotification(
-    title: string,
-    body: string,
-    secondsFromNow: number,
-    data: any = {},
-    channelId: string = 'default'
-  ): Promise<string> {
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title,
-        body,
-        data,
-        sound: true,
-        badge: 1,
-        channelId,
-      },
-      trigger: {
-        seconds: secondsFromNow,
-        channelId,
-      },
-    });
-
-    return notificationId;
-  }
-
-  // Cancel a scheduled notification
-  async cancelNotification(notificationId: string): Promise<void> {
-    await Notifications.cancelScheduledNotificationAsync(notificationId);
-  }
-
-  // Cancel all scheduled notifications
-  async cancelAllNotifications(): Promise<void> {
-    await Notifications.cancelAllScheduledNotificationsAsync();
-  }
-
-  // Get Expo push token
-  getExpoPushToken(): string | null {
-    return this.expoPushToken;
-  }
-
-  // Add listeners for incoming notifications
+  // ── Attach notification listeners ─────────────────────────────────────────
   addNotificationListeners(
-    onReceive: (notification: Notifications.Notification) => void,
-    onResponse: (response: Notifications.NotificationResponse) => void
+    onReceive:  (n: Notifications.Notification) => void,
+    onResponse: (r: Notifications.NotificationResponse) => void
   ): { remove: () => void }[] {
-    const receivedListener = Notifications.addNotificationReceivedListener(onReceive);
-    const responseListener = Notifications.addNotificationResponseReceivedListener(onResponse);
-
+    const recv = Notifications.addNotificationReceivedListener(onReceive);
+    const resp = Notifications.addNotificationResponseReceivedListener(onResponse);
     return [
-      { remove: () => Notifications.removeNotificationSubscription(receivedListener) },
-      { remove: () => Notifications.removeNotificationSubscription(responseListener) },
+      { remove: () => Notifications.removeNotificationSubscription(recv) },
+      { remove: () => Notifications.removeNotificationSubscription(resp) },
     ];
   }
 
-  // Get badge count
+  // ── Badge helpers ─────────────────────────────────────────────────────────
   async getBadgeCount(): Promise<number> {
-    return await Notifications.getBadgeCountAsync();
+    return Notifications.getBadgeCountAsync();
   }
 
-  // Set badge count
   async setBadgeCount(count: number): Promise<boolean> {
-    return await Notifications.setBadgeCountAsync(count);
+    return Notifications.setBadgeCountAsync(Math.max(0, count));
+  }
+
+  async clearBadge(): Promise<boolean> {
+    return Notifications.setBadgeCountAsync(0);
+  }
+
+  // ── Schedule local notification (show immediately) ────────────────────────
+  async scheduleLocalNotification(
+    title:     string,
+    body:      string,
+    data:      Record<string, any> = {},
+    channelId: string = 'default'
+  ): Promise<string> {
+    return Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        data,
+        sound:    true,
+        badge:    1,
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+        ...(Platform.OS === 'android' ? { channelId } : {}),
+      },
+      trigger: null, // fire immediately
+    });
+  }
+
+  getExpoPushToken(): string | null {
+    return this.expoPushToken;
   }
 }
 

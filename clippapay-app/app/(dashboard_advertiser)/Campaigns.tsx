@@ -339,7 +339,7 @@ export default function CampaignsScreen() {
 }
 
 const S = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#F5F5F7' },
+  screen: { flex: 1, backgroundColor: '#F5F5F7', },
 
   // Header — paddingTop: 16, no negative marginTop
   hdr:       { paddingTop: 16, paddingBottom: 20, paddingHorizontal: 20 },

@@ -52,8 +52,8 @@ const API_BASE = process.env.EXPO_PUBLIC_API_URL;
 const MIN_NGN_BUDGET  = 20_000;
 const MIN_USDT_BUDGET = 10;
 
-const NGN_PER_THOUSAND_VIEWS  = 3000;
-const USDT_PER_THOUSAND_VIEWS = 1.85;
+const NGN_PER_THOUSAND_VIEWS  = 1400;
+const USDT_PER_THOUSAND_VIEWS = 1.00;
 
 const PLATFORM_OPTIONS = [
   { id: 'tiktok',     label: 'TikTok',           icon: 'logo-tiktok'     },
