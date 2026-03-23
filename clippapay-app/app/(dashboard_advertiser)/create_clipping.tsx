@@ -154,9 +154,12 @@ export default function CreateClippingCampaign() {
             form.videoUrl.includes('youtube.com') ||
             form.videoUrl.includes('youtu.be') ||
             form.videoUrl.includes('vimeo.com') ||
+            form.videoUrl.includes('kick.com') ||
+            form.videoUrl.includes('twitch.com') ||
+            form.videoUrl.includes('onedrive.com') ||
             form.videoUrl.includes('drive.google.com');
           if (!isValid)
-            newErrors.videoUrl = 'Please enter a valid video URL (YouTube, Vimeo, Google Drive, or direct MP4)';
+            newErrors.videoUrl = 'Please enter a valid video URL (YouTube, Vimeo, Twitch, Kick, OneDrive, Google Drive, or direct MP4)';
         } catch {
           newErrors.videoUrl = 'Please enter a valid URL starting with https://';
         }
