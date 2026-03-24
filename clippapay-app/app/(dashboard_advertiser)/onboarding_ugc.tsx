@@ -196,7 +196,7 @@ export default function OnboardingUGC() {
           </View>
 
           {/* Sample Videos */}
-          <View style={styles.card}>
+          {/* <View style={styles.card}>
             <View style={styles.cardHeader}>
               <View style={[styles.cardIcon, { backgroundColor: '#FCE7F3' }]}>
                 <Ionicons name="play-circle" size={20} color="#DB2777" />
@@ -233,7 +233,7 @@ export default function OnboardingUGC() {
                 </View>
               </TouchableOpacity>
             ))}
-          </View>
+          </View> */}
 
           {/* Why Choose UGC */}
           <View style={styles.card}>
@@ -291,7 +291,7 @@ export default function OnboardingUGC() {
               </TouchableOpacity>
 
               <Text style={styles.ctaFootnote}>
-                No commitment • Set your own budget • Pay per approved video
+                No commitment • Set your own creator • Pay per approved video
               </Text>
             </LinearGradient>
           </View>

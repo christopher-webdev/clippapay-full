@@ -38,7 +38,7 @@ export default function Onboarding2() {
   return (
     <SafeAreaView style={styles.safe} {...panResponder.panHandlers}>
       <ImageBackground
-        source={require('../../assets/images/5.png')}
+        source={require('../../assets/images/img_5.jpg')}
         style={styles.background}
         resizeMode="cover"
       >

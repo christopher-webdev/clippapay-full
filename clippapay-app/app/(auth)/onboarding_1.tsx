@@ -20,7 +20,7 @@ export default function Onboarding1() {
   return (
     <SafeAreaView style={styles.safe}>
       <ImageBackground
-        source={require('../../assets/images/4.png')}
+        source={require('../../assets/images/img_4.jpg')}
         style={styles.background}
         resizeMode="cover"
       >

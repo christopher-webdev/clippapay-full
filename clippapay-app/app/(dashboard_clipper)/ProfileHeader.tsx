@@ -15,10 +15,8 @@ import { useNotifications } from '../../hooks/useNotifications';
 const API_BASE      = process.env.EXPO_PUBLIC_API_URL;
 const DEFAULT_IMAGE = require('../../assets/images/user-default.jpg');
 
-// ── Exported so _layout.tsx can consume it ───────────────────────────────────
 export const HEADER_HEIGHT = 72;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface UserData {
   _id: string;
   email: string;
@@ -33,7 +31,6 @@ interface UserData {
 
 interface Props { onNotificationPress?: () => void }
 
-// ─── Role config ──────────────────────────────────────────────────────────────
 const ROLE_CFG: Record<string, { label: string; color: string; bg: string }> = {
   advertiser:  { label: 'ADVERTISER', color: '#EF4444', bg: '#FEF2F2' },
   clipper:     { label: 'CREATOR',    color: '#10B981', bg: '#ECFDF5' },
@@ -42,7 +39,6 @@ const ROLE_CFG: Record<string, { label: string; color: string; bg: string }> = {
   platform:    { label: 'PLATFORM',   color: '#8B5CF6', bg: '#F5F3FF' },
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 const getToken = async () => {
   if (Platform.OS === 'web') return AsyncStorage.getItem('userToken');
   return (await SecureStore.getItemAsync('userToken')) || (await AsyncStorage.getItem('userToken'));
@@ -53,7 +49,6 @@ const getGreeting = () => {
   return h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening';
 };
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function ProfileHeader({ onNotificationPress }: Props) {
   const router = useRouter();
   const [user, setUser]           = useState<UserData | null>(null);
@@ -86,7 +81,6 @@ export default function ProfileHeader({ onNotificationPress }: Props) {
 
   useFocusEffect(useCallback(() => { load(); refresh(); }, []));
 
-  // ── Derived ─────────────────────────────────────────────────────────────────
   const displayName = (() => {
     if (!user) return 'Guest';
     if (user.company) return user.company;
@@ -113,6 +107,10 @@ export default function ProfileHeader({ onNotificationPress }: Props) {
       clipper:    '/(dashboard_clipper)/clipper_profile_edit',
     };
     router.push((routes[user?.role ?? ''] ?? '/(dashboard_clipper)/clipper_profile_edit') as any);
+  };
+
+  const goSettings = () => {
+    router.push('/(dashboard_clipper)/settings' as any);
   };
 
   if (loading) {
@@ -146,6 +144,13 @@ export default function ProfileHeader({ onNotificationPress }: Props) {
         </View>
       </TouchableOpacity>
 
+      {/* Settings icon */}
+      <TouchableOpacity style={S.iconWrap} onPress={goSettings} activeOpacity={0.75}>
+        <View style={S.iconInner}>
+          <Ionicons name="settings-outline" size={20} color="#374151" />
+        </View>
+      </TouchableOpacity>
+
       {/* Notification bell */}
       <TouchableOpacity style={S.bellWrap} onPress={goNotifs} activeOpacity={0.75}>
         <View style={S.bellInner}>
@@ -161,9 +166,7 @@ export default function ProfileHeader({ onNotificationPress }: Props) {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const S = StyleSheet.create({
-  // Fixed 72px height — matches _layout.tsx paddingTop: 72
   container: {
     height: HEADER_HEIGHT,
     backgroundColor: '#FFF',
@@ -180,8 +183,6 @@ const S = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-
-  // Avatar
   avatarWrap: { marginRight: 12 },
   avatar: {
     width: 44,
@@ -191,16 +192,23 @@ const S = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#A7F3D0',
   },
-
-  // Text block
   textWrap:  { flex: 1, justifyContent: 'center' },
   greeting:  { fontSize: 11, color: '#9CA3AF', fontWeight: '500', marginBottom: 2 },
   nameRow:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
   name:      { fontSize: 16, fontWeight: '700', color: '#0F0F1A', flexShrink: 1 },
   rolePill:  { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 20, flexShrink: 0 },
   roleLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
-
-  // Bell
+  iconWrap:  { marginLeft: 8 },
+  iconInner: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F9FAFB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+  },
   bellWrap:  { marginLeft: 8 },
   bellInner: {
     width: 40,

@@ -258,7 +258,7 @@ export default function OnboardingClipping() {
           </View>
 
           {/* Sample Clips */}
-          <View style={styles.card}>
+          {/* <View style={styles.card}>
             <View style={styles.cardHeader}>
               <View style={[styles.cardIcon, { backgroundColor: '#FFF1EE' }]}>
                 <Ionicons name="play-circle" size={20} color="#FF6B35" />
@@ -301,7 +301,7 @@ export default function OnboardingClipping() {
                 </View>
               </TouchableOpacity>
             ))}
-          </View>
+          </View> */}
 
           {/* Perfect For */}
           <View style={styles.card}>
@@ -351,7 +351,7 @@ export default function OnboardingClipping() {
               </TouchableOpacity>
 
               <Text style={styles.ctaFootnote}>
-                Set your budget • Upload your video • Start getting clips in 24h
+                Set budget • Provide video/channel url • Start getting clips
               </Text>
             </LinearGradient>
           </View>

@@ -165,23 +165,25 @@ class PushNotificationService {
   ): { remove: () => void }[] {
     const recv = Notifications.addNotificationReceivedListener(onReceive);
     const resp = Notifications.addNotificationResponseReceivedListener(onResponse);
+    // expo-notifications ≥0.28: subscriptions have a .remove() method directly.
+    // Notifications.removeNotificationSubscription() was removed in that version.
     return [
-      { remove: () => Notifications.removeNotificationSubscription(recv) },
-      { remove: () => Notifications.removeNotificationSubscription(resp) },
+      { remove: () => recv.remove() },
+      { remove: () => resp.remove() },
     ];
   }
 
   // ── Badge helpers ─────────────────────────────────────────────────────────
   async getBadgeCount(): Promise<number> {
-    return Notifications.getBadgeCountAsync();
+    return Notifications.getBadgeAsync();
   }
 
   async setBadgeCount(count: number): Promise<boolean> {
-    return Notifications.setBadgeCountAsync(Math.max(0, count));
+    return Notifications.setBadgeAsync(Math.max(0, count));
   }
 
   async clearBadge(): Promise<boolean> {
-    return Notifications.setBadgeCountAsync(0);
+    return Notifications.setBadgeAsync(0);
   }
 
   // ── Schedule local notification (show immediately) ────────────────────────

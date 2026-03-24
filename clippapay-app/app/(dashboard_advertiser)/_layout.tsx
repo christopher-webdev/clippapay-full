@@ -1,17 +1,18 @@
 // app/(dashboard_advertiser)/_layout.tsx
 import { Stack } from 'expo-router';
-import { View, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet, Dimensions, Platform } from 'react-native';
 import ProfileHeader from './ProfileHeader';
 import Footer from './Footer';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NotificationsProvider } from '../../hooks/useNotifications';
+import React from 'react';
 
 const { width } = Dimensions.get('window');
 const scale = width / 428;
 
 // ProfileHeader is fixed at 72px. Footer is ~98px * scale.
 // stackContent paddingTop = 72 (header), paddingBottom = footer height.
-const HEADER_HEIGHT = 72;
+const HEADER_HEIGHT = 42;
 const FOOTER_HEIGHT = Math.round(98 * scale);
 
 export default function DashboardLayout() {
@@ -42,11 +43,11 @@ export default function DashboardLayout() {
             <Stack.Screen name="my_clipping_campaigns"   options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="WalletScreen"            options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="Profile"                 options={{ animation: 'slide_from_right' }} />
+            
 
             {/* ── Campaign creation ── */}
-            <Stack.Screen name="create-clipping"         options={{ animation: 'slide_from_bottom' }} />
             <Stack.Screen name="create_clipping"         options={{ animation: 'slide_from_bottom' }} />
-            <Stack.Screen name="create-ugc"              options={{ animation: 'slide_from_bottom' }} />
+            <Stack.Screen name="CreateUgc"              options={{ animation: 'slide_from_bottom' }} />
 
             {/* ── Onboarding ── */}
             <Stack.Screen name="onboarding_ugc"          options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
@@ -99,8 +100,7 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
     paddingTop: HEADER_HEIGHT,       // slides content below header
-    paddingBottom: FOOTER_HEIGHT,    // slides content above footer
-    marginTop: -9,    
+    paddingBottom: FOOTER_HEIGHT,    // slides content above footer  
     backgroundColor: '#F5F5F7', 
   },
 
@@ -109,6 +109,8 @@ const styles = StyleSheet.create({
   stackContent: {
     flex: 1,
     backgroundColor: '#F5F5F7',
+    marginTop: Platform.OS === 'android' ? 30 : 0,
+
   },
 
   // Footer — fixed at bottom, full width

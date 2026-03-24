@@ -46,7 +46,7 @@ export default function CreateUGCsCard_2() {
 
           {/* Megaphone guy – positioned on right, overlapping */}
           <Image
-            source={require('../../assets/images/40.png')}
+            source={require('../../assets/images/img_40.png')}
             style={styles.megaphone}
             resizeMode="contain"
           />

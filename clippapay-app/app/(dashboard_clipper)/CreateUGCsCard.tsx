@@ -47,7 +47,7 @@ export default function CreateUGCsCard() {
 
           {/* Megaphone guy – positioned on right, overlapping */}
           <Image
-            source={require('../../assets/images/38.png')}
+            source={require('../../assets/images/img_38.png')}
             style={styles.megaphone}
             resizeMode="contain"
           />
@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
     width: 390 * scale,
     height: 230 * scale,
     alignSelf: 'center',
-    marginTop: 50 * scale, // spacing from "Ready to launch..." text
+    marginTop: 0 * scale, // spacing from "Ready to launch..." text
   },
   cardWrapper: {
     flex: 1,
