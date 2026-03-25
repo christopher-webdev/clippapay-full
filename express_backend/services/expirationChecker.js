@@ -108,11 +108,12 @@ async function checkExpiredOffers() {
 }
 
 // ─── 2. Overdue delivery ──────────────────────────────────────────────────────
-// Clipper accepted the job but missed the 48h delivery deadline.
+// Clipper accepted the job but missed the 72h delivery deadline.
 // Policy: auto-fail, refund advertiser's escrow.
 async function checkOverdueDeliveries() {
   const overdue = await Application.find({
-    status: { $in: ['accepted', 'revision_requested'] },
+    // status: { $in: ['accepted', 'revision_requested'] },
+    status: { $in: ['accepted',] },
     submissionDeadline: { $lt: new Date() },
   }).populate('campaign');
 
@@ -169,10 +170,10 @@ async function checkOverdueDeliveries() {
 }
 
 // ─── 3. Auto-complete (NEW) ───────────────────────────────────────────────────
-// Creator delivered the video but advertiser didn't review within 72 hours.
+// Creator delivered the video but advertiser didn't review within 120 hours.
 // Pay the creator automatically — they did the work.
 async function checkAutoComplete() {
-  const cutoff = new Date(Date.now() - 72 * 60 * 60 * 1000); // 72h ago
+  const cutoff = new Date(Date.now() - 120 * 60 * 60 * 1000); // 120h ago
 
   const campaigns = await Campaign.find({
     status: { $in: ['video_submitted', 'revision_submitted'] },

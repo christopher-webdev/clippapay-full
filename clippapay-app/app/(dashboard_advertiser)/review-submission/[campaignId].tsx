@@ -491,7 +491,7 @@ export default function ReviewSubmissionScreen() {
               <View style={S.maxRevWarning}>
                 <Ionicons name="alert-circle-outline" size={16} color="#D97706" />
                 <Text style={S.maxRevWarningTxt}>
-                  Maximum revisions reached. If you don't act within 72 hours, payment is automatically released to the creator.
+                  Maximum revisions reached. If you don't act within 120 hours, payment is automatically released to the creator.
                 </Text>
               </View>
             )}
@@ -579,7 +579,7 @@ export default function ReviewSubmissionScreen() {
             <ScrollView style={{ padding: 20 }} keyboardShouldPersistTaps="handled">
               <View style={M.tipBox}>
                 <Ionicons name="bulb-outline" size={16} color="#D97706" />
-                <Text style={M.tipTxt}>Be specific and constructive. The creator will see exactly what you write here and has 48 hours to resubmit.</Text>
+                <Text style={M.tipTxt}>Be specific and constructive. The creator will see exactly what you write here and has to resubmit.</Text>
               </View>
 
               <Text style={M.fieldLbl}>What needs to change? <Text style={{ color: '#EF4444' }}>*</Text></Text>

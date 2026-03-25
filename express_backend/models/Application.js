@@ -114,7 +114,7 @@ applicationSchema.methods.acceptOffer = async function () {
 
   this.status             = 'accepted';
   this.acceptedAt         = new Date();
-  this.submissionDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000); // +48 hours
+  this.submissionDeadline = new Date(Date.now() + 72 * 60 * 60 * 1000); // +72 hours
   await this.save();
 
   // NOW reject all other pending applicants — the job is taken

@@ -31,7 +31,9 @@ interface Proof {
 }
 interface Submission {
   _id: string;
-  clipper: { _id: string; firstName?: string; lastName?: string; email: string };
+  // clipper may be null if the account was deleted from the DB.
+  // We preserve the submission so no proof or earnings data is lost.
+  clipper: { _id: string; firstName?: string; lastName?: string; email: string } | null;
   proofs: Proof[];
   rewardAmount: number;
   createdAt: string;
@@ -60,8 +62,16 @@ interface Campaign {
 const fmtMoney  = (n: number, cur: 'NGN' | 'USDT') =>
   cur === 'NGN' ? `₦${(n || 0).toLocaleString()}` : `$${(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
-const clipperName = (c: Submission['clipper']) =>
-  c.firstName ? `${c.firstName} ${c.lastName || ''}`.trim() : c.email;
+/**
+ * Returns a display name for a clipper.
+ * If clipper is null/undefined (e.g. the account was deleted from the DB),
+ * we fall back to "Unknown Clipper" rather than crashing.
+ */
+const clipperName = (c: Submission['clipper']): string => {
+  if (!c) return 'Unknown Clipper';
+  if (c.firstName) return `${c.firstName} ${c.lastName || ''}`.trim();
+  return c.email || 'Unknown Clipper';
+};
 
 const PROOF_STATUS = {
   pending:  { label: 'Pending',  color: '#F59E0B', bg: '#FFFBEB', icon: 'time-outline'            },
@@ -102,12 +112,13 @@ export default function ClippingCampaignDetailScreen() {
 
       const [campRes, subRes] = await Promise.all([
         axios.get<Campaign>(`${API_BASE}/campaigns/clipping/${id}`, { headers }),
-        // Fetch all submissions for this campaign via admin/clipping route
         axios.get<Submission[]>(`${API_BASE}/campaigns/clipping/${id}/submissions`, { headers })
-          .catch(() => ({ data: [] as Submission[] })), // graceful if route not yet wired
+          .catch(() => ({ data: [] as Submission[] })),
       ]);
 
       setCampaign(campRes.data);
+      // Keep all submissions — even those whose clipper is null (deleted account).
+      // The UI renders them as "Unknown Clipper" so no proof/view data is lost.
       setSubmissions(subRes.data || []);
     } catch (err) {
       console.error('load detail:', err);
@@ -183,7 +194,6 @@ export default function ClippingCampaignDetailScreen() {
   const remaining = campaign.budget - (campaign.totalSpent || 0);
   const campCfg   = CAMPAIGN_STATUS[campaign.status] || CAMPAIGN_STATUS.active;
 
-  // Aggregate proof stats
   const allProofs       = submissions.flatMap((s) => s.proofs);
   const approvedProofs  = allProofs.filter((p) => p.status === 'approved');
   const pendingProofs   = allProofs.filter((p) => p.status === 'pending');
@@ -372,21 +382,34 @@ function ClippersTab({ submissions, currency }: { submissions: Submission[]; cur
   return (
     <>
       {submissions.map((sub) => {
-        const approved = sub.proofs.filter((p) => p.status === 'approved');
-        const pending  = sub.proofs.filter((p) => p.status === 'pending');
+        const approved      = sub.proofs.filter((p) => p.status === 'approved');
+        const pending       = sub.proofs.filter((p) => p.status === 'pending');
         const totalVerified = approved.reduce((s, p) => s + (p.verifiedViews || 0), 0);
+
+        // clipper may be null if the account was deleted from the DB.
+        // We still show the submission so no proof or earnings data is lost.
+        const isUnknown = !sub.clipper;
+        const name      = clipperName(sub.clipper);
+        const initials  = name.slice(0, 2).toUpperCase();
 
         return (
           <View key={sub._id} style={styles.clipperCard}>
             {/* Clipper header */}
             <View style={styles.clipperHeader}>
-              <View style={styles.clipperAvatar}>
-                <Text style={styles.clipperAvatarTxt}>
-                  {clipperName(sub.clipper).slice(0, 2).toUpperCase()}
-                </Text>
+              <View style={[styles.clipperAvatar, isUnknown && styles.clipperAvatarUnknown]}>
+                <Text style={styles.clipperAvatarTxt}>{initials}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.clipperName}>{clipperName(sub.clipper)}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                  <Text style={[styles.clipperName, isUnknown && styles.clipperNameUnknown]}>
+                    {name}
+                  </Text>
+                  {isUnknown && (
+                    <View style={styles.unknownBadge}>
+                      <Text style={styles.unknownBadgeTxt}>Account removed</Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={styles.clipperDate}>Joined {new Date(sub.createdAt).toLocaleDateString()}</Text>
               </View>
               <View style={styles.clipperEarned}>
@@ -535,8 +558,12 @@ const styles = StyleSheet.create({
   clipperCard:   { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
   clipperHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   clipperAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FF6B35', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  clipperAvatarUnknown: { backgroundColor: '#9CA3AF' },
   clipperAvatarTxt: { fontSize: 15, fontWeight: '700', color: '#FFF' },
   clipperName:   { fontSize: 14, fontWeight: '700', color: '#1F2937' },
+  clipperNameUnknown: { color: '#9CA3AF', fontStyle: 'italic' },
+  unknownBadge:  { backgroundColor: '#F3F4F6', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  unknownBadgeTxt: { fontSize: 10, color: '#9CA3AF' },
   clipperDate:   { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
   clipperEarned: { alignItems: 'flex-end' },
   clipperEarnedVal: { fontSize: 15, fontWeight: '800', color: '#10B981' },
