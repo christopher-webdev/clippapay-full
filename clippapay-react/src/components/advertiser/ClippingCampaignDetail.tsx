@@ -20,7 +20,7 @@ interface Proof {
 }
 interface Submission {
   _id: string;
-  clipper: { _id: string; firstName?: string; lastName?: string; email: string };
+  clipper: { _id: string; firstName?: string; lastName?: string; email: string } | null;
   proofs: Proof[];
   rewardAmount: number;
   createdAt: string;
@@ -49,8 +49,16 @@ interface Campaign {
 const fmtMoney = (n: number, cur: 'NGN' | 'USDT') =>
   cur === 'NGN' ? `₦${(n || 0).toLocaleString()}` : `$${(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
-const clipperName = (c: Submission['clipper']) =>
-  c.firstName ? `${c.firstName} ${c.lastName || ''}`.trim() : c.email;
+/**
+ * Returns a display name for a clipper.
+ * If clipper is null/undefined (e.g. account was deleted from the DB),
+ * we fall back to "Unknown Clipper" rather than crashing.
+ */
+const clipperName = (c: Submission['clipper']): string => {
+  if (!c) return 'Unknown Clipper';
+  if (c.firstName) return `${c.firstName} ${c.lastName || ''}`.trim();
+  return c.email || 'Unknown Clipper';
+};
 
 const getToken = () => localStorage.getItem('token');
 
@@ -93,6 +101,8 @@ export default function ClippingCampaignDetail() {
       ]);
 
       setCampaign(campRes.data);
+      // Keep all submissions — even those whose clipper is null (deleted account).
+      // The UI renders them as "Unknown Clipper" so no proof/view data is lost.
       setSubmissions(subRes.data || []);
     } catch (err) {
       console.error('load detail:', err);
@@ -368,20 +378,35 @@ function ClippersTab({ submissions, currency }: { submissions: Submission[]; cur
   return (
     <div className="space-y-3">
       {submissions.map((sub) => {
-        const approved     = sub.proofs.filter((p) => p.status === 'approved');
-        const pending      = sub.proofs.filter((p) => p.status === 'pending');
+        const approved      = sub.proofs.filter((p) => p.status === 'approved');
+        const pending       = sub.proofs.filter((p) => p.status === 'pending');
         const totalVerified = approved.reduce((s, p) => s + (p.verifiedViews || 0), 0);
-        const initials     = clipperName(sub.clipper).slice(0, 2).toUpperCase();
+
+        // clipper may be null if the account was deleted from the DB.
+        // We still show the submission so no proof or earnings data is lost.
+        const isUnknown = !sub.clipper;
+        const name      = clipperName(sub.clipper);
+        const initials  = name.slice(0, 2).toUpperCase();
 
         return (
           <div key={sub._id} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
             {/* Clipper header */}
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-11 h-11 rounded-full bg-orange-500 flex items-center justify-center shrink-0">
+              <div className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${isUnknown ? 'bg-gray-300' : 'bg-orange-500'}`}>
                 <span className="text-white font-bold text-sm">{initials}</span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-bold text-gray-900 text-sm">{clipperName(sub.clipper)}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className={`font-bold text-sm ${isUnknown ? 'text-gray-400 italic' : 'text-gray-900'}`}>{name}</p>
+                  {isUnknown && (
+                    <span
+                      title="This clipper's account no longer exists in the database. Their submissions and earnings are preserved."
+                      className="text-[10px] bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full cursor-default"
+                    >
+                      Account removed
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-400 mt-0.5">Joined {new Date(sub.createdAt).toLocaleDateString()}</p>
               </div>
               <div className="text-right">

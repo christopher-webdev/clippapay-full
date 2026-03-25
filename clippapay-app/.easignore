@@ -1,0 +1,15 @@
+node_modules
+.git
+.gitignore
+.expo
+dist
+build
+android
+ios
+*.log
+*.apk
+*.aab
+.env
+.env.*
+coverage
+.vscode
