@@ -117,9 +117,7 @@ const styles = StyleSheet.create({
   footerContainer: {
     backgroundColor: '#FFF',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
-    elevation: 6,
+    marginBottom: -50,
+
   },
 });

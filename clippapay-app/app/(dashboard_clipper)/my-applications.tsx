@@ -124,6 +124,7 @@ export default function MyApplicationsScreen() {
       case 'selected':           return p('/(dashboard_clipper)/accept-offer/[applicationId]');
       case 'accepted':           return p('/(dashboard_clipper)/submit-video/[applicationId]');
       case 'revision_requested': return p('/(dashboard_clipper)/review-revisions/[applicationId]');
+      case 'submitted':          return  p('/(dashboard_clipper)/submission-pending/[applicationId]');
       case 'approved':           return p('/(dashboard_clipper)/completed/[applicationId]');
       // declined/expired — open accept-offer which shows the correct ended state
       case 'declined':           return p('/(dashboard_clipper)/accept-offer/[applicationId]');

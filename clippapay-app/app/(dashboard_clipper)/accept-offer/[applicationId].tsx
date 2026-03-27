@@ -96,7 +96,7 @@ export default function AcceptOfferScreen() {
     const amount = `${sym}${app.paymentAmount?.toLocaleString()} ${app.paymentCurrency}`;
     Alert.alert(
       'Accept Offer',
-      `Accept this job for ${amount}?\n\nYou'll have 48 hours to deliver the video.`,
+      `Accept this job for ${amount}?\n\nYou'll have 72 hours to deliver the video.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Accept', onPress: async () => {
@@ -227,7 +227,7 @@ export default function AcceptOfferScreen() {
                 'Advertiser reviews all applications and picks one creator',
                 'If chosen, you have 2 hours to accept or decline',
                 'If you don\'t respond or decline, the advertiser picks someone else',
-                'Once you accept, deliver your video within 48 hours',
+                'Once you accept, deliver your video within 72 hours',
               ].map((step, i) => (
                 <View key={i} style={S.howRow}>
                   <View style={S.howNum}><Text style={S.howNumTxt}>{i + 1}</Text></View>
@@ -387,7 +387,7 @@ export default function AcceptOfferScreen() {
           <View style={S.commitCard}>
             <Text style={S.commitTitle}>By accepting, you commit to:</Text>
             {[
-              '📹  Delivering the video within 48 hours',
+              '📹  Delivering the video within 72 hours',
               '✅  Following the campaign brief and creative direction',
               '🔄  Up to 3 revision requests if needed',
               '⏰  Responding to feedback within reasonable time',
