@@ -6,6 +6,8 @@
 //  2. Dispute feature added — either party can raise a dispute, admin is notified
 //  3. After 3 revisions, Request Revision hidden; must Approve or Dispute
 //  4. Auto-payment still runs if advertiser does nothing (handled by expirationChecker)
+//  5. Full null-guard on applicationId — if the Application document was deleted
+//     from the DB, the populated field comes back null. Every access is now safe.
 //
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -40,30 +42,32 @@ const fmtDate = (d?: string) =>
 const fmtDateShort = (d?: string) =>
   !d ? '—' : new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
+type ApplicationRef = {
+  _id: string;
+  proposedRateNGN?: number;
+  proposedRateUSDT?: number;
+  paymentCurrency?: 'NGN' | 'USDT';
+  paymentAmount?: number;
+  revisionCount: number;
+  status?: string;
+  disputeRaised?: boolean;
+} | null; // ← explicitly typed as nullable
+
 type VideoSubmission = {
   _id: string;
-  applicationId: {
-    _id: string;
-    proposedRateNGN?: number;
-    proposedRateUSDT?: number;
-    paymentCurrency?: 'NGN' | 'USDT';
-    paymentAmount?: number;
-    revisionCount: number;   // ← real count lives here on the Application model
-    status?: string;
-    disputeRaised?: boolean;
-  };
+  applicationId: ApplicationRef;
   clipperId: {
     _id: string;
     firstName: string;
     lastName: string;
     profileImage: string | null;
     rating: number;
-  };
+  } | null; // ← also nullable if user deleted
   videoUrl: string;
   thumbnailUrl: string;
   submissionDate: string;
   status: 'pending_review' | 'approved' | 'revision_requested';
-  revisionCount: number;   // Campaign subdoc — NOT updated on revision; don't use for logic
+  revisionCount: number;
   feedback: Array<{ message: string; createdAt: string }>;
   approvedAt?: string;
 };
@@ -81,7 +85,7 @@ type CampaignData = {
   selectedClipper?: {
     _id: string; firstName: string; lastName: string;
     profileImage: string | null; rating: number;
-  };
+  } | null;
   finalVideo?: { url: string; thumbnailUrl?: string; approvedAt: string };
 };
 
@@ -90,6 +94,29 @@ const SUB_STATUS: Record<string, { label: string; color: string; bg: string; ico
   approved:          { label: 'Approved ✓',      color: '#059669', bg: '#ECFDF5', icon: 'checkmark-circle-outline' },
   revision_requested:{ label: 'Revision Sent',   color: '#D97706', bg: '#FFFBEB', icon: 'refresh-outline'          },
 };
+
+// ─── Safe accessor helpers ────────────────────────────────────────────────────
+// These prevent crashes when applicationId or clipperId is null in any submission.
+
+/** Safely read revisionCount from the Application ref. Falls back to the
+ *  Campaign subdoc value, then 0. Never throws on null. */
+const safeRevisionCount = (sub: VideoSubmission): number =>
+  sub.applicationId?.revisionCount ?? sub.revisionCount ?? 0;
+
+/** Safely read applicationId._id. Returns null if applicationId is null. */
+const safeAppId = (sub: VideoSubmission | null | undefined): string | null =>
+  sub?.applicationId?._id ?? null;
+
+/** Safely read payment info from the Application ref. */
+const safePayment = (sub: VideoSubmission | null | undefined) => ({
+  currency: sub?.applicationId?.paymentCurrency ?? null,
+  amount:   sub?.applicationId?.paymentAmount   ?? null,
+  symbol:   sub?.applicationId?.paymentCurrency === 'NGN' ? '₦' : '$',
+});
+
+/** Returns true if ANY submission has a disputed application or flag. */
+const isAnyDisputed = (subs: VideoSubmission[]): boolean =>
+  subs.some(s => s.applicationId?.status === 'disputed' || s.applicationId?.disputeRaised);
 
 export default function ReviewSubmissionScreen() {
   const { campaignId } = useLocalSearchParams<{ campaignId: string }>();
@@ -160,10 +187,13 @@ export default function ReviewSubmissionScreen() {
   const handleRevision = async () => {
     if (!feedback.trim()) { Alert.alert('Required', 'Please describe what needs to change.'); return; }
     if (!selected) return;
+    const appId = safeAppId(selected);
+    if (!appId) { Alert.alert('Error', 'Application reference is missing. Please reload.'); return; }
+
     setSendingRev(true);
     try {
       const token = await getToken();
-      const res   = await fetch(`${API_URL}/applications/${selected.applicationId._id}/revision`, {
+      const res   = await fetch(`${API_URL}/applications/${appId}/revision`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ feedback: feedback.trim() }),
@@ -183,17 +213,20 @@ export default function ReviewSubmissionScreen() {
   // ── Approve ─────────────────────────────────────────────────────────────────
   const handleApprove = async () => {
     if (!selected) return;
+    const appId = safeAppId(selected);
+    if (!appId) { Alert.alert('Error', 'Application reference is missing. Please reload.'); return; }
+
     setApproving(true);
     try {
       const token = await getToken();
-      const res   = await fetch(`${API_URL}/applications/${selected.applicationId._id}/approve`, {
+      const res   = await fetch(`${API_URL}/applications/${appId}/approve`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
-      const isNGN = selected.applicationId.paymentCurrency === 'NGN';
-      const amt   = `${isNGN ? '₦' : '$'}${selected.applicationId.paymentAmount?.toLocaleString()} ${selected.applicationId.paymentCurrency}`;
+      const pay   = safePayment(selected);
+      const amt   = pay.amount ? `${pay.symbol}${pay.amount.toLocaleString()} ${pay.currency}` : 'the agreed amount';
       setApproveModal(false);
       setDoneType('approve');
       setDoneMsg(`Payment of ${amt} has been released to the creator. Your campaign is now complete!`);
@@ -207,8 +240,9 @@ export default function ReviewSubmissionScreen() {
   // ── Dispute ─────────────────────────────────────────────────────────────────
   const handleDispute = async () => {
     if (!disputeReason.trim()) { Alert.alert('Required', 'Please describe the issue.'); return; }
-    const appId = pendingSub?.applicationId?._id;
-    if (!appId) return;
+    const appId = safeAppId(pendingSub);
+    if (!appId) { Alert.alert('Error', 'Application reference is missing. Please reload.'); return; }
+
     setRaisingDispute(true);
     try {
       const token = await getToken();
@@ -229,7 +263,7 @@ export default function ReviewSubmissionScreen() {
     } finally { setRaisingDispute(false); }
   };
 
-  // ── Loading/error states ────────────────────────────────────────────────────
+  // ── Loading / error ─────────────────────────────────────────────────────────
   if (loading) {
     return (
       <SafeAreaView style={S.safe}>
@@ -255,19 +289,21 @@ export default function ReviewSubmissionScreen() {
     );
   }
 
-  const pendingSub    = campaign.videoSubmissions?.find(s => s.status === 'pending_review');
-  const isCompleted   = !!campaign.finalVideo || campaign.status === 'completed';
-  const isDisputed    = campaign.videoSubmissions?.some(s => s.applicationId?.status === 'disputed' || s.applicationId?.disputeRaised);
+  const pendingSub  = campaign.videoSubmissions?.find(s => s.status === 'pending_review') ?? null;
+  const isCompleted = !!campaign.finalVideo || campaign.status === 'completed';
+  const isDisputed  = isAnyDisputed(campaign.videoSubmissions ?? []);
 
-  // ── CRITICAL FIX: read revisionCount from Application (applicationId.revisionCount)
-  // not from Campaign.videoSubmissions[].revisionCount which is never updated on revision.
-  const realRevisionCount = pendingSub?.applicationId?.revisionCount ?? pendingSub?.revisionCount ?? 0;
+  // SAFE: use helper — never crashes if applicationId is null
+  const realRevisionCount = safeRevisionCount(pendingSub ?? { revisionCount: 0 } as VideoSubmission);
   const revisionsLeft     = Math.max(0, 3 - realRevisionCount);
 
-  const payAmt      = selected?.applicationId?.paymentAmount || campaign.paymentAmount;
-  const payCur      = selected?.applicationId?.paymentCurrency || campaign.paymentCurrency;
-  const paySymbol   = payCur === 'NGN' ? '₦' : '$';
-  const clipper     = campaign.selectedClipper || selected?.clipperId;
+  // Payment display — safe even if applicationId is null
+  const pay       = safePayment(selected);
+  const payAmt    = pay.amount    ?? campaign.paymentAmount;
+  const payCur    = pay.currency  ?? campaign.paymentCurrency;
+  const paySymbol = payCur === 'NGN' ? '₦' : '$';
+
+  const clipper     = campaign.selectedClipper ?? selected?.clipperId ?? null;
   const clipperName = clipper ? `${clipper.firstName} ${clipper.lastName}` : 'Creator';
 
   return (
@@ -391,6 +427,8 @@ export default function ReviewSubmissionScreen() {
               const isSelected = selected?._id === sub._id;
               const vidThumb   = toUrl(sub.thumbnailUrl);
               const isPending  = sub.status === 'pending_review';
+              // Safe: use helper — never crashes if applicationId is null
+              const subRevCount = safeRevisionCount(sub);
 
               return (
                 <TouchableOpacity
@@ -405,8 +443,8 @@ export default function ReviewSubmissionScreen() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={S.subDate}>{fmtDate(sub.submissionDate)}</Text>
-                      {sub.applicationId.revisionCount > 0 && (
-                        <Text style={S.subRevCount}>Revision #{sub.applicationId.revisionCount}</Text>
+                      {subRevCount > 0 && (
+                        <Text style={S.subRevCount}>Revision #{subRevCount}</Text>
                       )}
                     </View>
                     <View style={[S.statusPill, { backgroundColor: cfg.bg }]}>
@@ -451,8 +489,8 @@ export default function ReviewSubmissionScreen() {
                     </View>
                   )}
 
-                  {/* Escrow line */}
-                  {sub.applicationId.paymentAmount && (
+                  {/* Escrow line — safe even if applicationId is null */}
+                  {sub.applicationId?.paymentAmount && (
                     <View style={S.payLine}>
                       <Ionicons name="lock-closed-outline" size={14} color="#059669" />
                       <Text style={S.payLineTxt}>
@@ -472,10 +510,9 @@ export default function ReviewSubmissionScreen() {
             <View style={S.actionsHdr}>
               <Ionicons name="shield-checkmark-outline" size={18} color="#4F46E5" />
               <Text style={S.actionsTitle}>Your Decision</Text>
-              {/* Show remaining revisions count */}
               <View style={[S.revLeftChip, revisionsLeft === 0 && S.revLeftChipEmpty]}>
                 <Text style={[S.revLeftTxt, revisionsLeft === 0 && S.revLeftTxtEmpty]}>
-                  {revisionsLeft}/{3} revisions left
+                  {revisionsLeft}/3 revisions left
                 </Text>
               </View>
             </View>
@@ -486,7 +523,6 @@ export default function ReviewSubmissionScreen() {
                 : 'Watch the video above first. Payment is only released when you approve.'}
             </Text>
 
-            {/* Max revisions warning */}
             {revisionsLeft === 0 && (
               <View style={S.maxRevWarning}>
                 <Ionicons name="alert-circle-outline" size={16} color="#D97706" />
@@ -496,9 +532,19 @@ export default function ReviewSubmissionScreen() {
               </View>
             )}
 
+            {/* Show a warning if applicationId is missing (deleted from DB) */}
+            {!pendingSub.applicationId && (
+              <View style={S.maxRevWarning}>
+                <Ionicons name="warning-outline" size={16} color="#EF4444" />
+                <Text style={[S.maxRevWarningTxt, { color: '#B91C1C' }]}>
+                  The application record for this submission is no longer available. Please contact support.
+                </Text>
+              </View>
+            )}
+
             <View style={S.actionBtns}>
-              {/* Request Revision — only visible if revisions remain */}
-              {revisionsLeft > 0 && (
+              {/* Request Revision — only visible if revisions remain AND applicationId exists */}
+              {revisionsLeft > 0 && pendingSub.applicationId && (
                 <TouchableOpacity
                   style={S.revBtn}
                   onPress={() => { setSelected(pendingSub); setRevModal(true); }}
@@ -508,25 +554,25 @@ export default function ReviewSubmissionScreen() {
                 </TouchableOpacity>
               )}
 
-              {/* Approve & Pay */}
-              <TouchableOpacity
-                style={S.approveBtn}
-                onPress={() => { setSelected(pendingSub); setApproveModal(true); }}
-              >
-                <LinearGradient colors={['#059669','#047857']} style={S.approveBtnGrad}>
-                  <Ionicons name="checkmark-circle" size={20} color="#FFF" />
-                  <Text style={S.approveBtnTxt}>Approve & Pay</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+              {/* Approve & Pay — only if applicationId exists */}
+              {pendingSub.applicationId && (
+                <TouchableOpacity
+                  style={S.approveBtn}
+                  onPress={() => { setSelected(pendingSub); setApproveModal(true); }}
+                >
+                  <LinearGradient colors={['#059669','#047857']} style={S.approveBtnGrad}>
+                    <Ionicons name="checkmark-circle" size={20} color="#FFF" />
+                    <Text style={S.approveBtnTxt}>Approve & Pay</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
 
-              {/* Divider */}
               <View style={S.disputeDivider}>
                 <View style={S.disputeDividerLine} />
                 <Text style={S.disputeDividerTxt}>{"or if there's a serious issue"}</Text>
                 <View style={S.disputeDividerLine} />
               </View>
 
-              {/* Raise Dispute */}
               <TouchableOpacity
                 style={S.disputeBtn}
                 onPress={() => setDisputeModal(true)}
@@ -768,38 +814,38 @@ const S = StyleSheet.create({
   errTxt:  { fontSize: 16, color: '#EF4444', marginTop: 12, marginBottom: 16 },
   goBack:  { backgroundColor: '#4F46E5', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12 },
 
-  header:  { paddingTop: 10, paddingBottom: 16, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center' },
+  header:  { paddingTop: 10, marginTop: -30, paddingBottom: 16, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center' },
   hdrBack: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', justifyContent: 'center', alignItems: 'center' },
   hdrTitle:{ fontSize: 16, fontWeight: '700', color: '#FFF' },
   hdrSub:  { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 1 },
-  completedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(16,185,129,0.2)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
+  completedBadge:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(16,185,129,0.2)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
   completedBadgeTxt: { fontSize: 11, fontWeight: '700', color: '#6EE7B7' },
-  pendingBadge:   { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(253,224,71,0.2)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
-  pendingBadgeTxt:{ fontSize: 11, fontWeight: '700', color: '#FCD34D' },
-  disputedBadge:  { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(239,68,68,0.2)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
-  disputedBadgeTxt:{ fontSize: 11, fontWeight: '700', color: '#FCA5A5' },
+  pendingBadge:      { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(253,224,71,0.2)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
+  pendingBadgeTxt:   { fontSize: 11, fontWeight: '700', color: '#FCD34D' },
+  disputedBadge:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(239,68,68,0.2)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
+  disputedBadgeTxt:  { fontSize: 11, fontWeight: '700', color: '#FCA5A5' },
 
-  completedBanner:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#6EE7B7', borderRadius: 16, padding: 14, marginBottom: 12, gap: 12 },
-  completedBannerIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#D1FAE5', justifyContent: 'center', alignItems: 'center' },
-  completedBannerTitle:{ fontSize: 15, fontWeight: '700', color: '#065F46' },
-  completedBannerSub:  { fontSize: 12, color: '#6EE7B7', marginTop: 2 },
-  watchFinalBtn:       { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#4F46E5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
-  watchFinalTxt:       { fontSize: 13, fontWeight: '700', color: '#4F46E5' },
+  completedBanner:      { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#6EE7B7', borderRadius: 16, padding: 14, marginBottom: 12, gap: 12 },
+  completedBannerIcon:  { width: 48, height: 48, borderRadius: 24, backgroundColor: '#D1FAE5', justifyContent: 'center', alignItems: 'center' },
+  completedBannerTitle: { fontSize: 15, fontWeight: '700', color: '#065F46' },
+  completedBannerSub:   { fontSize: 12, color: '#6EE7B7', marginTop: 2 },
+  watchFinalBtn:        { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#4F46E5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
+  watchFinalTxt:        { fontSize: 13, fontWeight: '700', color: '#4F46E5' },
 
   disputedBanner:      { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 16, padding: 14, marginBottom: 12, gap: 12 },
   disputedBannerTitle: { fontSize: 14, fontWeight: '700', color: '#B91C1C', marginBottom: 3 },
   disputedBannerSub:   { fontSize: 12, color: '#EF4444', lineHeight: 17 },
 
-  creatorCard:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 16, padding: 14, marginBottom: 12, gap: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
-  creatorAvatar:  { width: 48, height: 48, borderRadius: 24, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' },
-  creatorInitials:{ fontSize: 16, fontWeight: '800', color: '#4F46E5' },
-  creatorName:    { fontSize: 15, fontWeight: '700', color: '#111827' },
-  ratingRow:      { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  ratingTxt:      { fontSize: 12, color: '#9CA3AF' },
-  payPill:        { alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: '#6EE7B7' },
-  payPillLbl:     { fontSize: 10, color: '#6EE7B7', fontWeight: '600', marginBottom: 1 },
-  payPillAmt:     { fontSize: 16, fontWeight: '800', color: '#059669' },
-  payPillCur:     { fontSize: 10, color: '#059669', fontWeight: '600' },
+  creatorCard:     { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 16, padding: 14, marginBottom: 12, gap: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
+  creatorAvatar:   { width: 48, height: 48, borderRadius: 24, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' },
+  creatorInitials: { fontSize: 16, fontWeight: '800', color: '#4F46E5' },
+  creatorName:     { fontSize: 15, fontWeight: '700', color: '#111827' },
+  ratingRow:       { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  ratingTxt:       { fontSize: 12, color: '#9CA3AF' },
+  payPill:         { alignItems: 'center', backgroundColor: '#ECFDF5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: '#6EE7B7' },
+  payPillLbl:      { fontSize: 10, color: '#6EE7B7', fontWeight: '600', marginBottom: 1 },
+  payPillAmt:      { fontSize: 16, fontWeight: '800', color: '#059669' },
+  payPillCur:      { fontSize: 10, color: '#059669', fontWeight: '600' },
 
   briefCard:  { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 12 },
   briefTitle: { fontSize: 14, fontWeight: '700', color: '#374151', marginBottom: 8 },
@@ -819,20 +865,20 @@ const S = StyleSheet.create({
   subRevCount:  { fontSize: 11, color: '#F97316', fontWeight: '600', marginTop: 1 },
   statusPill:   { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 },
   statusPillTxt:{ fontSize: 11, fontWeight: '700' },
-  videoBox:      { marginHorizontal: 14, marginBottom: 14, height: 196, borderRadius: 14, overflow: 'hidden', backgroundColor: '#0F172A' },
-  videoThumb:    { width: '100%', height: '100%', position: 'absolute' },
-  videoThumbEmpty: { width: '100%', height: '100%', backgroundColor: '#1E293B', justifyContent: 'center', alignItems: 'center' },
-  videoOverlay:  { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 18, gap: 6 },
-  playCircle:    { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.22)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.45)' },
-  videoTapTxt:   { fontSize: 12, color: 'rgba(255,255,255,0.8)', fontWeight: '600' },
-  newBadge:      { position: 'absolute', top: 10, left: 10, backgroundColor: '#4F46E5', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  newBadgeTxt:   { fontSize: 10, fontWeight: '800', color: '#FFF', letterSpacing: 0.5 },
-  feedbackHistory:     { borderTopWidth: 1, borderTopColor: '#F3F4F6', marginHorizontal: 14, paddingTop: 12, paddingBottom: 8 },
-  feedbackHistoryTitle:{ fontSize: 12, fontWeight: '700', color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 },
-  feedbackItem:        { flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'flex-start' },
-  feedbackDot:         { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F97316', marginTop: 5 },
-  feedbackMsg:         { flex: 1, fontSize: 13, color: '#374151', lineHeight: 18 },
-  feedbackDate:        { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
+  videoBox:       { marginHorizontal: 14, marginBottom: 14, height: 196, borderRadius: 14, overflow: 'hidden', backgroundColor: '#0F172A' },
+  videoThumb:     { width: '100%', height: '100%', position: 'absolute' },
+  videoThumbEmpty:{ width: '100%', height: '100%', backgroundColor: '#1E293B', justifyContent: 'center', alignItems: 'center' },
+  videoOverlay:   { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 18, gap: 6 },
+  playCircle:     { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.22)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.45)' },
+  videoTapTxt:    { fontSize: 12, color: 'rgba(255,255,255,0.8)', fontWeight: '600' },
+  newBadge:       { position: 'absolute', top: 10, left: 10, backgroundColor: '#4F46E5', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  newBadgeTxt:    { fontSize: 10, fontWeight: '800', color: '#FFF', letterSpacing: 0.5 },
+  feedbackHistory:      { borderTopWidth: 1, borderTopColor: '#F3F4F6', marginHorizontal: 14, paddingTop: 12, paddingBottom: 8 },
+  feedbackHistoryTitle: { fontSize: 12, fontWeight: '700', color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 },
+  feedbackItem:         { flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'flex-start' },
+  feedbackDot:          { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F97316', marginTop: 5 },
+  feedbackMsg:          { flex: 1, fontSize: 13, color: '#374151', lineHeight: 18 },
+  feedbackDate:         { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
   payLine:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#ECFDF5', marginHorizontal: 14, marginBottom: 14, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   payLineTxt: { fontSize: 13, fontWeight: '600', color: '#065F46' },
 
@@ -840,27 +886,27 @@ const S = StyleSheet.create({
   emptyTitle: { fontSize: 16, fontWeight: '600', color: '#6B7280' },
   emptySub:   { fontSize: 13, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 20 },
 
-  actionsWrap:   { backgroundColor: '#FFF', borderRadius: 18, padding: 18, marginTop: 4 },
-  actionsHdr:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  actionsTitle:  { flex: 1, fontSize: 15, fontWeight: '700', color: '#111827' },
-  revLeftChip:   { backgroundColor: '#EEF2FF', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  actionsWrap:      { backgroundColor: '#FFF', borderRadius: 18, padding: 18, marginTop: 4 },
+  actionsHdr:       { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  actionsTitle:     { flex: 1, fontSize: 15, fontWeight: '700', color: '#111827' },
+  revLeftChip:      { backgroundColor: '#EEF2FF', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   revLeftChipEmpty: { backgroundColor: '#FEF2F2' },
-  revLeftTxt:    { fontSize: 11, fontWeight: '700', color: '#4F46E5' },
-  revLeftTxtEmpty:{ color: '#EF4444' },
-  actionsDesc:   { fontSize: 13, color: '#6B7280', lineHeight: 18, marginBottom: 12 },
-  maxRevWarning: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#FFFBEB', borderRadius: 12, padding: 12, marginBottom: 14 },
+  revLeftTxt:       { fontSize: 11, fontWeight: '700', color: '#4F46E5' },
+  revLeftTxtEmpty:  { color: '#EF4444' },
+  actionsDesc:      { fontSize: 13, color: '#6B7280', lineHeight: 18, marginBottom: 12 },
+  maxRevWarning:    { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#FFFBEB', borderRadius: 12, padding: 12, marginBottom: 14 },
   maxRevWarningTxt: { flex: 1, fontSize: 13, color: '#92400E', lineHeight: 18 },
-  actionBtns:    { gap: 10 },
-  revBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FFFBEB', borderWidth: 1.5, borderColor: '#FDE68A', borderRadius: 14, paddingVertical: 14 },
-  revBtnTxt:     { fontSize: 14, fontWeight: '700', color: '#D97706' },
-  approveBtn:    { borderRadius: 14, overflow: 'hidden' },
-  approveBtnGrad:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
-  approveBtnTxt: { fontSize: 16, fontWeight: '700', color: '#FFF' },
+  actionBtns:       { gap: 10 },
+  revBtn:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FFFBEB', borderWidth: 1.5, borderColor: '#FDE68A', borderRadius: 14, paddingVertical: 14 },
+  revBtnTxt:        { fontSize: 14, fontWeight: '700', color: '#D97706' },
+  approveBtn:       { borderRadius: 14, overflow: 'hidden' },
+  approveBtnGrad:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
+  approveBtnTxt:    { fontSize: 16, fontWeight: '700', color: '#FFF' },
   disputeDivider:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
   disputeDividerLine:{ flex: 1, height: 1, backgroundColor: '#F3F4F6' },
   disputeDividerTxt: { fontSize: 11, color: '#9CA3AF', fontWeight: '500' },
-  disputeBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 14, paddingVertical: 12 },
-  disputeBtnTxt: { fontSize: 14, fontWeight: '600', color: '#EF4444' },
+  disputeBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 14, paddingVertical: 12 },
+  disputeBtnTxt:     { fontSize: 14, fontWeight: '600', color: '#EF4444' },
 });
 
 // ─── Modal styles ──────────────────────────────────────────────────────────────
@@ -887,20 +933,20 @@ const M = StyleSheet.create({
   sendBtn:    { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#F97316', borderRadius: 14, paddingVertical: 14 },
   sendTxt:    { fontSize: 15, fontWeight: '700', color: '#FFF' },
 
-  centeredOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  confirmCard:     { backgroundColor: '#FFF', borderRadius: 24, width: width - 48, overflow: 'hidden' },
-  confirmTop:      { alignItems: 'center', paddingVertical: 28 },
+  centeredOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  confirmCard:      { backgroundColor: '#FFF', borderRadius: 24, width: width - 48, overflow: 'hidden' },
+  confirmTop:       { alignItems: 'center', paddingVertical: 28 },
   confirmIconCircle:{ width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.6)', justifyContent: 'center', alignItems: 'center' },
-  confirmTitle:    { fontSize: 20, fontWeight: '800', color: '#111827', marginBottom: 8, textAlign: 'center' },
-  confirmDesc:     { fontSize: 14, color: '#6B7280', lineHeight: 20, textAlign: 'center', marginBottom: 18 },
-  confirmPayBox:   { backgroundColor: '#ECFDF5', borderRadius: 14, padding: 14, alignItems: 'center', marginBottom: 20 },
-  confirmPayLbl:   { fontSize: 12, color: '#6EE7B7', fontWeight: '600', marginBottom: 4 },
-  confirmPayAmt:   { fontSize: 28, fontWeight: '800', color: '#059669' },
-  confirmPayCur:   { fontSize: 13, color: '#059669', fontWeight: '600' },
-  confirmBtns:     { flexDirection: 'row', gap: 10 },
-  confirmCancel:   { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
-  confirmCancelTxt:{ fontSize: 15, fontWeight: '600', color: '#6B7280' },
-  confirmApprove:  { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#059669', borderRadius: 14, paddingVertical: 15 },
+  confirmTitle:     { fontSize: 20, fontWeight: '800', color: '#111827', marginBottom: 8, textAlign: 'center' },
+  confirmDesc:      { fontSize: 14, color: '#6B7280', lineHeight: 20, textAlign: 'center', marginBottom: 18 },
+  confirmPayBox:    { backgroundColor: '#ECFDF5', borderRadius: 14, padding: 14, alignItems: 'center', marginBottom: 20 },
+  confirmPayLbl:    { fontSize: 12, color: '#6EE7B7', fontWeight: '600', marginBottom: 4 },
+  confirmPayAmt:    { fontSize: 28, fontWeight: '800', color: '#059669' },
+  confirmPayCur:    { fontSize: 13, color: '#059669', fontWeight: '600' },
+  confirmBtns:      { flexDirection: 'row', gap: 10 },
+  confirmCancel:    { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
+  confirmCancelTxt: { fontSize: 15, fontWeight: '600', color: '#6B7280' },
+  confirmApprove:   { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#059669', borderRadius: 14, paddingVertical: 15 },
   confirmApproveTxt:{ fontSize: 15, fontWeight: '700', color: '#FFF' },
 
   doneCard:  { backgroundColor: '#FFF', borderRadius: 24, width: width - 48, alignItems: 'center', overflow: 'hidden', paddingBottom: 24 },

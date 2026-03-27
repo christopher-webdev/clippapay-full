@@ -305,6 +305,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 8,
     elevation: 8,
+    marginBottom: Platform.OS === 'android' ? 0 : 0, // 
   },
   tabBar: {
     flexDirection: 'row',
