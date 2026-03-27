@@ -81,7 +81,7 @@ export default function JoinUGCScreen() {
       const token = await getToken();
       if (!token) { router.push('/login'); return; }
 
-      const params = new URLSearchParams({ page: String(refresh ? 1 : pg), limit: '12' });
+      const params = new URLSearchParams({ page: String(refresh ? 1 : pg), limit: '12', status: 'active' });
       if (q) params.append('search', q);
       if (cat && cat !== 'All') params.append('category', cat);
 
@@ -89,11 +89,16 @@ export default function JoinUGCScreen() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      const list: Campaign[] = data.campaigns || [];
+      // Keep only active campaigns — defensive client-side guard
+      const list: Campaign[] = (data.campaigns || []).filter(
+        (c: Campaign) => c.status === 'active'
+      );
+
       if (refresh || pg === 1) { setCampaigns(list); setPage(1); }
       else setCampaigns((prev) => [...prev, ...list]);
 
-      setTotal(data.pagination?.total || 0);
+      // Count only active campaigns for the stats chip
+      setTotal(data.pagination?.total ?? list.length);
       setHasMore(pg < (data.pagination?.pages || 1));
     } catch (err) {
       console.error(err);
@@ -143,6 +148,9 @@ export default function JoinUGCScreen() {
     }
   };
 
+  // Active campaigns count — always reflects what's actually shown
+  const activeCount = campaigns.filter(c => c.status === 'active').length;
+
   const renderCard = ({ item: c }: { item: Campaign }) => {
     const img = toUrl(c.thumbnailUrl);
     const days = daysLeft(c.applicationDeadline);
@@ -155,11 +163,7 @@ export default function JoinUGCScreen() {
       >
         {/* Thumbnail */}
         {img ? (
-          <Image
-            source={{ uri: img }}
-            style={S.thumb}
-            resizeMode="contain"
-          />
+          <Image source={{ uri: img }} style={S.thumb} resizeMode="contain" />
         ) : (
           <View style={S.thumbPlaceholder}>
             <MaterialCommunityIcons name="image-outline" size={32} color="#C4B5FD" />
@@ -216,8 +220,9 @@ export default function JoinUGCScreen() {
           <View style={S.navBtn} />
         </View>
 
+        {/* Stats chip — only counts active campaigns */}
         <View style={S.statsChip}>
-          <Text style={S.statsVal}>{total}</Text>
+          <Text style={S.statsVal}>{activeCount}</Text>
           <Text style={S.statsLbl}>Active Campaigns</Text>
         </View>
 

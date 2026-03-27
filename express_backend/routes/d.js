@@ -1,19 +1,18 @@
-
 import express from "express";
 import multer from "multer";
 import path from "path";
 import Campaign from "../models/Campaign.js";
 import Application from "../models/Application.js";
 import Notification from "../models/Notification.js";
-import { requireAuth, requireAdvertiser } from "../middleware/auth.js"; // assume you have role middleware
+import { requireAuth, requireAdvertiser } from "../middleware/auth.js";
 import { requireAdminAuth } from "../middleware/adminAuth.js";
 import fs from "fs";
 
 const router = express.Router();
+
 // MULTER CONFIG – THUMBNAIL
 const uploadDir = path.join(process.cwd(), "uploads/campaigns");
 
-// Make sure folder exists (redundant if you use the startup function, but safe)
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
   console.log(`Ensured campaigns upload dir exists: ${uploadDir}`);
@@ -42,10 +41,18 @@ const upload = multer({
 
 router.get("/active", requireAuth, async (req, res) => {
   try {
-    const { category, page = 1, limit = 20 } = req.query;
+    const { category, search, page = 1, limit = 20 } = req.query;
 
-    const query = { status: "active" };
-    if (category) query.category = category;
+    const query = {
+      // Explicitly match only 'active' — excludes legacy 'expired' and
+      // any other stale status values left over from before the model change
+      status: "active",
+      // Deadline must still be in the future
+      applicationDeadline: { $gt: new Date() },
+    };
+
+    if (category && category !== "All") query.category = category;
+    if (search) query.title = { $regex: search, $options: "i" };
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -54,10 +61,7 @@ router.get("/active", requireAuth, async (req, res) => {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit))
-        .populate(
-          "advertiser",
-          "firstName lastName company rating profileImage",
-        )
+        .populate("advertiser", "firstName lastName company rating profileImage")
         .lean(),
       Campaign.countDocuments(query),
     ]);
@@ -69,10 +73,11 @@ router.get("/active", requireAuth, async (req, res) => {
         page: parseInt(page),
         limit: parseInt(limit),
         total,
-        pages: Math.ceil(total / limit),
+        pages: Math.ceil(total / parseInt(limit)),
       },
     });
   } catch (err) {
+    console.error("GET /active error:", err);
     res.status(500).json({ error: "Failed to load campaigns" });
   }
 });
