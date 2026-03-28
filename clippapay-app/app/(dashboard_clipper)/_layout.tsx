@@ -1,6 +1,6 @@
 // app/(dashboard_clipper)/_layout.tsx
 import { Stack } from 'expo-router';
-import { View, StyleSheet, Dimensions, Platform, KeyboardAvoidingView } from 'react-native';
+import { View, StyleSheet, Dimensions, Platform } from 'react-native';
 import ProfileHeader from './ProfileHeader';
 import FooterClipper from './FooterClipper';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,46 +18,38 @@ export default function DashboardClipperLayout() {
     <NotificationsProvider>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
 
-        {/* ── Fixed header — sits above everything ── */}
+        {/* ── Fixed header ── */}
         <View style={styles.headerContainer}>
           <ProfileHeader />
         </View>
 
-        {/* ── KeyboardAvoidingView lifts body + footer when keyboard opens ── */}
-        <KeyboardAvoidingView
-          style={styles.keyboardAvoid}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? HEADER_HEIGHT : 0}
-        >
-          {/* ── Stack body ── */}
-          <View style={styles.body}>
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: styles.stackContent,
-                animation: 'slide_from_right',
-                gestureEnabled: true,
-                gestureDirection: 'horizontal',
-              }}
-            >
-              <Stack.Screen name="clipper_dashboard"      options={{ animation: 'fade' }} />
-              <Stack.Screen name="join_clipping"          options={{ animation: 'slide_from_right' }} />
-              <Stack.Screen name="join_ugc"               options={{ animation: 'slide_from_right' }} />
-              <Stack.Screen name="my_clipping"            options={{ animation: 'slide_from_right' }} />
-              <Stack.Screen name="my-applications"        options={{ animation: 'slide_from_right' }} />
-              <Stack.Screen name="wallet"                 options={{ animation: 'slide_from_right' }} />
-              <Stack.Screen name="clipper_profile_edit"   options={{ animation: 'slide_from_right' }} />
-              <Stack.Screen name="notifications"          options={{ animation: 'slide_from_right' }} />
-              <Stack.Screen name="submit_clipping"        options={{ animation: 'slide_from_right' }} />
-            </Stack>
-          </View>
+        {/* ── Body — paddingTop clears header, paddingBottom clears footer ── */}
+        <View style={styles.body}>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: styles.stackContent,
+              animation: 'slide_from_right',
+              gestureEnabled: true,
+              gestureDirection: 'horizontal',
+            }}
+          >
+            <Stack.Screen name="clipper_dashboard"      options={{ animation: 'fade' }} />
+            <Stack.Screen name="join_clipping"          options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="join_ugc"               options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="my_clipping"            options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="my-applications"        options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="wallet"                 options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="clipper_profile_edit"   options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="notifications"          options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="submit_clipping"        options={{ animation: 'slide_from_right' }} />
+          </Stack>
+        </View>
 
-          {/* ── Footer sits at bottom of KeyboardAvoidingView — rises with keyboard ── */}
-          <View style={styles.footerContainer}>
-            <FooterClipper />
-          </View>
-
-        </KeyboardAvoidingView>
+        {/* ── Footer — position absolute so it NEVER moves ── */}
+        <View style={styles.footerContainer}>
+          <FooterClipper />
+        </View>
 
       </SafeAreaView>
     </NotificationsProvider>
@@ -70,13 +62,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
 
-  // Takes up all space below safe-area top, pushes up when keyboard opens
-  keyboardAvoid: {
-    flex: 1,
-    paddingTop: HEADER_HEIGHT, // clears the absolute header
-  },
-
-  // ProfileHeader — fixed at top, full width, sits above everything
   headerContainer: {
     position: 'absolute',
     top: 0,
@@ -91,9 +76,10 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  // Body fills flex=1 — footer is now a sibling, not absolute
   body: {
     flex: 1,
+    paddingTop: HEADER_HEIGHT,
+    paddingBottom: FOOTER_HEIGHT,
     backgroundColor: '#F5F5F7',
   },
 
@@ -103,8 +89,12 @@ const styles = StyleSheet.create({
     marginTop: Platform.OS === 'android' ? 30 : 0,
   },
 
-  // Footer sits at the bottom of KeyboardAvoidingView — rises with keyboard
   footerContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
     backgroundColor: '#FFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },

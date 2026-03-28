@@ -173,7 +173,7 @@ export default function ClipperDashboard() {
         <View style={S.sectionHeader}>
           <Text style={S.sectionTitle}>Start Earning</Text>
           <TouchableOpacity onPress={() => router.push('/(dashboard_clipper)/join_clipping' as any)}>
-            <Text style={S.sectionLink}>See all →</Text>
+            {/* <Text style={S.sectionLink}>See all →</Text> */}
           </TouchableOpacity>
         </View>
 
@@ -184,7 +184,7 @@ export default function ClipperDashboard() {
         <View style={S.sectionHeader}>
           <Text style={S.sectionTitle}>My Active Work</Text>
           <TouchableOpacity onPress={() => router.push('/(dashboard_clipper)/my_clipping' as any)}>
-            <Text style={S.sectionLink}>See all →</Text>
+            {/* <Text style={S.sectionLink}>See all →</Text> */}
           </TouchableOpacity>
         </View>
 

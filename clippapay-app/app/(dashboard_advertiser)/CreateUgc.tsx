@@ -4,7 +4,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity, Image,
   Platform, Alert, KeyboardAvoidingView, ActivityIndicator,
-  StyleSheet, Dimensions, Modal,
+  StyleSheet, Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +16,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const API_URL  = process.env.EXPO_PUBLIC_API_URL;
 const { width } = Dimensions.get('window');
 
+// ─── Auto deadline — always 3 months from today ───────────────────────────────
+const getDeadline3Months = (): Date => {
+  const d = new Date();
+  d.setMonth(d.getMonth() + 3);
+  return d;
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 type FormData = {
   title: string;
@@ -24,7 +31,6 @@ type FormData = {
   keyPhrases: string;
   preferredLength: string;
   category: string;
-  deadlineDate: Date | null;
   aspectRatio: string;
   preferredLocation: string;
   locationDescription: string;
@@ -46,14 +52,11 @@ const CATEGORIES = [
 ];
 
 const STEPS = [
-  { title: 'Campaign Basics',      icon: 'document-text-outline'   },
-  { title: 'Script & Content',     icon: 'mic-outline'             },
-  { title: 'Creative Direction',   icon: 'color-palette-outline'   },
-  { title: 'Review & Submit',      icon: 'checkmark-circle-outline'},
+  { title: 'Campaign Basics',    icon: 'document-text-outline'    },
+  { title: 'Script & Content',   icon: 'mic-outline'              },
+  { title: 'Creative Direction', icon: 'color-palette-outline'    },
+  { title: 'Review & Submit',    icon: 'checkmark-circle-outline' },
 ];
-
-const MONTHS    = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const DAYS_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const getToken = async () => {
@@ -64,74 +67,8 @@ const getToken = async () => {
   } catch { return null; }
 };
 
-const fmtDate = (d: Date | null) =>
-  !d ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-
-const buildCalendar = (year: number, month: number) => {
-  const firstDay    = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells: (number | null)[] = Array(firstDay).fill(null);
-  for (let i = 1; i <= daysInMonth; i++) cells.push(i);
-  while (cells.length % 7 !== 0) cells.push(null);
-  return cells;
-};
-
-// ─── Calendar ─────────────────────────────────────────────────────────────────
-function CalendarPicker({ value, onChange, onClose }: {
-  value: Date | null; onChange: (d: Date) => void; onClose: () => void;
-}) {
-  const today = new Date();
-  const [viewYear, setViewYear]   = useState(value?.getFullYear() ?? today.getFullYear());
-  const [viewMonth, setViewMonth] = useState(value?.getMonth() ?? today.getMonth());
-  const cells = buildCalendar(viewYear, viewMonth);
-
-  const prevMonth = () => viewMonth === 0 ? (setViewMonth(11), setViewYear(y => y - 1)) : setViewMonth(m => m - 1);
-  const nextMonth = () => viewMonth === 11 ? (setViewMonth(0), setViewYear(y => y + 1)) : setViewMonth(m => m + 1);
-
-  const isPast = (day: number) => {
-    const d = new Date(viewYear, viewMonth, day); d.setHours(0, 0, 0, 0);
-    const t = new Date(); t.setHours(0, 0, 0, 0);
-    return d <= t;
-  };
-  const isSelected = (day: number) =>
-    value?.getFullYear() === viewYear && value?.getMonth() === viewMonth && value?.getDate() === day;
-
-  return (
-    <View style={CAL.wrap}>
-      <View style={CAL.header}>
-        <TouchableOpacity style={CAL.navBtn} onPress={prevMonth}>
-          <Ionicons name="chevron-back" size={20} color="#4F46E5" />
-        </TouchableOpacity>
-        <Text style={CAL.monthTitle}>{MONTHS[viewMonth]} {viewYear}</Text>
-        <TouchableOpacity style={CAL.navBtn} onPress={nextMonth}>
-          <Ionicons name="chevron-forward" size={20} color="#4F46E5" />
-        </TouchableOpacity>
-      </View>
-      <View style={CAL.weekRow}>
-        {DAYS_ABBR.map(d => <Text key={d} style={CAL.weekDay}>{d}</Text>)}
-      </View>
-      <View style={CAL.grid}>
-        {cells.map((day, i) => {
-          if (!day) return <View key={`e-${i}`} style={CAL.cell} />;
-          const past = isPast(day); const sel = isSelected(day);
-          return (
-            <TouchableOpacity
-              key={`d-${day}`}
-              style={[CAL.cell, sel && CAL.cellSelected, past && CAL.cellPast]}
-              onPress={() => { if (past) return; onChange(new Date(viewYear, viewMonth, day)); onClose(); }}
-              disabled={past} activeOpacity={0.7}
-            >
-              <Text style={[CAL.dayTxt, sel && CAL.dayTxtSelected, past && CAL.dayTxtPast]}>{day}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      <TouchableOpacity style={CAL.cancelBtn} onPress={onClose}>
-        <Text style={CAL.cancelTxt}>Cancel</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
+const fmtDate = (d: Date) =>
+  d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 function FieldError({ msg }: { msg?: string }) {
@@ -182,12 +119,11 @@ export default function CreateUGCScreen() {
   const [step, setStep]       = useState(0);
   const [loading, setLoading] = useState(false);
   const [done, setDone]       = useState(false);
-  const [calOpen, setCalOpen] = useState(false);
   const [errors, setErrors]   = useState<Errors>({});
 
   const [form, setForm] = useState<FormData>({
     title: '', description: '', script: '', keyPhrases: '',
-    preferredLength: '30s', category: '', deadlineDate: null,
+    preferredLength: '30s', category: '',
     aspectRatio: '9:16', preferredLocation: 'anywhere',
     locationDescription: '', backgroundStyle: '', moodTone: '',
     referenceLinks: '', thumbnail: null,
@@ -213,12 +149,11 @@ export default function CreateUGCScreen() {
   const validateStep = (s: number): boolean => {
     const e: Errors = {};
     if (s === 0) {
-      if (!form.title.trim())                     e.title       = 'Campaign title is required';
-      else if (form.title.trim().length < 5)      e.title       = 'Title must be at least 5 characters';
-      if (!form.description.trim())               e.description = 'Brief description is required';
+      if (!form.title.trim())                       e.title       = 'Campaign title is required';
+      else if (form.title.trim().length < 5)        e.title       = 'Title must be at least 5 characters';
+      if (!form.description.trim())                 e.description = 'Brief description is required';
       else if (form.description.trim().length < 20) e.description = 'Description should be at least 20 characters';
-      if (!form.category.trim())                  e.category    = 'Category is required';
-      if (!form.deadlineDate)                     e.deadlineDate = 'Please pick an application deadline';
+      if (!form.category.trim())                    e.category    = 'Category is required';
     }
     if (s === 1) {
       if (form.keyPhrases.length > 2000) e.keyPhrases = 'Key phrases are too long (max 2000 chars)';
@@ -244,6 +179,9 @@ export default function CreateUGCScreen() {
       const token = await getToken();
       if (!token) { Alert.alert('Not logged in', 'Please log in again.'); router.replace('/(auth)/login'); return; }
 
+      // Auto-calculate deadline: 3 months from today
+      const deadline = getDeadline3Months();
+
       const fd = new FormData() as any;
       fd.append('title',               form.title.trim());
       fd.append('description',         form.description.trim());
@@ -251,7 +189,7 @@ export default function CreateUGCScreen() {
       fd.append('keyPhrases',          JSON.stringify(form.keyPhrases.split('\n').map(p => p.trim()).filter(Boolean)));
       fd.append('preferredLength',     form.preferredLength);
       fd.append('category',            form.category.trim());
-      fd.append('applicationDeadline', form.deadlineDate!.toISOString());
+      fd.append('applicationDeadline', deadline.toISOString());
       fd.append('aspectRatio',         form.aspectRatio);
       fd.append('preferredLocation',   form.preferredLocation);
       fd.append('locationDescription', form.locationDescription.trim());
@@ -281,16 +219,15 @@ export default function CreateUGCScreen() {
         const newErrors: Errors = {};
         serverDetails.forEach((msg: string) => {
           const m = msg.toLowerCase();
-          if (m.includes('title'))                            newErrors.title       = msg;
-          else if (m.includes('descrip'))                    newErrors.description = msg;
-          else if (m.includes('categor'))                    newErrors.category    = msg;
-          else if (m.includes('deadline') || m.includes('date')) newErrors.deadlineDate = msg;
-          else if (m.includes('script'))                     newErrors.script      = msg;
+          if (m.includes('title'))        newErrors.title       = msg;
+          else if (m.includes('descrip')) newErrors.description = msg;
+          else if (m.includes('categor')) newErrors.category    = msg;
+          else if (m.includes('script'))  newErrors.script      = msg;
         });
         const mainErr = data.error || data.message || `Server error ${res.status}`;
         if (Object.keys(newErrors).length > 0) {
           setErrors(newErrors);
-          if (newErrors.title || newErrors.description || newErrors.category || newErrors.deadlineDate) {
+          if (newErrors.title || newErrors.description || newErrors.category) {
             setStep(0);
             scrollRef.current?.scrollTo({ y: 0, animated: true });
           }
@@ -308,7 +245,7 @@ export default function CreateUGCScreen() {
     }
   };
 
-  // ── Success screen — plain View, no SafeAreaView ─────────────────────────
+  // ── Success screen ───────────────────────────────────────────────────────
   if (done) {
     return (
       <View style={{ flex: 1, backgroundColor: '#F5F5F7' }}>
@@ -336,7 +273,12 @@ export default function CreateUGCScreen() {
             style={S.successBtnSecondary}
             onPress={() => {
               setDone(false); setStep(0);
-              setForm({ title:'', description:'', script:'', keyPhrases:'', preferredLength:'30s', category:'', deadlineDate:null, aspectRatio:'9:16', preferredLocation:'anywhere', locationDescription:'', backgroundStyle:'', moodTone:'', referenceLinks:'', thumbnail:null });
+              setForm({
+                title: '', description: '', script: '', keyPhrases: '',
+                preferredLength: '30s', category: '', aspectRatio: '9:16',
+                preferredLocation: 'anywhere', locationDescription: '',
+                backgroundStyle: '', moodTone: '', referenceLinks: '', thumbnail: null,
+              });
             }}
           >
             <Text style={S.successBtnSecondaryTxt}>Create Another Campaign</Text>
@@ -346,7 +288,7 @@ export default function CreateUGCScreen() {
     );
   }
 
-  // ── Steps ─────────────────────────────────────────────────────────────────
+  // ── Step 0: Campaign Basics ──────────────────────────────────────────────
   const renderStep0 = () => (
     <>
       <TouchableOpacity style={S.thumbBox} onPress={pickThumb} activeOpacity={0.85}>
@@ -409,24 +351,19 @@ export default function CreateUGCScreen() {
         <ChipGroup options={LENGTHS} value={form.preferredLength} onChange={v => set('preferredLength', v)} />
       </View>
 
-      <View style={S.field}>
-        <Text style={S.label}>Application Deadline <Text style={S.req}>*</Text></Text>
-        <Text style={S.hint}>Applications close on this date. Must be at least 1 day from today.</Text>
-        <TouchableOpacity
-          style={[S.dateBtn, errors.deadlineDate && S.inputErr]}
-          onPress={() => setCalOpen(true)}
-        >
-          <Ionicons name="calendar-outline" size={20} color={form.deadlineDate ? '#4F46E5' : '#9CA3AF'} />
-          <Text style={[S.dateBtnTxt, form.deadlineDate && { color: '#1F2937', fontWeight: '600' }]}>
-            {form.deadlineDate ? fmtDate(form.deadlineDate) : 'Pick a deadline date'}
-          </Text>
-          <Ionicons name="chevron-down" size={16} color="#9CA3AF" />
-        </TouchableOpacity>
-        <FieldError msg={errors.deadlineDate} />
+      {/* ── Auto deadline info — not editable ── */}
+      <View style={S.deadlineInfo}>
+        <Ionicons name="calendar-outline" size={18} color="#4F46E5" />
+        <View style={{ flex: 1 }}>
+          <Text style={S.deadlineInfoTitle}>Application Deadline</Text>
+          <Text style={S.deadlineInfoVal}>{fmtDate(getDeadline3Months())}</Text>
+          <Text style={S.deadlineInfoSub}>Automatically set to 3 months from today</Text>
+        </View>
       </View>
     </>
   );
 
+  // ── Step 1: Script & Content ─────────────────────────────────────────────
   const renderStep1 = () => (
     <>
       <SectionHdr icon="mic-outline" title="Script & Talking Points" sub="Help the creator understand exactly what to say" />
@@ -464,6 +401,7 @@ export default function CreateUGCScreen() {
     </>
   );
 
+  // ── Step 2: Creative Direction ───────────────────────────────────────────
   const renderStep2 = () => (
     <>
       <SectionHdr icon="color-palette-outline" title="Creative Direction" sub="All fields optional — only fill what matters to you" />
@@ -516,18 +454,20 @@ export default function CreateUGCScreen() {
     </>
   );
 
+  // ── Step 3: Review ───────────────────────────────────────────────────────
   const renderStep3 = () => {
     const keyPhraseList = form.keyPhrases.split('\n').map(p => p.trim()).filter(Boolean);
+    const deadline      = getDeadline3Months();
     return (
       <>
         <SectionHdr icon="checkmark-circle-outline" title="Review Your Campaign" sub="Check everything looks right before submitting" />
         {[
-          { label: 'Title',        val: form.title || '—',               icon: 'text-outline'           },
-          { label: 'Category',     val: form.category || '—',            icon: 'pricetag-outline'       },
-          { label: 'Video Length', val: form.preferredLength,            icon: 'timer-outline'          },
-          { label: 'Deadline',     val: fmtDate(form.deadlineDate) || '—', icon: 'calendar-outline'   },
-          { label: 'Aspect Ratio', val: form.aspectRatio,                icon: 'phone-portrait-outline' },
-          { label: 'Location',     val: form.preferredLocation,          icon: 'location-outline'       },
+          { label: 'Title',        val: form.title || '—',       icon: 'text-outline'           },
+          { label: 'Category',     val: form.category || '—',    icon: 'pricetag-outline'       },
+          { label: 'Video Length', val: form.preferredLength,    icon: 'timer-outline'          },
+          { label: 'Deadline',     val: fmtDate(deadline),       icon: 'calendar-outline'       },
+          { label: 'Aspect Ratio', val: form.aspectRatio,        icon: 'phone-portrait-outline' },
+          { label: 'Location',     val: form.preferredLocation,  icon: 'location-outline'       },
         ].map(({ label, val, icon }) => (
           <View key={label} style={S.reviewRow}>
             <View style={S.reviewIcon}><Ionicons name={icon as any} size={16} color="#4F46E5" /></View>
@@ -535,6 +475,14 @@ export default function CreateUGCScreen() {
             <Text style={S.reviewVal} numberOfLines={1}>{val}</Text>
           </View>
         ))}
+
+        {/* Deadline note in review */}
+        <View style={S.deadlineReviewNote}>
+          <Ionicons name="information-circle-outline" size={15} color="#6366F1" />
+          <Text style={S.deadlineReviewNoteTxt}>
+            Deadline is automatically set to 3 months from today ({fmtDate(deadline)})
+          </Text>
+        </View>
 
         <View style={S.reviewSection}>
           <Text style={S.reviewSectionTitle}>Brief</Text>
@@ -578,12 +526,13 @@ export default function CreateUGCScreen() {
 
   const isLastStep = step === STEPS.length - 1;
 
-  // ── Main render — plain View, no SafeAreaView ─────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: '#F5F5F7' }}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-
-        {/* Header — paddingTop: 16, layout already cleared the ProfileHeader */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
+        {/* Header */}
         <View style={S.fixedHdr}>
           <TouchableOpacity style={S.backBtn} onPress={step === 0 ? () => router.back() : goBack}>
             <Ionicons name="arrow-back" size={22} color="#1F2937" />
@@ -642,45 +591,12 @@ export default function CreateUGCScreen() {
           <View style={{ height: 40 }} />
         </ScrollView>
       </KeyboardAvoidingView>
-
-      {/* Calendar Modal */}
-      <Modal visible={calOpen} transparent animationType="fade" onRequestClose={() => setCalOpen(false)}>
-        <TouchableOpacity style={S.calOverlay} activeOpacity={1} onPress={() => setCalOpen(false)}>
-          <TouchableOpacity activeOpacity={1} onPress={e => e.stopPropagation()}>
-            <CalendarPicker
-              value={form.deadlineDate}
-              onChange={d => set('deadlineDate', d)}
-              onClose={() => setCalOpen(false)}
-            />
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
     </View>
   );
 }
 
-// ─── Calendar styles ───────────────────────────────────────────────────────────
-const CAL = StyleSheet.create({
-  wrap:          { backgroundColor: '#FFF', borderRadius: 20, padding: 20, width: width - 40, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 24, elevation: 12 },
-  header:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  navBtn:        { width: 36, height: 36, borderRadius: 18, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' },
-  monthTitle:    { fontSize: 16, fontWeight: '700', color: '#111827' },
-  weekRow:       { flexDirection: 'row', marginBottom: 8 },
-  weekDay:       { flex: 1, textAlign: 'center', fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
-  grid:          { flexDirection: 'row', flexWrap: 'wrap' },
-  cell:          { width: `${100/7}%` as any, aspectRatio: 1, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
-  cellSelected:  { backgroundColor: '#4F46E5', borderRadius: 100 },
-  cellPast:      { opacity: 0.3 },
-  dayTxt:        { fontSize: 14, fontWeight: '500', color: '#1F2937' },
-  dayTxtSelected:{ color: '#FFF', fontWeight: '700' },
-  dayTxtPast:    { color: '#D1D5DB' },
-  cancelBtn:     { marginTop: 16, alignItems: 'center', paddingVertical: 12 },
-  cancelTxt:     { fontSize: 15, fontWeight: '600', color: '#6B7280' },
-});
-
-// ─── Main styles ───────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const S = StyleSheet.create({
-  // Header — no paddingTop needed, layout body already cleared the fixed ProfileHeader
   fixedHdr:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
   backBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
   hdrTitle:    { fontSize: 16, fontWeight: '700', color: '#111827' },
@@ -717,15 +633,28 @@ const S = StyleSheet.create({
   errRow:    { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
   errTxt:    { fontSize: 12, color: '#EF4444', fontWeight: '500' },
 
-  chipRow:        { flexDirection: 'row', gap: 8 },
-  chip:           { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, backgroundColor: '#F3F4F6', borderWidth: 1.5, borderColor: '#E5E7EB' },
-  chipActive:     { backgroundColor: '#EEF2FF', borderColor: '#4F46E5' },
-  chipErrBorder:  { borderColor: '#FCA5A5' },
-  chipTxt:        { fontSize: 13, fontWeight: '500', color: '#6B7280' },
-  chipTxtActive:  { color: '#4F46E5', fontWeight: '700' },
+  chipRow:       { flexDirection: 'row', gap: 8 },
+  chip:          { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, backgroundColor: '#F3F4F6', borderWidth: 1.5, borderColor: '#E5E7EB' },
+  chipActive:    { backgroundColor: '#EEF2FF', borderColor: '#4F46E5' },
+  chipErrBorder: { borderColor: '#FCA5A5' },
+  chipTxt:       { fontSize: 13, fontWeight: '500', color: '#6B7280' },
+  chipTxtActive: { color: '#4F46E5', fontWeight: '700' },
 
-  dateBtn:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
-  dateBtnTxt: { flex: 1, fontSize: 15, color: '#9CA3AF' },
+  // ── Auto deadline display (read-only) ──
+  deadlineInfo: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    backgroundColor: '#EEF2FF', borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: '#C7D2FE', marginBottom: 4,
+  },
+  deadlineInfoTitle: { fontSize: 13, fontWeight: '700', color: '#3730A3', marginBottom: 2 },
+  deadlineInfoVal:   { fontSize: 15, fontWeight: '800', color: '#4F46E5', marginBottom: 2 },
+  deadlineInfoSub:   { fontSize: 11, color: '#6366F1' },
+
+  deadlineReviewNote: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    backgroundColor: '#EEF2FF', borderRadius: 10, padding: 10, marginBottom: 12,
+  },
+  deadlineReviewNoteTxt: { flex: 1, fontSize: 12, color: '#4338CA', lineHeight: 17 },
 
   phrasesPreview: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   phraseChip:     { backgroundColor: '#EEF2FF', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
@@ -745,12 +674,12 @@ const S = StyleSheet.create({
   reviewSectionTxt:   { fontSize: 14, color: '#374151', lineHeight: 20 },
   reviewPhrase:       { fontSize: 13, color: '#4F46E5', marginBottom: 4 },
 
-  nextStepsBox:  { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginTop: 20 },
-  nextStepsTitle:{ fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 14 },
-  nextStepRow:   { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
-  nextStepNum:   { width: 24, height: 24, borderRadius: 12, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' },
-  nextStepNumTxt:{ fontSize: 12, fontWeight: '700', color: '#4F46E5' },
-  nextStepTxt:   { flex: 1, fontSize: 13, color: '#374151', lineHeight: 18 },
+  nextStepsBox:   { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginTop: 20 },
+  nextStepsTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 14 },
+  nextStepRow:    { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
+  nextStepNum:    { width: 24, height: 24, borderRadius: 12, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' },
+  nextStepNumTxt: { fontSize: 12, fontWeight: '700', color: '#4F46E5' },
+  nextStepTxt:    { flex: 1, fontSize: 13, color: '#374151', lineHeight: 18 },
 
   actions:       { flexDirection: 'row', gap: 12, marginTop: 24 },
   backActionBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F3F4F6', borderRadius: 14, paddingVertical: 15, paddingHorizontal: 18 },
@@ -758,8 +687,6 @@ const S = StyleSheet.create({
   nextBtn:       { flex: 2, borderRadius: 14, overflow: 'hidden' },
   nextGrad:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
   nextTxt:       { fontSize: 16, fontWeight: '700', color: '#FFF' },
-
-  calOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 20 },
 
   successWrap:            { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
   successCircle:          { width: 100, height: 100, borderRadius: 50, justifyContent: 'center', alignItems: 'center', marginBottom: 24 },

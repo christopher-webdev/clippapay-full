@@ -9,13 +9,19 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { useFocusEffect } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { useNotifications } from '../../hooks/useNotifications';
 
 const API_BASE      = process.env.EXPO_PUBLIC_API_URL;
 const DEFAULT_IMAGE = require('../../assets/images/user-default.jpg');
 
 export const HEADER_HEIGHT = 72;
+
+// Routes where the Settings icon shows (and bell hides)
+const PROFILE_ROUTES = [
+  '/(dashboard_clipper)/clipper_profile_edit',
+  '/clipper_profile_edit',
+];
 
 interface UserData {
   _id: string;
@@ -51,11 +57,18 @@ const getGreeting = () => {
 
 export default function ProfileHeader({ onNotificationPress }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser]           = useState<UserData | null>(null);
   const [imgUri, setImgUri]       = useState<string | null>(null);
   const [imgErr, setImgErr]       = useState(false);
   const [loading, setLoading]     = useState(true);
   const { unreadCount, refresh }  = useNotifications();
+
+  
+  // True when the user is currently on the Profile screen
+  const isOnProfile = PROFILE_ROUTES.some(r =>
+    pathname === r || pathname.toLowerCase() === r.toLowerCase()
+  );
 
   const load = async () => {
     const token = await getToken();
@@ -144,27 +157,31 @@ export default function ProfileHeader({ onNotificationPress }: Props) {
         </View>
       </TouchableOpacity>
 
-      {/* Settings icon */}
-      <TouchableOpacity style={S.iconWrap} onPress={goSettings} activeOpacity={0.75}>
-        <View style={S.iconInner}>
-          <Ionicons name="settings-outline" size={20} color="#374151" />
-        </View>
-      </TouchableOpacity>
-
-      {/* Notification bell */}
-      <TouchableOpacity style={S.bellWrap} onPress={goNotifs} activeOpacity={0.75}>
-        <View style={S.bellInner}>
-          <Ionicons name="notifications-outline" size={21} color="#374151" />
-          {unreadCount > 0 && (
-            <View style={S.badge}>
-              <Text style={S.badgeTxt}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
-            </View>
-          )}
-        </View>
-      </TouchableOpacity>
-    </View>
-  );
-}
+      {/* Settings icon — only on Profile screen */}
+           {isOnProfile && (
+             <TouchableOpacity style={S.iconWrap} onPress={goSettings} activeOpacity={0.75}>
+               <View style={S.iconInner}>
+                 <Ionicons name="settings-outline" size={20} color="#374151" />
+               </View>
+             </TouchableOpacity>
+           )}
+     
+           {/* Notification bell — hidden on Profile screen */}
+           {!isOnProfile && (
+             <TouchableOpacity style={S.bellWrap} onPress={goNotifs} activeOpacity={0.75}>
+               <View style={S.bellInner}>
+                 <Ionicons name="notifications-outline" size={21} color="#374151" />
+                 {unreadCount > 0 && (
+                   <View style={S.badge}>
+                     <Text style={S.badgeTxt}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                   </View>
+                 )}
+               </View>
+             </TouchableOpacity>
+           )}
+         </View>
+       );
+     }
 
 const S = StyleSheet.create({
   container: {

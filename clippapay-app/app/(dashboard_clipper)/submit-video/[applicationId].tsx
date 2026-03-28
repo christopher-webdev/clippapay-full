@@ -1,12 +1,10 @@
 // app/(dashboard_clipper)/submit-video/[applicationId].tsx
-// Rebuilt: clean design, thumbnail & note fields uncommented, 
-// fixed ImagePicker deprecation, deadline countdown, proper error handling
+// NO SafeAreaView — _layout.tsx owns safe area + header height padding.
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity, Image,
   ActivityIndicator, Alert, StyleSheet, Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -15,8 +13,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL   = process.env.EXPO_PUBLIC_API_URL;
-const UPLOADS   = process.env.EXPO_PUBLIC_UPLOADS_BASE_URL || '';
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
+const UPLOADS = process.env.EXPO_PUBLIC_UPLOADS_BASE_URL || '';
 
 const toUrl = (p?: string | null) =>
   !p ? null : p.startsWith('http') ? p : `${UPLOADS}${p.startsWith('/') ? p : '/' + p}`;
@@ -43,8 +41,8 @@ export default function SubmitVideoScreen() {
   const { applicationId } = useLocalSearchParams<{ applicationId: string }>();
   const router = useRouter();
 
-  const [app, setApp]           = useState<any>(null);
-  const [loading, setLoading]   = useState(true);
+  const [app, setApp]             = useState<any>(null);
+  const [loading, setLoading]     = useState(true);
   const [uploading, setUploading] = useState(false);
 
   const [videoFile, setVideoFile]       = useState<any>(null);
@@ -75,7 +73,7 @@ export default function SubmitVideoScreen() {
   const pickVideo = async () => {
     try {
       const r = await DocumentPicker.getDocumentAsync({
-        type: ['video/mp4','video/quicktime','video/webm'],
+        type: ['video/mp4', 'video/quicktime', 'video/webm'],
         copyToCacheDirectory: true,
       });
       if (!r.canceled && r.assets?.[0]) {
@@ -129,19 +127,21 @@ export default function SubmitVideoScreen() {
     } finally { setUploading(false); }
   };
 
+  // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <SafeAreaView style={S.safe}>
+      <View style={S.container}>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator size="large" color="#7C3AED" />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
+  // ── Not found ────────────────────────────────────────────────────────────
   if (!app) {
     return (
-      <SafeAreaView style={S.safe}>
+      <View style={S.container}>
         <View style={S.center}>
           <Ionicons name="alert-circle-outline" size={56} color="#EF4444" />
           <Text style={{ color: '#EF4444', marginTop: 12, fontSize: 16 }}>Application not found</Text>
@@ -149,7 +149,7 @@ export default function SubmitVideoScreen() {
             <Text style={{ color: '#FFF', fontWeight: '600' }}>Go Back</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -158,11 +158,15 @@ export default function SubmitVideoScreen() {
   const thumb        = toUrl(app.campaign?.thumbnailUrl);
 
   return (
-    <SafeAreaView style={S.safe}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-
-        {/* Header */}
-        <LinearGradient colors={['#7C3AED','#5B21B6']} style={S.header}>
+    // Plain View — layout already handles safe area and header clearance
+    <View style={S.container}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 60 }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Header — paddingTop: 0, layout body already cleared the ProfileHeader */}
+        <LinearGradient colors={['#7C3AED', '#5B21B6']} style={S.header}>
           <TouchableOpacity style={S.hdrBack} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color="#FFF" />
           </TouchableOpacity>
@@ -207,7 +211,6 @@ export default function SubmitVideoScreen() {
         <View style={S.section}>
           <Text style={S.sectionTitle}>Video File <Text style={S.req}>*</Text></Text>
           <Text style={S.sectionSub}>MP4, MOV or WebM · max 200 MB</Text>
-
           <TouchableOpacity style={[S.uploadBox, videoFile && S.uploadBoxDone]} onPress={pickVideo}>
             <Ionicons name={videoFile ? 'checkmark-circle' : 'videocam-outline'} size={32} color={videoFile ? '#059669' : '#7C3AED'} />
             <Text style={[S.uploadTxt, videoFile && { color: '#059669' }]}>
@@ -219,14 +222,13 @@ export default function SubmitVideoScreen() {
           </TouchableOpacity>
         </View>
 
-       
         {/* Submit */}
         <TouchableOpacity
           style={[S.submitBtn, (!videoFile || uploading || deadlinePast) && { opacity: 0.5 }]}
           onPress={handleSubmit}
           disabled={!videoFile || uploading || !!deadlinePast}
         >
-          <LinearGradient colors={['#7C3AED','#5B21B6']} style={S.submitGrad}>
+          <LinearGradient colors={['#7C3AED', '#5B21B6']} style={S.submitGrad}>
             {uploading ? (
               <><ActivityIndicator color="#FFF" /><Text style={S.submitTxt}>Uploading…</Text></>
             ) : (
@@ -239,14 +241,16 @@ export default function SubmitVideoScreen() {
           <Text style={S.deadlineWarning}>⚠️ Your submission deadline has passed. Contact the advertiser for an extension.</Text>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const S = StyleSheet.create({
-  safe:    { flex: 1, backgroundColor: '#F5F5F7' },
-  center:  { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  container: { flex: 1, backgroundColor: '#F5F5F7' },
+  center:    { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+
+  // paddingTop: 0 — layout body already cleared the ProfileHeader, no extra gap
+  header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 0, paddingBottom: 14 },
   hdrBack: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
   hdrTitle:{ fontSize: 18, fontWeight: '700', color: '#FFF' },
 
@@ -259,30 +263,22 @@ const S = StyleSheet.create({
   deadlinePillRed: { backgroundColor: '#FEF2F2' },
   deadlineTxt:  { fontSize: 11, fontWeight: '600', color: '#F97316' },
 
-  paymentBanner:{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ECFDF5', marginHorizontal: 16, marginBottom: 8, borderRadius: 12, padding: 12 },
-  paymentTxt:   { flex: 1, fontSize: 13, fontWeight: '600', color: '#065F46' },
+  paymentBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ECFDF5', marginHorizontal: 16, marginBottom: 8, borderRadius: 12, padding: 12 },
+  paymentTxt:    { flex: 1, fontSize: 13, fontWeight: '600', color: '#065F46' },
 
   section:      { backgroundColor: '#FFF', marginHorizontal: 16, marginBottom: 12, borderRadius: 16, padding: 16 },
   sectionTitle: { fontSize: 15, fontWeight: '700', color: '#1F2937', marginBottom: 3 },
   sectionSub:   { fontSize: 12, color: '#9CA3AF', marginBottom: 14 },
   req:          { color: '#EF4444' },
-  opt:          { fontSize: 12, color: '#9CA3AF', fontWeight: '400' },
 
-  uploadBox:    { borderWidth: 2, borderColor: '#DDD6FE', borderStyle: 'dashed', borderRadius: 14, padding: 24, alignItems: 'center', gap: 8, backgroundColor: '#FAFAFA' },
-  uploadBoxDone:{ borderColor: '#6EE7B7', backgroundColor: '#F0FDF4', borderStyle: 'solid' },
-  uploadTxt:    { fontSize: 14, fontWeight: '600', color: '#7C3AED', textAlign: 'center' },
-  uploadSub:    { fontSize: 12, color: '#9CA3AF' },
+  uploadBox:     { borderWidth: 2, borderColor: '#DDD6FE', borderStyle: 'dashed', borderRadius: 14, padding: 24, alignItems: 'center', gap: 8, backgroundColor: '#FAFAFA' },
+  uploadBoxDone: { borderColor: '#6EE7B7', backgroundColor: '#F0FDF4', borderStyle: 'solid' },
+  uploadTxt:     { fontSize: 14, fontWeight: '600', color: '#7C3AED', textAlign: 'center' },
+  uploadSub:     { fontSize: 12, color: '#9CA3AF' },
 
-  thumbBox:     { height: 140, borderRadius: 14, overflow: 'hidden', backgroundColor: '#F5F3FF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#EDE9FE' },
-  thumbImg:     { width: '100%', height: '100%' },
-  thumbEmpty:   { alignItems: 'center', gap: 8 },
-  thumbEmptyTxt:{ fontSize: 13, color: '#A78BFA' },
-  thumbEditBadge:{ position: 'absolute', bottom: 10, right: 10, width: 30, height: 30, borderRadius: 15, backgroundColor: '#7C3AED', justifyContent: 'center', alignItems: 'center' },
+  submitBtn:  { marginHorizontal: 16, marginTop: 8, borderRadius: 16, overflow: 'hidden' },
+  submitGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 17 },
+  submitTxt:  { fontSize: 17, fontWeight: '700', color: '#FFF' },
 
-  textarea:     { borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 12, padding: 14, fontSize: 14, color: '#1F2937', minHeight: 100, textAlignVertical: 'top', backgroundColor: '#FAFAFA' },
-
-  submitBtn:    { marginHorizontal: 16, marginTop: 8, borderRadius: 16, overflow: 'hidden' },
-  submitGrad:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 17 },
-  submitTxt:    { fontSize: 17, fontWeight: '700', color: '#FFF' },
   deadlineWarning: { fontSize: 13, color: '#EF4444', textAlign: 'center', marginTop: 12, paddingHorizontal: 20 },
 });
