@@ -32,7 +32,6 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
@@ -42,32 +41,20 @@ export default function LoginPage() {
           password: credentials.password,
         }),
       });
-
       const data = await res.json();
       if (!res.ok) {
-        if (data.notVerified) {
-          setStep('otp');
-          setError(data.error || 'Account not verified.');
-          return;
-        }
+        if (data.notVerified) { setStep('otp'); setError(data.error || 'Account not verified.'); return; }
         throw new Error(data.error || data.message || 'Login failed');
       }
-
       localStorage.setItem('token', data.token);
       axios.defaults.baseURL = API_BASE;
       axios.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
-
       const decoded = parseJwt(data.token);
       const role = decoded?.role;
-      if (role === 'clipper') {
-        navigate('/dashboard/clipper');
-      } else if (role === 'advertiser') {
-        navigate('/dashboard/advertiser');
-      } else if (role === 'ad-worker') {
-        navigate('/dashboard/ad-worker');
-      } else {
-        navigate('/');
-      }
+      if (role === 'clipper')         navigate('/dashboard/clipper');
+      else if (role === 'advertiser') navigate('/dashboard/advertiser');
+      else if (role === 'ad-worker')  navigate('/dashboard/ad-worker');
+      else                            navigate('/');
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -79,21 +66,14 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-
     try {
       const res = await fetch(`${API_BASE}/auth/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: credentials.email.toLowerCase(),
-          otp,
-        }),
+        body: JSON.stringify({ email: credentials.email.toLowerCase(), otp }),
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Verification failed');
-
-      // Retry login after verification
       await login(e);
     } catch (err: any) {
       setError(err.message);
@@ -105,10 +85,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 p-6">
       <div className="w-full max-w-md bg-white p-8 rounded-2xl shadow-xl relative">
-        <Link
-          to="/"
-          className="absolute top-4 right-4 text-sm text-indigo-600 font-semibold hover:underline"
-        >
+        <Link to="/" className="absolute top-4 right-4 text-sm text-indigo-600 font-semibold hover:underline">
           ← Go to Homepage
         </Link>
 
@@ -121,58 +98,33 @@ export default function LoginPage() {
         {step === 'login' ? (
           <form onSubmit={login} className="space-y-5">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email address
-              </label>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email address</label>
               <input
-                id="email"
-                name="email"
-                type="email"
-                value={credentials.email}
-                onChange={handleChange}
-                required
+                id="email" name="email" type="email"
+                value={credentials.email} onChange={handleChange} required
                 className="mt-1 w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                Password
-              </label>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700">Password</label>
               <div className="relative mt-1">
                 <input
-                  id="password"
-                  name="password"
-                  type={showPassword ? 'text' : 'password'}
-                  value={credentials.password}
-                  onChange={handleChange}
-                  required
+                  id="password" name="password" type={showPassword ? 'text' : 'password'}
+                  value={credentials.password} onChange={handleChange} required
                   className="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
                 />
-                <button
-                  type="button"
-                  onClick={togglePassword}
-                  className="absolute inset-y-0 right-3 flex items-center text-sm text-gray-500 hover:text-indigo-500"
-                >
+                <button type="button" onClick={togglePassword} className="absolute inset-y-0 right-3 flex items-center text-sm text-gray-500 hover:text-indigo-500">
                   {showPassword ? 'Hide' : 'Show'}
                 </button>
               </div>
             </div>
 
             <div className="text-right text-sm">
-              <Link
-                to="/forgot-password"
-                className="text-indigo-600 hover:underline font-medium"
-              >
-                Forgot password?
-              </Link>
+              <Link to="/forgot-password" className="text-indigo-600 hover:underline font-medium">Forgot password?</Link>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-indigo-600 text-white py-3 rounded-md font-semibold hover:bg-indigo-700 transition disabled:opacity-60"
-            >
+            <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-md font-semibold hover:bg-indigo-700 transition disabled:opacity-60">
               {loading ? 'Logging in…' : 'Log In'}
             </button>
           </form>
@@ -182,21 +134,12 @@ export default function LoginPage() {
               Enter the OTP sent to your email
             </label>
             <input
-              id="otp"
-              name="otp"
-              type="text"
-              value={otp}
-              onChange={(e) => setOtp(e.target.value)}
-              maxLength={6}
-              required
+              id="otp" name="otp" type="text" value={otp}
+              onChange={(e) => setOtp(e.target.value)} maxLength={6} required
               className="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
               placeholder="6-digit code"
             />
-            <button
-              type="submit"
-              className="w-full bg-green-600 text-white py-3 rounded-md font-semibold hover:bg-green-700 transition"
-              disabled={loading}
-            >
+            <button type="submit" disabled={loading} className="w-full bg-green-600 text-white py-3 rounded-md font-semibold hover:bg-green-700 transition">
               {loading ? 'Verifying…' : 'Verify & Log In'}
             </button>
           </form>
@@ -205,11 +148,17 @@ export default function LoginPage() {
         {step === 'login' && (
           <p className="mt-6 text-sm text-center text-gray-600">
             Don't have an account?{' '}
-            <Link to="/signup" className="text-indigo-600 font-medium hover:underline">
-              Sign up
-            </Link>
+            <Link to="/signup" className="text-indigo-600 font-medium hover:underline">Sign up</Link>
           </p>
         )}
+
+        {/* ── Terms & Privacy — required for Play Store / App Store compliance ── */}
+        <p className="mt-6 text-xs text-center text-gray-400 leading-relaxed">
+          By continuing, you agree to our{' '}
+          <Link to="/terms" className="text-indigo-500 hover:underline font-medium">Terms of Service</Link>
+          {' '}and{' '}
+          <Link to="/privacy" className="text-indigo-500 hover:underline font-medium">Privacy Policy</Link>
+        </p>
       </div>
     </div>
   );

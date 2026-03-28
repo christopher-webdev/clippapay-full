@@ -1501,12 +1501,46 @@ export default function HomePage() {
       <WhySection />
       <CTA />
 
-      {/* Footer */}
-      <footer style={{ borderTop: "2px solid var(--border)", padding: "32px 40px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
+{/* Footer — replace the existing footer block in HomePage.tsx with this */}
+      <footer style={{
+        borderTop: "2px solid var(--border)",
+        padding: "32px 40px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: 16
+      }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span className="font-display" style={{ fontSize: 18, fontWeight: 800, color: "var(--muted)" }}>ClippaPay</span>
         </div>
-        <span className="font-body" style={{ fontSize: 14, color: "var(--muted)" }}>Create. Clip. Convert. © 2026</span>
+
+        <span className="font-body" style={{ fontSize: 14, color: "var(--muted)" }}>
+          Create. Clip. Convert. © 2026
+        </span>
+
+        {/* ── Legal links — required for Google Play & App Store ── */}
+        <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+          <Link
+            to="/terms"
+            className="font-body"
+            style={{ fontSize: 13, color: "var(--muted)", textDecoration: "none", fontWeight: 500 }}
+            onMouseEnter={e => (e.target as HTMLElement).style.color = "#fff"}
+            onMouseLeave={e => (e.target as HTMLElement).style.color = "var(--muted)"}
+          >
+            Terms of Service
+          </Link>
+          <Link
+            to="/privacy"
+            className="font-body"
+            style={{ fontSize: 13, color: "var(--muted)", textDecoration: "none", fontWeight: 500 }}
+            onMouseEnter={e => (e.target as HTMLElement).style.color = "#fff"}
+            onMouseLeave={e => (e.target as HTMLElement).style.color = "var(--muted)"}
+          >
+            Privacy Policy
+          </Link>
+        </div>
+
         <div style={{ display: "flex", gap: 8 }}>
           <Tag color="var(--ugc)">UGC</Tag>
           <Tag color="var(--clip)">Clipping</Tag>

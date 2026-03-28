@@ -1,157 +1,103 @@
 // src/pages/Terms.tsx
-import React from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect } from 'react';
+import { Link } from 'react-router-dom';
 
-const Terms: React.FC = () => {
-    const navigate = useNavigate();   // ✅ hooks must be inside the component
+const SECTIONS = [
+          { body: 'These Terms & Conditions ("Terms") govern your use of the ClippaPay platform ("Platform") operated by Clippa Digital Hub LTD, a company registered in Nigeria ("Company"). By creating an account or using the Platform, you agree to these Terms.' },
+          { heading: '1. Eligibility', body: 'You must be at least 18 years old and capable of entering a legally binding agreement under Nigerian law to use ClippaPay. By registering, you confirm that all information you provide is accurate and complete.' },
+          { heading: '2. Platform Services', body: 'ClippaPay provides three core services: (a) UGC Creation — enabling brands to post campaigns and receive bids from vetted creators who produce authentic short-form content; (b) Clipping — enabling creators to clip long-form brand content into short-form videos distributed across social platforms, earning per verified view; (c) UGC Affiliate — enabling creators to earn commissions on sales generated via unique referral links.' },
+          { heading: '3. Creator Obligations', body: 'Creators agree to: produce original content that meets campaign briefs; not engage in view fraud, bot traffic, or artificial inflation of performance metrics; only submit work that they own or have rights to; comply with the Community Guidelines; and accurately report performance data.' },
+          { heading: '4. Brand/Advertiser Obligations', body: 'Brands agree to: fund campaigns in full before creator work begins; provide clear and lawful campaign briefs; approve or request revisions within 2 business days of content submission; not misuse creator-produced content beyond the agreed campaign scope.' },
+          { heading: '5. Payments & Fees', body: 'Brand payments are held in escrow by ClippaPay and released to creators upon content approval or verified performance milestones. ClippaPay charges a platform service fee on each transaction as disclosed at the point of campaign creation. Creator payouts are processed within 3 business days of approval to verified Nigerian bank accounts or USDT wallets.' },
+          { heading: '6. Intellectual Property', body: 'Creators retain ownership of original content they produce. By submitting content to a campaign, creators grant the commissioning brand a non-exclusive, royalty-free licence to use that content for the agreed campaign duration and scope. See our Intellectual Property Policy for full details.' },
+          { heading: '7. Prohibited Activities', body: 'Users may not: submit fraudulent content or performance data; harass, impersonate, or defame other users; use the platform to distribute illegal content; attempt to bypass the platform to conduct off-platform deals with matched partners; or violate any applicable Nigerian or international law.' },
+          { heading: '8. Termination', body: 'ClippaPay may suspend or terminate your account for violation of these Terms, fraud, or any conduct deemed harmful to the platform community. Users may terminate their account at any time by contacting support.' },
+          { heading: '9. Limitation of Liability', body: 'To the maximum extent permitted by Nigerian law, Clippa Digital Hub LTD shall not be liable for indirect, incidental, or consequential damages arising from use of the Platform. Our total liability shall not exceed the total fees paid by you in the 3 months preceding the claim.' },
+          { heading: '10. Governing Law', body: 'These Terms are governed by the laws of the Federal Republic of Nigeria. Any disputes shall be resolved by the courts of Abuja, Nigeria.' },
+          { heading: '11. Contact', body: 'For Terms-related queries: reach@clippapay.com' },
+];
 
-    return (
-        <main
-            className="policy-container"
-            style={{ padding: "2rem", maxWidth: 900, margin: "0 auto" }}
-        >
-            {/* back button */}
-            <div className="mb-4">
-                <button
-                    onClick={() => navigate("/")}
-                    className="text-sm text-indigo-600 hover:text-indigo-800 font-medium transition flex items-center gap-1"
-                >
-                    ← Back to Home
-                </button>
-            </div>
+export default function Terms() {
+  useEffect(() => { window.scrollTo(0, 0); }, []);
 
-            <h1>Terms of Service</h1>
-            <p>
-                <em>Last updated:&nbsp;July 24,&nbsp;2025</em>
+  return (
+    <div style={{ background: '#060608', minHeight: '100vh', fontFamily: "'Outfit', sans-serif", color: '#e5e7eb' }}>
+
+      {/* Nav */}
+      <nav style={{ position: 'sticky', top: 0, zIndex: 200, background: '#060608CC', backdropFilter: 'blur(16px)', borderBottom: '2px solid #ffffff14', padding: '18px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Link to="/" style={{ textDecoration: 'none' }}>
+          <span style={{ fontSize: 22, fontWeight: 800, background: 'linear-gradient(135deg, #FF5F38, #A78BFA)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            ClippaPay
+          </span>
+        </Link>
+        <Link to="/" style={{ textDecoration: 'none', fontSize: 14, fontWeight: 600, color: '#9ca3af', border: '1.5px solid #ffffff22', borderRadius: 10, padding: '8px 18px' }}>
+          ← Back to Home
+        </Link>
+      </nav>
+
+      {/* Hero */}
+      <div style={{ maxWidth: 760, margin: '0 auto', padding: '64px 24px 0' }}>
+        <div style={{ display: 'inline-block', fontSize: 12, fontWeight: 700, letterSpacing: 1.5, color: '#FF5F38', background: '#FF5F3818', borderRadius: 8, padding: '4px 12px', marginBottom: 20, textTransform: 'uppercase' }}>
+          Legal
+        </div>
+        <h1 style={{ fontSize: 'clamp(32px, 6vw, 52px)', fontWeight: 800, color: '#fff', lineHeight: 1.1, marginBottom: 16, letterSpacing: -1 }}>
+          Terms &amp; Conditions
+        </h1>
+        <p style={{ fontSize: 16, color: '#9ca3af', lineHeight: 1.7, marginBottom: 8 }}>
+          Effective date: <strong style={{ color: '#e5e7eb' }}>1 April 2025</strong>
+        </p>
+        <p style={{ fontSize: 16, color: '#9ca3af', lineHeight: 1.7, marginBottom: 48 }}>
+          Operated by <strong style={{ color: '#e5e7eb' }}>Clippa Digital Hub LTD</strong>
+        </p>
+      </div>
+
+      {/* Divider */}
+      <div style={{ maxWidth: 760, margin: '0 auto 48px', padding: '0 24px' }}>
+        <div style={{ height: 1, background: 'linear-gradient(90deg, transparent, #ffffff22, transparent)' }} />
+      </div>
+
+      {/* Content */}
+      <div style={{ maxWidth: 760, margin: '0 auto', padding: '0 24px 100px' }}>
+        {SECTIONS.map((section, i) => (
+          <div key={i} style={{ marginBottom: 40 }}>
+            {section.heading && (
+              <h2 style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 12, paddingLeft: 16, borderLeft: '3px solid #FF5F38' }}>
+                {section.heading}
+              </h2>
+            )}
+            <p style={{ fontSize: 16, color: '#9ca3af', lineHeight: 1.8, paddingLeft: section.heading ? 16 : 0 }}>
+              {section.body}
             </p>
+          </div>
+        ))}
 
-            <p>
-                PLEASE READ THESE TERMS OF SERVICE (“<strong>Terms</strong>”) CAREFULLY
-                BEFORE USING THE SERVICE. By accessing or using ClippaPay, you agree to
-                be bound by these Terms and our Privacy Policy. If you do not agree, do
-                not use the Service.
-            </p>
+        {/* Footer note */}
+        <div style={{ marginTop: 64, padding: '28px 32px', background: '#ffffff08', borderRadius: 16, border: '1.5px solid #ffffff14', textAlign: 'center' }}>
+          <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
+            Also available in our mobile app
+          </p>
+          <div style={{ display: 'flex', gap: 20, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Link to="/privacy" style={{ fontSize: 14, fontWeight: 600, color: '#A78BFA', textDecoration: 'none' }}>
+              Privacy Policy →
+            </Link>
+            <Link to="/login" style={{ fontSize: 14, fontWeight: 600, color: '#FF5F38', textDecoration: 'none' }}>
+              Log In →
+            </Link>
+            <Link to="/signup" style={{ fontSize: 14, fontWeight: 600, color: '#34d399', textDecoration: 'none' }}>
+              Sign Up →
+            </Link>
+          </div>
+        </div>
+      </div>
 
-            {/* ---------- sections ------------------------------------ */}
-            <h2>1.&nbsp;Definitions</h2>
-            <ul>
-                <li><strong>Advertiser</strong> – funds campaigns to promote content.</li>
-                <li><strong>Clipper</strong> – distributes advertiser content and earns per qualified view.</li>
-                <li><strong>Campaign</strong> – advertising order with budget, CPM, targeting, creatives.</li>
-                <li>
-                    <strong>Qualified View</strong> – a view validated by ClippaPay’s fraud‑detection systems and meeting campaign
-                    criteria.
-                </li>
-            </ul>
-
-            <h2>2.&nbsp;Eligibility &amp; Account</h2>
-            <p>
-                You must be at least 18 and capable of a binding contract. Provide
-                accurate info and keep it current. You’re responsible for safeguarding
-                credentials.
-            </p>
-
-            <h2>3.&nbsp;Service Description</h2>
-            <p>
-                ClippaPay connects Advertisers seeking virality with Clippers who post
-                content. We track views and handle escrow.
-            </p>
-
-            <h2>4.&nbsp;Advertiser Obligations</h2>
-            <ul>
-                <li>Fund campaigns in advance.</li>
-                <li>Provide lawful, non‑infringing creative assets.</li>
-                <li>Comply with platform policies (e.g., TikTok guidelines).</li>
-                <li>
-                    Unused funds after 180 days may incur an inactivity fee or be refunded
-                    minus processing costs.
-                </li>
-            </ul>
-
-            <h2>5.&nbsp;Clipper Obligations</h2>
-            <ul>
-                <li>Post content exactly as provided—no deceptive practices.</li>
-                <li>Do not buy views, use bots, or break third‑party rules.</li>
-                <li>Submit links for verification within the campaign window.</li>
-            </ul>
-
-            <h2>6.&nbsp;Payments</h2>
-            <ul>
-                <li>Clippers earn at the advertised CPM; withdrawals from ₦1,000.</li>
-                <li>Advertisers are charged per qualified view; spend ≤ budget.</li>
-                <li>Fraudulent earnings may be reversed.</li>
-            </ul>
-
-            <h2>7.&nbsp;Intellectual Property</h2>
-            <p>
-                All ClippaPay software and branding are ours or licensed. You keep
-                ownership of your content but grant us a worldwide, non‑exclusive,
-                royalty‑free licence to host, display, and distribute it to operate the
-                Service.
-            </p>
-
-            <h2>8.&nbsp;Prohibited Conduct</h2>
-            <p>You agree not to:</p>
-            <ul>
-                <li>Break laws or third‑party rights.</li>
-                <li>Spam, distribute malware, or advertise illegally.</li>
-                <li>Reverse‑engineer, scrape, or exploit the platform.</li>
-                <li>Harass, hate, or abuse others.</li>
-                <li>Interfere with security features.</li>
-            </ul>
-
-            <h2>9.&nbsp;Suspension &amp; Termination</h2>
-            <p>
-                We may suspend or terminate for violations. Upon termination, your
-                rights end immediately, but payment obligations survive.
-            </p>
-
-            <h2>10.&nbsp;Disclaimers</h2>
-            <p>
-                The Service is provided “AS IS” and “AS AVAILABLE.” We disclaim all
-                warranties. We do not guarantee earnings or campaign results.
-            </p>
-
-            <h2>11.&nbsp;Limitation of Liability</h2>
-            <p>
-                To the fullest extent permitted, ClippaPay is not liable for indirect or
-                consequential losses. Our aggregate liability will not exceed ₦100,000
-                or the fees you paid us in the last 6 months, whichever is greater.
-            </p>
-
-            <h2>12.&nbsp;Indemnification</h2>
-            <p>
-                You will indemnify and hold harmless ClippaPay, its directors, employees
-                and partners from claims arising out of your use, your content, or your
-                breach of these Terms.
-            </p>
-
-            <h2>13.&nbsp;Governing Law &amp; Dispute Resolution</h2>
-            <p>
-                These Terms are governed by the laws of the Federal Republic of Nigeria.
-                Disputes go to good‑faith negotiation, then arbitration in Abuja under
-                the Arbitration &amp; Conciliation Act.
-            </p>
-
-            <h2>14.&nbsp;Changes to Terms</h2>
-            <p>
-                We may modify these Terms anytime by posting an updated version.
-                Continued use after changes means acceptance.
-            </p>
-
-            <h2>15.&nbsp;Contact</h2>
-            <address>
-                ClippaPay&nbsp;Ltd.<br />
-                No&nbsp;67, Area&nbsp;1 Old Secretariat, Abuja, Nigeria<br />
-                Email:&nbsp;
-                <a href="mailto:reach@clippapay.com">reach@clippapay.com</a>
-            </address>
-
-            <p style={{ marginTop: "2rem" }}>
-                © 2025 ClippaPay Ltd.&nbsp;All rights reserved.
-            </p>
-        </main>
-    );
-};
-
-export default Terms;
+      {/* Footer */}
+      <footer style={{ borderTop: '2px solid #ffffff14', padding: '28px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+        <span style={{ fontSize: 14, color: '#4b5563' }}>© 2026 Clippa Digital Hub LTD. All rights reserved.</span>
+        <div style={{ display: 'flex', gap: 20 }}>
+          <Link to="/terms" style={{ fontSize: 14, color: '#6b7280', textDecoration: 'none' }}>Terms</Link>
+          <Link to="/privacy" style={{ fontSize: 14, color: '#6b7280', textDecoration: 'none' }}>Privacy</Link>
+        </div>
+      </footer>
+    </div>
+  );
+}
